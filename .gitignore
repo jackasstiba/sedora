@@ -46,3 +46,9 @@ next-env.d.ts
 *.db
 *.db-journal
 scrape_log.txt
+
+# prisma-installed agent skill packs (dev tooling, not needed for deploy)
+/.agents/
+/.claude/
+/.windsurf/
+/skills-lock.json
