@@ -1,0 +1,33 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Get a free hosted Postgres database in seconds: `npx create-db`
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Item {
+  id            Int      @id @default(autoincrement())
+  source        String
+  sourceId      String
+  title         String
+  genre         String
+  subGenre      String?
+  eventType     String
+  eventDate     DateTime?
+  eventDateText String?
+  price         String?
+  url           String
+  imageUrl      String?
+  scrapedAt     DateTime @default(now())
+
+  @@unique([source, sourceId])
+  @@index([genre])
+  @@index([eventDate])
+}
