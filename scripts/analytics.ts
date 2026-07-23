@@ -21,7 +21,7 @@ function ymd(d: Date): string {
 async function query(
   path: string,
   params: Record<string, string>
-): Promise<{ data: unknown } | null> {
+): Promise<{ data?: unknown; planLimited?: boolean } | null> {
   const qs = new URLSearchParams({ projectId: PROJECT_ID!, ...params });
   if (TEAM_ID) qs.set("teamId", TEAM_ID);
   const res = await fetch(`${BASE}/${path}?${qs.toString()}`, {

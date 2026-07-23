@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import { FilterBar } from "@/components/FilterBar";
 import { ItemCard } from "@/components/ItemCard";
 import { getGenres, getItems, getStats } from "@/lib/items";
+import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
@@ -15,10 +16,11 @@ export default async function Home({
   const query = params.q ?? "";
   const sort = params.sort === "recent" ? "recent" : "date";
 
-  const [genres, items, stats] = await Promise.all([
+  const [genres, items, stats, months] = await Promise.all([
     getGenres(),
     getItems({ genre: genre || undefined, query: query || undefined, sort }),
     getStats(),
+    getMonthsWithItems(),
   ]);
 
   return (
@@ -56,7 +58,43 @@ export default async function Home({
         </div>
       )}
 
-      <footer className="mt-12 border-t border-neutral-200 pt-4 text-xs text-neutral-400 dark:border-neutral-800">
+      <nav className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
+        <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+          ジャンルから探す
+        </p>
+        <div className="mb-6 flex flex-wrap gap-2">
+          {genres.map(({ genre: g }) => (
+            <a
+              key={g}
+              href={`/genre/${encodeURIComponent(g)}`}
+              className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+            >
+              {g}
+            </a>
+          ))}
+        </div>
+
+        {months.length > 0 && (
+          <>
+            <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+              発売月から探す
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {months.map((m) => (
+                <a
+                  key={m}
+                  href={`/release/${m}`}
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                >
+                  {monthLabel(m)}
+                </a>
+              ))}
+            </div>
+          </>
+        )}
+      </nav>
+
+      <footer className="mt-8 border-t border-neutral-200 pt-4 text-xs text-neutral-400 dark:border-neutral-800">
         情報は各配信元サイトから自動収集したものです。予約・購入は各リンク先の公式・販売ページをご確認ください。
       </footer>
     </main>
