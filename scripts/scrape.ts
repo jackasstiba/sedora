@@ -1,5 +1,6 @@
 import { prisma } from "../src/lib/prisma";
 import { runAllScrapers } from "../src/scrapers";
+import { checkHealth } from "./health";
 
 async function main() {
   // figisland_pb は詳細ページ取得型。既に価格まで取れているものは再取得しない。
@@ -42,6 +43,9 @@ async function main() {
   }
 
   console.log(`合計 ${total} 件を保存しました`);
+
+  checkHealth(results);
+
   await prisma.$disconnect();
 }
 

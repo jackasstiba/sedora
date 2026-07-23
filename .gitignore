@@ -46,6 +46,9 @@ next-env.d.ts
 *.db
 *.db-journal
 scrape_log.txt
+# scrape health check (local run state)
+scrape_health.json
+scrape_health.log
 
 # prisma-installed agent skill packs (dev tooling, not needed for deploy)
 /.agents/
