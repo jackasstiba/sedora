@@ -15,6 +15,7 @@ const SOURCE_LABELS: Record<string, string> = {
   snkrdunk: "スニーカーダンク",
   rarecheck: "レアチェック",
   channeltono: "ちゃんねらー速報",
+  collabo_cafe: "コラボカフェ",
 };
 
 export function sourceLabel(source: string): string {

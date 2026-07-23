@@ -20,6 +20,7 @@ const EVENT_COLORS: Record<string, string> = {
   発売: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   登場予定: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
   販売開始: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
+  開催: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
 };
 
 function eventColor(eventType: string): string {
