@@ -68,12 +68,18 @@ export async function getItems(filter: ItemFilter) {
   return prisma.item.findMany({
     where,
     orderBy: [...orderBy],
-    take: 300,
+    take: 1000,
   });
 }
 
 export async function getStats() {
-  const total = await prisma.item.count();
+  // 表示と同じスコープ（今後の予定＋日付未定）で件数を数える。過去に終わった
+  // イベントは表示されないので「掲載 N件」にも含めない。
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const total = await prisma.item.count({
+    where: { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+  });
   const latest = await prisma.item.findFirst({
     orderBy: { scrapedAt: "desc" },
     select: { scrapedAt: true },
