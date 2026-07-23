@@ -1,11 +1,19 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
+import { MonthCalendar } from "@/components/MonthCalendar";
 import { getItemsByMonth, getMonthsWithItems, isValidMonth, monthLabel } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+const WEEKDAYS = ["日", "月", "火", "水", "木", "金", "土"];
+
+export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+
+export async function generateStaticParams() {
+  const months = await getMonthsWithItems();
+  return months.map((month) => ({ month }));
+}
 
 type Props = { params: Promise<{ month: string }> };
 
@@ -33,6 +41,18 @@ export default async function MonthPage({ params }: Props) {
   if (items.length === 0) notFound();
 
   const label = monthLabel(month);
+
+  // 日ごとに件数を集計＋グループ化（カレンダーと日別セクションで使う）
+  const counts: Record<number, number> = {};
+  const byDay = new Map<number, typeof items>();
+  for (const it of items) {
+    if (!it.eventDate) continue;
+    const day = new Date(it.eventDate).getDate();
+    counts[day] = (counts[day] ?? 0) + 1;
+    if (!byDay.has(day)) byDay.set(day, []);
+    byDay.get(day)!.push(it);
+  }
+  const days = [...byDay.keys()].sort((a, b) => a - b);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -67,10 +87,28 @@ export default async function MonthPage({ params }: Props) {
         </p>
       </header>
 
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-        {items.map((item) => (
-          <ItemCard key={item.id} item={item} />
-        ))}
+      <MonthCalendar month={month} counts={counts} />
+
+      <div className="flex flex-col gap-8">
+        {days.map((day) => {
+          const dayItems = byDay.get(day)!;
+          const dow = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, day).getDay();
+          return (
+            <section key={day} id={`day-${day}`} className="scroll-mt-4">
+              <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+                {Number(month.slice(5, 7))}月{day}日
+                <span className="ml-1 text-sm font-normal text-neutral-400">
+                  ({WEEKDAYS[dow]}) {dayItems.length}件
+                </span>
+              </h2>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {dayItems.map((item) => (
+                  <ItemCard key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
+          );
+        })}
       </div>
 
       <nav className="mt-10 border-t border-neutral-200 pt-4 dark:border-neutral-800">

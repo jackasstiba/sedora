@@ -1,7 +1,7 @@
 import { Suspense } from "react";
 import { FilterBar } from "@/components/FilterBar";
 import { ItemCard } from "@/components/ItemCard";
-import { getGenres, getItems, getStats } from "@/lib/items";
+import { getGenres, getItems, getStats, groupItemsByDate } from "@/lib/items";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
@@ -15,6 +15,7 @@ export default async function Home({
     sort?: string;
     status?: string;
     when?: string;
+    dated?: string;
   }>;
 }) {
   const params = await searchParams;
@@ -26,13 +27,17 @@ export default async function Home({
       ? params.status
       : undefined;
   const when = params.when === "week" || params.when === "month" ? params.when : undefined;
+  const datedOnly = params.dated === "1";
 
   const [genres, items, stats, months] = await Promise.all([
     getGenres(),
-    getItems({ genre: genre || undefined, query: query || undefined, sort, status, when }),
+    getItems({ genre: genre || undefined, query: query || undefined, sort, status, when, datedOnly }),
     getStats(),
     getMonthsWithItems(),
   ]);
+
+  // 発売日順のときは日付見出しでグループ化。新着順はそのまま並べる。
+  const groups = sort === "date" ? groupItemsByDate(items) : null;
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -62,12 +67,29 @@ export default async function Home({
             activeQuery={query}
             activeStatus={status ?? ""}
             activeWhen={when ?? ""}
+            activeDatedOnly={datedOnly}
           />
         </Suspense>
       </div>
 
       {items.length === 0 ? (
         <p className="py-16 text-center text-neutral-500">該当する商品が見つかりませんでした。</p>
+      ) : groups ? (
+        <div className="flex flex-col gap-8">
+          {groups.map((g) => (
+            <section key={g.label}>
+              <h2 className="mb-3 flex items-baseline gap-2 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+                {g.label}
+                <span className="text-sm font-normal text-neutral-400">{g.items.length}</span>
+              </h2>
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+                {g.items.map((item) => (
+                  <ItemCard key={item.id} item={item} />
+                ))}
+              </div>
+            </section>
+          ))}
+        </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {items.map((item) => (
@@ -113,6 +135,12 @@ export default async function Home({
       </nav>
 
       <footer className="mt-8 border-t border-neutral-200 pt-4 text-xs text-neutral-400 dark:border-neutral-800">
+        <p className="mb-2">
+          <a href="/feed.xml" className="text-rose-600 hover:underline dark:text-rose-400">
+            RSSで新着を購読
+          </a>
+          （Discordやフィードリーダーに新着レア情報を自動で流せます）
+        </p>
         情報は各配信元サイトから自動収集したものです。予約・購入は各リンク先の公式・販売ページをご確認ください。
       </footer>
     </main>

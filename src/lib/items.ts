@@ -11,6 +11,7 @@ export type ItemFilter = {
   sort?: "date" | "recent";
   status?: ItemStatus;
   when?: ItemWhen;
+  datedOnly?: boolean;
 };
 
 // バラバラな eventType 文字列を、せどり視点の3グループに正規化する。
@@ -86,6 +87,8 @@ export async function getItems(filter: ItemFilter) {
       end.setMonth(today.getMonth() + 1, 1); // 翌月1日0時（＝今月末まで）
     }
     where.eventDate = { gte: today, lt: end };
+  } else if (filter.datedOnly) {
+    where.eventDate = { gte: today }; // 日付が確定しているものだけ（未定を隠す）
   } else {
     and.push({ OR: [{ eventDate: { gte: today } }, { eventDate: null }] });
   }
@@ -104,6 +107,44 @@ export async function getItems(filter: ItemFilter) {
     orderBy: [...orderBy],
     take: 1000,
   });
+}
+
+/** 発売日順のアイテムを「今日/明日/今週/それ以降/日付未定」に分けて見出し表示しやすくする */
+export function groupItemsByDate<T extends { eventDate: Date | null }>(
+  items: T[]
+): { label: string; items: T[] }[] {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const t0 = today.getTime();
+  const day = 24 * 60 * 60 * 1000;
+  const tomorrow = t0 + day;
+  const dayAfter = t0 + 2 * day;
+  const dow = today.getDay();
+  const nextMon = t0 + (((8 - dow) % 7) || 7) * day;
+
+  const buckets: Record<string, T[]> = {
+    今日: [],
+    明日: [],
+    今週: [],
+    それ以降: [],
+    日付未定: [],
+  };
+  for (const it of items) {
+    if (!it.eventDate) {
+      buckets["日付未定"].push(it);
+      continue;
+    }
+    const d = new Date(it.eventDate);
+    d.setHours(0, 0, 0, 0);
+    const ms = d.getTime();
+    if (ms < tomorrow) buckets["今日"].push(it);
+    else if (ms < dayAfter) buckets["明日"].push(it);
+    else if (ms < nextMon) buckets["今週"].push(it);
+    else buckets["それ以降"].push(it);
+  }
+  return Object.entries(buckets)
+    .filter(([, arr]) => arr.length > 0)
+    .map(([label, arr]) => ({ label, items: arr }));
 }
 
 export async function getStats() {

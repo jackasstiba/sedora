@@ -3,9 +3,14 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { getItemsByGenre, getGenreList } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+
+export async function generateStaticParams() {
+  const genres = await getGenreList();
+  return genres.map((genre) => ({ genre }));
+}
 
 type Props = { params: Promise<{ genre: string }> };
 

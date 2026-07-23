@@ -4,7 +4,7 @@ import { ItemCard } from "@/components/ItemCard";
 import { sourceLabel } from "@/lib/items";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
@@ -159,6 +159,22 @@ export default async function ItemPage({ params }: Props) {
           </p>
         </div>
       </div>
+
+      <section className="mt-8 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
+        <h2 className="mb-2 text-base font-bold text-neutral-900 dark:text-neutral-50">
+          この商品について
+        </h2>
+        <p>
+          「{item.title}」は、{item.genre}
+          {item.subGenre && item.subGenre !== item.genre ? `（${item.subGenre}）` : ""}の
+          {item.eventType}情報です。
+          {dateLabel ? `${dateLabel}に${item.eventType}予定。` : "日程は未定・情報は随時更新されます。"}
+          {item.price ? `価格は${item.price}。` : ""}
+          情報は{sourceLabel(item.source)}より自動収集しています。予約・購入は公式・販売ページをご確認ください。
+          レアレーダーでは、{item.genre}をはじめフィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど
+          レア・限定アイテムの予約開始・発売・抽選スケジュールを毎日自動でまとめています。
+        </p>
+      </section>
 
       {related.length > 0 && (
         <section className="mt-10">

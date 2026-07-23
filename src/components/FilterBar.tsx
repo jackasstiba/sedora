@@ -11,6 +11,7 @@ type Props = {
   activeQuery: string;
   activeStatus: string;
   activeWhen: string;
+  activeDatedOnly: boolean;
 };
 
 const STATUS_TABS: { value: string; label: string }[] = [
@@ -33,6 +34,7 @@ export function FilterBar({
   activeQuery,
   activeStatus,
   activeWhen,
+  activeDatedOnly,
 }: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -119,6 +121,12 @@ export function FilterBar({
             </button>
           ))}
         </div>
+        <button
+          onClick={() => updateParam({ dated: activeDatedOnly ? null : "1" })}
+          className={pillClass(activeDatedOnly, false)}
+        >
+          日付未定を隠す
+        </button>
       </div>
 
       <div className="flex items-center gap-2 text-sm">

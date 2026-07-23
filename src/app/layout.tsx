@@ -20,6 +20,9 @@ export const metadata: Metadata = {
   title: "レアレーダー | レア・限定品の予約・発売・抽選スケジュール",
   description:
     "フィギュア・トレカ・スニーカー・プラモなど、レア・限定アイテムの予約開始・発売・抽選スケジュールを各所から毎日自動でまとめてお届け。",
+  alternates: {
+    types: { "application/rss+xml": "/feed.xml" },
+  },
   openGraph: {
     title: "レアレーダー | レア・限定品の予約・発売・抽選スケジュール",
     description:
