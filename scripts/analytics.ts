@@ -28,6 +28,8 @@ async function query(
     headers: { Authorization: `Bearer ${TOKEN}` },
   });
   if (!res.ok) {
+    // 402 = プラン制限（Hobbyではカスタムイベント取得にPro以上が必要）。エラー扱いしない。
+    if (res.status === 402) return { planLimited: true };
     const body = await res.text();
     console.error(`  ✗ ${path} 取得失敗 (HTTP ${res.status}): ${body.slice(0, 200)}`);
     return null;
@@ -113,9 +115,11 @@ async function main() {
     by: "eventData/genre",
     limit: "20",
     filter: "eventName eq 'genre_select'",
-  })) as { data?: Row[] } | null;
+  })) as { data?: Row[]; planLimited?: boolean } | null;
   console.log("\n■ 人気ジャンル（クリック数） TOP20");
-  if (!genres?.data?.length) {
+  if (genres?.planLimited) {
+    console.log("  （HobbyプランではカスタムイベントのAPI取得にPro以上が必要。ジャンル別集計は現状不可）");
+  } else if (!genres?.data?.length) {
     console.log("  （まだデータなし。イベント計測は反映に時間がかかる）");
   } else {
     for (const r of genres.data) {
