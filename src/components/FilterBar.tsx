@@ -2,6 +2,7 @@
 
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
+import { track } from "@vercel/analytics";
 
 type Props = {
   genres: { genre: string; count: number }[];
@@ -58,7 +59,11 @@ export function FilterBar({ genres, activeGenre, activeSort, activeQuery }: Prop
         {genres.map(({ genre, count }) => (
           <button
             key={genre}
-            onClick={() => updateParam({ genre })}
+            onClick={() => {
+              // どのジャンルが見られているかを解析できるようにイベント記録
+              track("genre_select", { genre });
+              updateParam({ genre });
+            }}
             className={chipClass(activeGenre === genre)}
           >
             {genre}

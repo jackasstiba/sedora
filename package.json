@@ -9,6 +9,7 @@
     "start": "next start",
     "lint": "eslint",
     "scrape": "node --env-file-if-exists=.env --import tsx scripts/scrape.ts",
+  "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "db:deploy": "prisma migrate deploy"
   },
