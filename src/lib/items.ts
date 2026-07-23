@@ -32,6 +32,7 @@ const SOURCE_LABELS: Record<string, string> = {
   collabo_cafe: "コラボカフェ",
   ichiban_kuji: "一番くじ倶楽部",
   pokemon_goods: "ポケモン公式",
+  pokemoncard: "ポケモンカード公式",
 };
 
 export function sourceLabel(source: string): string {
