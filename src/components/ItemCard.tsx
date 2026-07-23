@@ -14,13 +14,25 @@ type Item = {
   imageUrl: string | null;
 };
 
+const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
+const BLUE = "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
+const PURPLE = "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300";
+const AMBER = "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+
 const EVENT_COLORS: Record<string, string> = {
-  予約開始: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  抽選: "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
-  発売: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  登場予定: "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300",
-  販売開始: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300",
-  開催: "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  // 予約系＝緑
+  予約開始: GREEN,
+  予約受付中: GREEN,
+  受付開始: GREEN,
+  販売開始: GREEN,
+  // 抽選＝紫（せどり重要・目立たせる）
+  抽選: PURPLE,
+  // 発売・登場系＝青
+  発売: BLUE,
+  登場予定: BLUE,
+  再販: BLUE,
+  // 開催（コラボ等）＝アンバー
+  開催: AMBER,
 };
 
 function eventColor(eventType: string): string {

@@ -9,16 +9,27 @@ export const dynamic = "force-dynamic";
 export default async function Home({
   searchParams,
 }: {
-  searchParams: Promise<{ genre?: string; q?: string; sort?: string }>;
+  searchParams: Promise<{
+    genre?: string;
+    q?: string;
+    sort?: string;
+    status?: string;
+    when?: string;
+  }>;
 }) {
   const params = await searchParams;
   const genre = params.genre ?? "";
   const query = params.q ?? "";
   const sort = params.sort === "recent" ? "recent" : "date";
+  const status =
+    params.status === "reserve" || params.status === "lottery" || params.status === "release"
+      ? params.status
+      : undefined;
+  const when = params.when === "week" || params.when === "month" ? params.when : undefined;
 
   const [genres, items, stats, months] = await Promise.all([
     getGenres(),
-    getItems({ genre: genre || undefined, query: query || undefined, sort }),
+    getItems({ genre: genre || undefined, query: query || undefined, sort, status, when }),
     getStats(),
     getMonthsWithItems(),
   ]);
@@ -44,7 +55,14 @@ export default async function Home({
 
       <div className="mb-6">
         <Suspense fallback={<div className="h-24" />}>
-          <FilterBar genres={genres} activeGenre={genre} activeSort={sort} activeQuery={query} />
+          <FilterBar
+            genres={genres}
+            activeGenre={genre}
+            activeSort={sort}
+            activeQuery={query}
+            activeStatus={status ?? ""}
+            activeWhen={when ?? ""}
+          />
         </Suspense>
       </div>
 

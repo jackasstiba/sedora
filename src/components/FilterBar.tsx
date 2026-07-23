@@ -9,9 +9,31 @@ type Props = {
   activeGenre: string;
   activeSort: string;
   activeQuery: string;
+  activeStatus: string;
+  activeWhen: string;
 };
 
-export function FilterBar({ genres, activeGenre, activeSort, activeQuery }: Props) {
+const STATUS_TABS: { value: string; label: string }[] = [
+  { value: "", label: "すべて" },
+  { value: "reserve", label: "予約" },
+  { value: "lottery", label: "抽選" },
+  { value: "release", label: "発売・登場" },
+];
+
+const WHEN_TABS: { value: string; label: string }[] = [
+  { value: "", label: "全期間" },
+  { value: "week", label: "今週" },
+  { value: "month", label: "今月" },
+];
+
+export function FilterBar({
+  genres,
+  activeGenre,
+  activeSort,
+  activeQuery,
+  activeStatus,
+  activeWhen,
+}: Props) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [queryInput, setQueryInput] = useState(activeQuery);
@@ -72,6 +94,33 @@ export function FilterBar({ genres, activeGenre, activeSort, activeQuery }: Prop
         ))}
       </div>
 
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        <div className="flex items-center gap-1.5">
+          <span className="text-neutral-500 dark:text-neutral-400">種別:</span>
+          {STATUS_TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => updateParam({ status: t.value || null })}
+              className={pillClass(activeStatus === t.value, t.value === "lottery")}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1.5">
+          <span className="text-neutral-500 dark:text-neutral-400">時期:</span>
+          {WHEN_TABS.map((t) => (
+            <button
+              key={t.value}
+              onClick={() => updateParam({ when: t.value || null })}
+              className={pillClass(activeWhen === t.value, false)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
       <div className="flex items-center gap-2 text-sm">
         <span className="text-neutral-500 dark:text-neutral-400">並び替え:</span>
         <button
@@ -97,6 +146,17 @@ function chipClass(active: boolean): string {
       ? "border-rose-600 bg-rose-600 text-white"
       : "border-neutral-300 bg-white text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
   }`;
+}
+
+function pillClass(active: boolean, isLottery: boolean): string {
+  if (active) {
+    const color = isLottery ? "bg-purple-600" : "bg-neutral-800 dark:bg-neutral-200 dark:text-neutral-900";
+    return `rounded-md px-2.5 py-1 font-semibold text-white ${color}`;
+  }
+  const idle = isLottery
+    ? "text-purple-700 hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/30"
+    : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800";
+  return `rounded-md px-2.5 py-1 ${idle}`;
 }
 
 function sortClass(active: boolean): string {
