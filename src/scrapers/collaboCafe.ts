@@ -3,10 +3,17 @@ import { extractDateAndEventFromText, fetchHtml, parseJapaneseFullDate, sleep } 
 
 // コラボカフェ.com: アニメ・ゲーム・VTuber等のコラボカフェ / くじ / ポップアップ /
 // 店舗タイアップ / グッズ情報を横断的にまとめているアグリゲーター。
-// トップページ(新着横断) + VTuberタグ(ホロライブ等)を取得し post-ID で重複排除する。
+// トップ(新着横断) + せどり向けの物販系カテゴリ + ホロライブ専用カテゴリを巡回し、
+// post-ID で重複排除する。カテゴリを個別に見ることで、トップに載らない作品別コラボ
+// (例: ホロライブ×極楽湯の各弾) も取りこぼさない。
 const LISTING_URLS = [
   "https://collabo-cafe.com/",
-  "https://collabo-cafe.com/events/tag/vtuber/",
+  "https://collabo-cafe.com/events/category/goods/",
+  "https://collabo-cafe.com/events/category/kuji/",
+  "https://collabo-cafe.com/events/category/pop-up-store/",
+  "https://collabo-cafe.com/events/category/shop-tieup/",
+  "https://collabo-cafe.com/events/category/cafe/",
+  "https://collabo-cafe.com/events/category/hololive/",
 ];
 
 // article class の event-category-* から拾う種別スラッグ → 表示ラベル
