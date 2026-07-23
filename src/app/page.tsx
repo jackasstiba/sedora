@@ -25,10 +25,10 @@ export default async function Home({
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
       <header className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
-          せどりレーダー
+          レアレーダー
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          レア・限定品の予約 / 発売 / 抽選情報をまとめて自動収集。せどり・転売の仕入れリサーチに。
+          フィギュア・トレカ・スニーカー・プラモなど、レア・限定アイテムの予約開始・発売・抽選スケジュールを毎日まとめてお届け。
         </p>
         <p className="mt-2 text-xs text-neutral-400">
           掲載 {stats.total} 件
