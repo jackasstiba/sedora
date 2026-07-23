@@ -66,5 +66,7 @@ export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
     await sleep(500);
   }
 
-  return items;
+  // 古い順に返す。登録順=id順になり、新しい商品ほど大きいidになるので、
+  // 新着順（id降順）で「登場日が新しいグッズ」が上に来る。
+  return items.reverse();
 }
