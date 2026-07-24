@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 
-export type ItemStatus = "reserve" | "lottery" | "release";
+export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
 
 export type ItemFilter = {
@@ -14,8 +14,11 @@ export type ItemFilter = {
   datedOnly?: boolean;
 };
 
+// 日付なしのうち「日程未定の予定品」を表す eventType（＝いま買えるわけではない）。
+const TBD_EVENT_TYPES = ["登場予定", "開催"];
+
 // バラバラな eventType 文字列を、せどり視点の3グループに正規化する。
-export const STATUS_EVENT_TYPES: Record<ItemStatus, string[]> = {
+export const STATUS_EVENT_TYPES: Record<Exclude<ItemStatus, "now">, string[]> = {
   reserve: ["予約開始", "予約受付中", "受付開始"],
   lottery: ["抽選"],
   release: ["発売", "販売開始", "登場予定", "開催", "再販"],
@@ -64,11 +67,17 @@ export async function getItems(filter: ItemFilter) {
   if (filter.source) where.source = filter.source;
   if (filter.query) where.title = { contains: filter.query };
 
-  if (filter.status === "lottery") {
+  if (filter.status === "now") {
+    // 「いま買える」速報。Xミラー系(あみあみ予約開始/販売再開など)は未来の日付が無く、
+    // 日付なし＝今すぐ動くべき情報。せどり的に価値が高いので専用ビューで拾う。
+    // ただし「登場予定」「開催」は“日程未定の予定品”なので速報からは外す。
+    where.eventDate = null;
+    where.eventType = { notIn: TBD_EVENT_TYPES };
+  } else if (filter.status === "lottery") {
     // 抽選は eventType が「抽選」のものに加え、タイトルに「抽選」を含むものも拾う
     // （例: eventType=登場予定 だが「抽選販売」の商品）。せどり的に取りこぼさない。
     and.push({ OR: [{ eventType: "抽選" }, { title: { contains: "抽選" } }] });
-  } else if (filter.status) {
+  } else if (filter.status === "reserve" || filter.status === "release") {
     where.eventType = { in: STATUS_EVENT_TYPES[filter.status] };
   }
 
@@ -77,7 +86,9 @@ export async function getItems(filter: ItemFilter) {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
-  if (filter.when) {
+  if (filter.status === "now") {
+    // 速報ビューは日付なし（いま買える）に固定済みなので、日付条件は付けない
+  } else if (filter.when) {
     // 今週／今月フィルタは日付が確定しているものだけ（未定は範囲に入らない）
     const end = new Date(today);
     if (filter.when === "week") {

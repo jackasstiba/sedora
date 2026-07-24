@@ -16,6 +16,7 @@ type Props = {
 
 const STATUS_TABS: { value: string; label: string }[] = [
   { value: "", label: "すべて" },
+  { value: "now", label: "速報(いま買える)" },
   { value: "reserve", label: "予約" },
   { value: "lottery", label: "抽選" },
   { value: "release", label: "発売・登場" },

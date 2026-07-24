@@ -23,7 +23,10 @@ export default async function Home({
   const query = params.q ?? "";
   const sort = params.sort === "recent" ? "recent" : "date";
   const status =
-    params.status === "reserve" || params.status === "lottery" || params.status === "release"
+    params.status === "reserve" ||
+    params.status === "lottery" ||
+    params.status === "release" ||
+    params.status === "now"
       ? params.status
       : undefined;
   const when = params.when === "week" || params.when === "month" ? params.when : undefined;
