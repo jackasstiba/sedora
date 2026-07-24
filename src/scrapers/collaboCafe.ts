@@ -1,5 +1,11 @@
 import { ScrapedItem } from "./types";
-import { extractDateAndEventFromText, fetchHtml, parseJapaneseFullDate, sleep } from "./util";
+import {
+  classifyGenre,
+  extractDateAndEventFromText,
+  fetchHtml,
+  parseJapaneseFullDate,
+  sleep,
+} from "./util";
 
 // コラボカフェ.com: アニメ・ゲーム・VTuber等のコラボカフェ / くじ / ポップアップ /
 // 店舗タイアップ / グッズ情報を横断的にまとめているアグリゲーター。
@@ -62,13 +68,24 @@ function parseArticle(block: string): ScrapedItem | null {
   const period = periodRaw.replace(/^\s*期間\s*[:：]\s*/, "").trim();
   const eventDate = parseJapaneseFullDate(period) ?? extractDateAndEventFromText(title).date;
 
+  // くじ・グッズは「物販」なので、コラボ一括ではなく中身でジャンル判定し「発売」にする。
+  // （例: 一番くじ商品が genre=コラボ / eventType=開催 になっていた分類ズレの修正）
+  // カフェ・ポップアップ・店舗コラボ等の“場のイベント”は従来どおり コラボ / 開催。
+  const subGenre = pickSubGenre(block);
+  const isMerch = subGenre === "くじ" || subGenre === "グッズ";
+  let genre = "コラボ";
+  if (isMerch) {
+    const g = classifyGenre(title);
+    genre = g === "その他" ? "コラボ" : g;
+  }
+
   return {
     source: "collabo_cafe",
     sourceId: id,
     title,
-    genre: "コラボ",
-    subGenre: pickSubGenre(block),
-    eventType: "開催",
+    genre,
+    subGenre,
+    eventType: isMerch ? "発売" : "開催",
     eventDate,
     eventDateText: period || null,
     price: null,

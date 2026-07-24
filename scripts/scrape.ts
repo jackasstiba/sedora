@@ -1,6 +1,7 @@
 import { prisma } from "../src/lib/prisma";
 import { runAllScrapers } from "../src/scrapers";
 import { checkHealth } from "./health";
+import { cleanTitle } from "../src/scrapers/util";
 
 async function main() {
   // figisland_pb は詳細ページ取得型。既に価格まで取れているものは再取得しない。
@@ -19,7 +20,9 @@ async function main() {
       continue;
     }
 
-    for (const item of items) {
+    for (const raw of items) {
+      // 配信元タイトルの日付告知・編集タグを落として商品名として読みやすくする
+      const item = { ...raw, title: cleanTitle(raw.title) };
       await prisma.item.upsert({
         where: { source_sourceId: { source: item.source, sourceId: item.sourceId } },
         create: item,

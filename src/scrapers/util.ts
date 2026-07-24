@@ -80,6 +80,25 @@ export function extractDateAndEventFromText(
   };
 }
 
+// 配信元のタイトルには、日付欄と重複する告知（「7月24日より開催!」）や
+// 編集タグ（【新着】【オススメ】）が付いていることが多い。商品名として読みやすくするため落とす。
+const NOISE_TAGS =
+  /^(?:【(?:新着|速報|再販|再入荷|注目|人気|限定|オススメ|おすすめ|超オススメ|超絶オススメ)】\s*)+/;
+const LEADING_DATE = /^\d{1,2}\/\d{1,2}(?:・\d{1,2}\/\d{1,2})*\s*(?:発売|抽選|予約)?\s*[｜|]\s*/;
+const TRAILING_DATE =
+  /\s*\d{1,2}月\d{1,2}日(?:から|より)?\s*(?:順次)?\s*(?:発売|開催|登場|開始|実施|販売|予約開始|受付開始)(?:決定|予定|中)?\s*[!！]*\s*$/;
+
+/** タイトルから日付告知・編集タグを取り除いて商品名として読みやすくする */
+export function cleanTitle(raw: string): string {
+  let t = raw.trim();
+  t = t.replace(NOISE_TAGS, "");
+  t = t.replace(LEADING_DATE, "");
+  t = t.replace(TRAILING_DATE, "");
+  t = t.trim();
+  // 削りすぎて短くなった場合は元に戻す（安全側）
+  return t.length >= 4 ? t : raw.trim();
+}
+
 export function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -93,6 +112,8 @@ function toHalfWidth(s: string): string {
 export function classifyGenre(text: string): string {
   const norm = toHalfWidth(text);
   const t = norm.toLowerCase();
+  // 「一番くじ」は独立ジャンル（コラボ扱いにしない）
+  if (/一番くじ/.test(norm)) return "一番くじ";
   if (/フィギュア|フィギュアーツ|ねんどろ|プライズ|scale|スケール|ぬいぐるみ|monsterarts|figuarts/i.test(norm)) {
     return "フィギュア";
   }
