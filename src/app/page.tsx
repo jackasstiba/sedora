@@ -12,7 +12,6 @@ export default async function Home({
   searchParams: Promise<{
     genre?: string;
     q?: string;
-    sort?: string;
     status?: string;
     when?: string;
     dated?: string;
@@ -21,7 +20,6 @@ export default async function Home({
   const params = await searchParams;
   const genre = params.genre ?? "";
   const query = params.q ?? "";
-  const sort = params.sort === "recent" ? "recent" : "date";
   const status =
     params.status === "reserve" ||
     params.status === "lottery" ||
@@ -34,13 +32,13 @@ export default async function Home({
 
   const [genres, items, stats, months] = await Promise.all([
     getGenres(),
-    getItems({ genre: genre || undefined, query: query || undefined, sort, status, when, datedOnly }),
+    getItems({ genre: genre || undefined, query: query || undefined, status, when, datedOnly }),
     getStats(),
     getMonthsWithItems(),
   ]);
 
-  // 発売日順のときは日付見出しでグループ化。新着順はそのまま並べる。
-  const groups = sort === "date" ? groupItemsByDate(items) : null;
+  // 常に発売日で並べ、日付見出し（今日/明日/今週/それ以降/日付未定）でグループ化する。
+  const groups = groupItemsByDate(items);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -66,7 +64,6 @@ export default async function Home({
           <FilterBar
             genres={genres}
             activeGenre={genre}
-            activeSort={sort}
             activeQuery={query}
             activeStatus={status ?? ""}
             activeWhen={when ?? ""}
@@ -77,7 +74,7 @@ export default async function Home({
 
       {items.length === 0 ? (
         <p className="py-16 text-center text-neutral-500">該当する商品が見つかりませんでした。</p>
-      ) : groups ? (
+      ) : (
         <div className="flex flex-col gap-8">
           {groups.map((g) => (
             <section key={g.label}>
@@ -91,12 +88,6 @@ export default async function Home({
                 ))}
               </div>
             </section>
-          ))}
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-          {items.map((item) => (
-            <ItemCard key={item.id} item={item} />
           ))}
         </div>
       )}

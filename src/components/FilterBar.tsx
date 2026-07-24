@@ -7,7 +7,6 @@ import { track } from "@vercel/analytics";
 type Props = {
   genres: { genre: string; count: number }[];
   activeGenre: string;
-  activeSort: string;
   activeQuery: string;
   activeStatus: string;
   activeWhen: string;
@@ -31,7 +30,6 @@ const WHEN_TABS: { value: string; label: string }[] = [
 export function FilterBar({
   genres,
   activeGenre,
-  activeSort,
   activeQuery,
   activeStatus,
   activeWhen,
@@ -129,22 +127,6 @@ export function FilterBar({
           日付未定を隠す
         </button>
       </div>
-
-      <div className="flex items-center gap-2 text-sm">
-        <span className="text-neutral-500 dark:text-neutral-400">並び替え:</span>
-        <button
-          onClick={() => updateParam({ sort: null })}
-          className={sortClass(activeSort !== "recent")}
-        >
-          発売・予約日順
-        </button>
-        <button
-          onClick={() => updateParam({ sort: "recent" })}
-          className={sortClass(activeSort === "recent")}
-        >
-          新着順
-        </button>
-      </div>
     </div>
   );
 }
@@ -168,10 +150,3 @@ function pillClass(active: boolean, isLottery: boolean): string {
   return `rounded-md px-2.5 py-1 ${idle}`;
 }
 
-function sortClass(active: boolean): string {
-  return `rounded-md px-2 py-1 transition ${
-    active
-      ? "bg-neutral-200 font-semibold text-neutral-900 dark:bg-neutral-700 dark:text-neutral-100"
-      : "text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200"
-  }`;
-}
