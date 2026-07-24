@@ -20,10 +20,13 @@ export function todayJst(): Date {
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()));
 }
 
-/** "7/25(土)" */
+/** "7/25(土)"。ただし今年(日本時間基準)以外は年を付けて "2027/7/28(水)"。
+ *  年を省くと、来年の日付が今年の間に紛れて「順番がおかしい」ように見えるため。 */
 export function formatShort(d: Date | string): string {
   const x = new Date(d);
-  return `${x.getUTCMonth() + 1}/${x.getUTCDate()}(${DAYS[x.getUTCDay()]})`;
+  const y = x.getUTCFullYear();
+  const md = `${x.getUTCMonth() + 1}/${x.getUTCDate()}(${DAYS[x.getUTCDay()]})`;
+  return y === todayJst().getUTCFullYear() ? md : `${y}/${md}`;
 }
 
 /** "2026年7月25日(土)" */
