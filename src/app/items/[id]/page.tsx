@@ -3,16 +3,14 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { sourceLabel } from "@/lib/items";
 import { getItemById, getRelatedItems } from "@/lib/seo";
+import { formatLong } from "@/lib/date";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
 function formatDate(date: Date | null): string | null {
-  if (!date) return null;
-  const d = new Date(date);
-  const days = ["日", "月", "火", "水", "木", "金", "土"];
-  return `${d.getFullYear()}年${d.getMonth() + 1}月${d.getDate()}日(${days[d.getDay()]})`;
+  return date ? formatLong(date) : null;
 }
 
 type Props = { params: Promise<{ id: string }> };
@@ -23,11 +21,16 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!item) return { title: "見つかりませんでした | レアレーダー" };
 
   const dateStr = formatDate(item.eventDate) ?? item.eventDateText ?? "";
-  const title = `${item.title}｜${item.eventType}日・${item.genre} | レアレーダー`;
-  const description =
-    `${item.title}の${item.eventType}情報。${dateStr ? `${dateStr}／` : ""}` +
-    `ジャンル: ${item.genre}${item.price ? `／${item.price}` : ""}。配信元: ${sourceLabel(item.source)}。` +
-    `レア・限定アイテムの予約・発売スケジュールをまとめるレアレーダーで最新情報をチェック。`;
+  const title = `${item.title} | レアレーダー`;
+  // 事実だけを簡潔に（宣伝文句は入れない）
+  const description = [
+    dateStr ? `${item.eventType}日: ${dateStr}` : null,
+    item.price ? `価格: ${item.price}` : null,
+    `ジャンル: ${item.genre}`,
+    `情報元: ${sourceLabel(item.source)}`,
+  ]
+    .filter(Boolean)
+    .join(" ／ ");
 
   return {
     title,
@@ -159,22 +162,6 @@ export default async function ItemPage({ params }: Props) {
           </p>
         </div>
       </div>
-
-      <section className="mt-8 text-sm leading-relaxed text-neutral-700 dark:text-neutral-300">
-        <h2 className="mb-2 text-base font-bold text-neutral-900 dark:text-neutral-50">
-          この商品について
-        </h2>
-        <p>
-          「{item.title}」は、{item.genre}
-          {item.subGenre && item.subGenre !== item.genre ? `（${item.subGenre}）` : ""}の
-          {item.eventType}情報です。
-          {dateLabel ? `${dateLabel}に${item.eventType}予定。` : "日程は未定・情報は随時更新されます。"}
-          {item.price ? `価格は${item.price}。` : ""}
-          情報は{sourceLabel(item.source)}より自動収集しています。予約・購入は公式・販売ページをご確認ください。
-          レアレーダーでは、{item.genre}をはじめフィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど
-          レア・限定アイテムの予約開始・発売・抽選スケジュールを毎日自動でまとめています。
-        </p>
-      </section>
 
       {related.length > 0 && (
         <section className="mt-10">

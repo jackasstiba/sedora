@@ -49,7 +49,7 @@ export default async function Home({
           レアレーダー
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          フィギュア・トレカ・スニーカー・プラモなど、レア・限定アイテムの予約開始・発売・抽選スケジュールを毎日まとめてお届け。
+          フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの、予約開始・発売・抽選の予定。
         </p>
         <p className="mt-2 text-xs text-neutral-400">
           掲載 {stats.total} 件

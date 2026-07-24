@@ -1,4 +1,5 @@
 import { sourceLabel } from "@/lib/items";
+import { formatShort } from "@/lib/date";
 
 type Item = {
   id: number;
@@ -40,10 +41,7 @@ function eventColor(eventType: string): string {
 }
 
 function formatDate(date: Date | null): string | null {
-  if (!date) return null;
-  const d = new Date(date);
-  const days = ["日", "月", "火", "水", "木", "金", "土"];
-  return `${d.getMonth() + 1}/${d.getDate()}(${days[d.getDay()]})`;
+  return date ? formatShort(date) : null;
 }
 
 export function ItemCard({ item }: { item: Item }) {

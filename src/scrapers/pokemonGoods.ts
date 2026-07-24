@@ -24,7 +24,8 @@ type ApiItem = {
 function parseDotDate(s: string | null): Date | null {
   const m = s?.match(/^(\d{4})\.(\d{2})\.(\d{2})$/);
   if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  // 暦日は UTC 0時で作る（本番のUTC環境で1日ズレないように）
+  return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
 }
 
 export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {

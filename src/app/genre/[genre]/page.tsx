@@ -18,9 +18,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { genre: raw } = await params;
   const genre = decodeURIComponent(raw);
   const title = `${genre}の予約・発売スケジュール一覧 | レアレーダー`;
-  const description =
-    `${genre}のレア・限定アイテムの予約開始・発売・抽選スケジュールを毎日自動でまとめて掲載。` +
-    `${genre}の新作・新商品の発売日をいち早くチェックできます。`;
+  const description = `${genre}の予約開始・発売・抽選の予定を、発売日が近い順に掲載。`;
   return {
     title,
     description,
@@ -65,7 +63,7 @@ export default async function GenrePage({ params }: Props) {
           {genre}の予約・発売スケジュール
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          {genre}のレア・限定アイテムの予約開始・発売・抽選予定を、発売日が近い順にまとめています（{items.length}件）。
+          発売日が近い順・{items.length}件
         </p>
       </header>
 

@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
+import { todayJst } from "./date";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
@@ -83,8 +84,7 @@ export async function getItems(filter: ItemFilter) {
 
   // 過去に終わったイベントは常に除外し、これから予約・発売される商品（＋日付未定）
   // だけを表示する。新着順でも過去イベント（例: 後から収集した3月開催分）を出さない。
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayJst(); // 日本時間の「今日」を暦日(UTC0時)で
 
   if (filter.status === "now") {
     // 速報ビューは日付なし（いま買える）に固定済みなので、日付条件は付けない
@@ -92,11 +92,11 @@ export async function getItems(filter: ItemFilter) {
     // 今週／今月フィルタは日付が確定しているものだけ（未定は範囲に入らない）
     const end = new Date(today);
     if (filter.when === "week") {
-      const dow = today.getDay(); // 0=日
+      const dow = today.getUTCDay(); // 0=日
       const daysToNextMon = ((8 - dow) % 7) || 7;
-      end.setDate(today.getDate() + daysToNextMon); // 来週月曜0時（＝今週末まで）
+      end.setUTCDate(today.getUTCDate() + daysToNextMon); // 来週月曜0時（＝今週末まで）
     } else {
-      end.setMonth(today.getMonth() + 1, 1); // 翌月1日0時（＝今月末まで）
+      end.setUTCMonth(today.getUTCMonth() + 1, 1); // 翌月1日0時（＝今月末まで）
     }
     where.eventDate = { gte: today, lt: end };
   } else if (filter.datedOnly) {
@@ -125,13 +125,12 @@ export async function getItems(filter: ItemFilter) {
 export function groupItemsByDate<T extends { eventDate: Date | null }>(
   items: T[]
 ): { label: string; items: T[] }[] {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayJst();
   const t0 = today.getTime();
   const day = 24 * 60 * 60 * 1000;
   const tomorrow = t0 + day;
   const dayAfter = t0 + 2 * day;
-  const dow = today.getDay();
+  const dow = today.getUTCDay();
   const nextMon = t0 + (((8 - dow) % 7) || 7) * day;
 
   const buckets: Record<string, T[]> = {
@@ -147,8 +146,8 @@ export function groupItemsByDate<T extends { eventDate: Date | null }>(
       continue;
     }
     const d = new Date(it.eventDate);
-    d.setHours(0, 0, 0, 0);
-    const ms = d.getTime();
+    // 暦日として正規化（保存値の時刻ゆらぎに影響されないように）
+    const ms = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
     if (ms < tomorrow) buckets["今日"].push(it);
     else if (ms < dayAfter) buckets["明日"].push(it);
     else if (ms < nextMon) buckets["今週"].push(it);
@@ -162,8 +161,7 @@ export function groupItemsByDate<T extends { eventDate: Date | null }>(
 export async function getStats() {
   // 表示と同じスコープ（今後の予定＋日付未定）で件数を数える。過去に終わった
   // イベントは表示されないので「掲載 N件」にも含めない。
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayJst();
   const total = await prisma.item.count({
     where: { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
   });

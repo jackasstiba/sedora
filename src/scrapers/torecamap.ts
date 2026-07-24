@@ -8,7 +8,8 @@ function parseSlashDate(text: string): Date | null {
   const m = text.match(/(\d{4})\/(\d{1,2})\/(\d{1,2})/);
   if (!m) return null;
   const [, y, mo, d] = m;
-  return new Date(Number(y), Number(mo) - 1, Number(d));
+  // 暦日は UTC 0時で作る（本番のUTC環境で1日ズレないように）
+  return new Date(Date.UTC(Number(y), Number(mo) - 1, Number(d)));
 }
 
 export async function scrapeTorecamap(): Promise<ScrapedItem[]> {

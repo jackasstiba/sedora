@@ -9,12 +9,18 @@ export async function fetchHtml(url: string): Promise<string> {
   return res.text();
 }
 
+// 日付は「時刻を持たない暦日」として UTC 0時で作る。
+// ローカル時刻(JST)で作ると、UTCで動く本番サーバーで1日ズレて表示されるため。
+function calDate(y: number, month1: number, d: number): Date {
+  return new Date(Date.UTC(y, month1 - 1, d));
+}
+
 /** "20260806" -> Date(2026-08-06) */
 export function parseYyyymmdd(id: string): Date | null {
   const m = id.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (!m) return null;
   const [, y, mo, d] = m;
-  return new Date(Number(y), Number(mo) - 1, Number(d));
+  return calDate(Number(y), Number(mo), Number(d));
 }
 
 /** "2026年8月6日" -> Date */
@@ -22,7 +28,7 @@ export function parseJapaneseFullDate(text: string): Date | null {
   const m = text.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日/);
   if (!m) return null;
   const [, y, mo, d] = m;
-  return new Date(Number(y), Number(mo) - 1, Number(d));
+  return calDate(Number(y), Number(mo), Number(d));
 }
 
 /** "2026年9月" (発送予定など) -> Date(その月の1日) */
@@ -30,7 +36,7 @@ export function parseJapaneseYearMonth(text: string): Date | null {
   const m = text.match(/(\d{4})年\s*(\d{1,2})月/);
   if (!m) return null;
   const [, y, mo] = m;
-  return new Date(Number(y), Number(mo) - 1, 1);
+  return calDate(Number(y), Number(mo), 1);
 }
 
 /** "7/2 (木)" のような月日を、基準の年月から年を補って Date にする */
@@ -42,18 +48,18 @@ export function parseSlashMonthDay(text: string, baseYear: number, baseMonth: nu
   // 12月ページに載る1月発売などをまたぐ補正
   let year = baseYear;
   if (month < baseMonth - 1) year += 1;
-  return new Date(year, month - 1, day);
+  return calDate(year, month, day);
 }
 
 /** "7月6日" (no year) -> resolves to nearest future/past-tolerant year */
 export function resolveMonthDay(month: number, day: number, reference = new Date()): Date {
-  let year = reference.getFullYear();
-  const guess = new Date(year, month - 1, day);
+  let year = reference.getUTCFullYear();
+  const guess = calDate(year, month, day);
   const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
   if (guess.getTime() < reference.getTime() - sixtyDaysMs) {
     year += 1;
   }
-  return new Date(year, month - 1, day);
+  return calDate(year, month, day);
 }
 
 /** Extract first "N月N日" occurrence + optional event-type keyword from free text */

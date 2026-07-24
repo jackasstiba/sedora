@@ -1,4 +1,5 @@
 import { prisma } from "./prisma";
+import { todayJst } from "./date";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
 
@@ -21,8 +22,7 @@ export async function getItemById(id: number) {
 
 /** 同じジャンルの、これから予約・発売の関連アイテム（自分自身は除く） */
 export async function getRelatedItems(genre: string, excludeId: number, take = 12) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayJst();
   return prisma.item.findMany({
     where: {
       genre,
@@ -36,8 +36,7 @@ export async function getRelatedItems(genre: string, excludeId: number, take = 1
 
 /** ジャンルページ用：今後の予定＋日付未定を発売日順で */
 export async function getItemsByGenre(genre: string, take = 200) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const today = todayJst();
   return prisma.item.findMany({
     where: { genre, OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
@@ -52,7 +51,8 @@ function monthRange(month: string): { start: Date; end: Date } | null {
   const y = Number(m[1]);
   const mo = Number(m[2]);
   if (mo < 1 || mo > 12) return null;
-  return { start: new Date(y, mo - 1, 1), end: new Date(y, mo, 1) };
+  // 暦日は UTC 0時基準（保存値と揃える）
+  return { start: new Date(Date.UTC(y, mo - 1, 1)), end: new Date(Date.UTC(y, mo, 1)) };
 }
 
 /** 月ページ用：その月に発売・開催のアイテム（過去も含めた一覧） */
@@ -87,7 +87,7 @@ export async function getMonthsWithItems(): Promise<string[]> {
   for (const r of rows) {
     if (!r.eventDate) continue;
     const d = new Date(r.eventDate);
-    set.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    set.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
   }
   return [...set].sort().reverse();
 }

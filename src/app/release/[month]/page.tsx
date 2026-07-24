@@ -47,7 +47,7 @@ export default async function MonthPage({ params }: Props) {
   const byDay = new Map<number, typeof items>();
   for (const it of items) {
     if (!it.eventDate) continue;
-    const day = new Date(it.eventDate).getDate();
+    const day = new Date(it.eventDate).getUTCDate();
     counts[day] = (counts[day] ?? 0) + 1;
     if (!byDay.has(day)) byDay.set(day, []);
     byDay.get(day)!.push(it);
@@ -83,7 +83,7 @@ export default async function MonthPage({ params }: Props) {
           {label}発売・予約のレア・限定アイテム
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
-          {label}に発売・予約開始・抽選される予定を日付順にまとめています（{items.length}件）。
+          日付順・{items.length}件
         </p>
       </header>
 
@@ -92,7 +92,9 @@ export default async function MonthPage({ params }: Props) {
       <div className="flex flex-col gap-8">
         {days.map((day) => {
           const dayItems = byDay.get(day)!;
-          const dow = new Date(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, day).getDay();
+          const dow = new Date(
+            Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, day)
+          ).getUTCDay();
           return (
             <section key={day} id={`day-${day}`} className="scroll-mt-4">
               <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">

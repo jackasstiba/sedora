@@ -15,8 +15,9 @@ export function MonthCalendar({
   const year = Number(m[1]);
   const monthIdx = Number(m[2]) - 1;
 
-  const startDow = new Date(year, monthIdx, 1).getDay();
-  const daysInMonth = new Date(year, monthIdx + 1, 0).getDate();
+  // 暦日は UTC 基準で計算（保存値・表示と揃える）
+  const startDow = new Date(Date.UTC(year, monthIdx, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate();
 
   const cells: (number | null)[] = [];
   for (let i = 0; i < startDow; i++) cells.push(null);
