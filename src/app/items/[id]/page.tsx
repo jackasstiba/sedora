@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { sourceLabel } from "@/lib/items";
@@ -88,13 +89,13 @@ export default async function ItemPage({ params }: Props) {
       />
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
-        <a href="/" className="hover:underline">
+        <Link href="/" className="hover:underline">
           レアレーダー
-        </a>
+        </Link>
         {" ／ "}
-        <a href={`/genre/${encodeURIComponent(item.genre)}`} className="hover:underline">
+        <Link href={`/genre/${encodeURIComponent(item.genre)}`} className="hover:underline">
           {item.genre}
-        </a>
+        </Link>
       </nav>
 
       <div className="grid gap-6 sm:grid-cols-2">
@@ -114,12 +115,12 @@ export default async function ItemPage({ params }: Props) {
             <span className="rounded-full bg-rose-600 px-2 py-0.5 font-semibold text-white">
               {item.eventType}
             </span>
-            <a
+            <Link
               href={`/genre/${encodeURIComponent(item.genre)}`}
               className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700 hover:underline dark:bg-neutral-800 dark:text-neutral-200"
             >
               {item.genre}
-            </a>
+            </Link>
             {item.subGenre && item.subGenre !== item.genre && (
               <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
                 {item.subGenre}
@@ -174,12 +175,12 @@ export default async function ItemPage({ params }: Props) {
             ))}
           </div>
           <p className="mt-4 text-sm">
-            <a
+            <Link
               href={`/genre/${encodeURIComponent(item.genre)}`}
               className="text-rose-600 hover:underline dark:text-rose-400"
             >
               {item.genre}の一覧をすべて見る →
-            </a>
+            </Link>
           </p>
         </section>
       )}

@@ -1,5 +1,5 @@
 import { ScrapedItem } from "./types";
-import { fetchHtml, parseJapaneseFullDate } from "./util";
+import { parseJapaneseFullDate } from "./util";
 
 // ポケモンカードゲーム公式の商品情報。SPAが叩く topList.php（JSON）を直接取得する。
 // 拡張パック等の発売はトレカせどりの最重要イベント（1件の価値が高い）。

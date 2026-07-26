@@ -27,6 +27,11 @@ export async function scrapeFigisland(): Promise<ScrapedItem[]> {
 
       const imageUrl = el.find("p").first().find("img").first().attr("src") ?? null;
 
+      // 商品ではなく「新作プライズ入荷予定表 未定情報」等の見出し／プレースホルダ行を除外。
+      // 本物の商品は必ず詳細リンク(fiXXXX)か画像を持つので、両方欠けている行は捨てる
+      // （薄いSEOページ・空カードの混入を防ぐ）。
+      if (!idMatch && !imageUrl) return;
+
       items.push({
         source: "figisland",
         sourceId,

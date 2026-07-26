@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { sourceLabel } from "@/lib/items";
 import { formatShort } from "@/lib/date";
 
@@ -48,7 +49,7 @@ export function ItemCard({ item }: { item: Item }) {
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
 
   return (
-    <a
+    <Link
       href={`/items/${item.id}`}
       className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900"
     >
@@ -92,6 +93,6 @@ export function ItemCard({ item }: { item: Item }) {
           {item.price && <span className="font-medium text-neutral-700 dark:text-neutral-200">{item.price.split(" / ")[0]}</span>}
         </div>
       </div>
-    </a>
+    </Link>
   );
 }

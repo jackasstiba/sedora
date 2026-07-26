@@ -1,4 +1,4 @@
-import { Suspense } from "react";
+import Link from "next/link";
 import { FilterBar } from "@/components/FilterBar";
 import { ItemCard } from "@/components/ItemCard";
 import { getGenres, getItems, getStats, groupItemsByDate } from "@/lib/items";
@@ -60,16 +60,14 @@ export default async function Home({
       </header>
 
       <div className="mb-6">
-        <Suspense fallback={<div className="h-24" />}>
-          <FilterBar
-            genres={genres}
-            activeGenre={genre}
-            activeQuery={query}
-            activeStatus={status ?? ""}
-            activeWhen={when ?? ""}
-            activeDatedOnly={datedOnly}
-          />
-        </Suspense>
+        <FilterBar
+          genres={genres}
+          activeGenre={genre}
+          activeQuery={query}
+          activeStatus={status ?? ""}
+          activeWhen={when ?? ""}
+          activeDatedOnly={datedOnly}
+        />
       </div>
 
       {items.length === 0 ? (
@@ -98,13 +96,13 @@ export default async function Home({
         </p>
         <div className="mb-6 flex flex-wrap gap-2">
           {genres.map(({ genre: g }) => (
-            <a
+            <Link
               key={g}
               href={`/genre/${encodeURIComponent(g)}`}
               className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
             >
               {g}
-            </a>
+            </Link>
           ))}
         </div>
 
@@ -115,28 +113,19 @@ export default async function Home({
             </p>
             <div className="flex flex-wrap gap-2">
               {months.map((m) => (
-                <a
+                <Link
                   key={m}
                   href={`/release/${m}`}
+                  prefetch={false}
                   className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
                 >
                   {monthLabel(m)}
-                </a>
+                </Link>
               ))}
             </div>
           </>
         )}
       </nav>
-
-      <footer className="mt-8 border-t border-neutral-200 pt-4 text-xs text-neutral-400 dark:border-neutral-800">
-        <p className="mb-2">
-          <a href="/feed.xml" className="text-rose-600 hover:underline dark:text-rose-400">
-            RSSで新着を購読
-          </a>
-          （Discordやフィードリーダーに新着レア情報を自動で流せます）
-        </p>
-        情報は各配信元サイトから自動収集したものです。予約・購入は各リンク先の公式・販売ページをご確認ください。
-      </footer>
     </main>
   );
 }

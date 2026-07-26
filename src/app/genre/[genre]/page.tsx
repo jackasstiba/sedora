@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { getItemsByGenre, getGenreList } from "@/lib/seo";
@@ -51,9 +52,9 @@ export default async function GenrePage({ params }: Props) {
       />
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
-        <a href="/" className="hover:underline">
+        <Link href="/" className="hover:underline">
           レアレーダー
-        </a>
+        </Link>
         {" ／ "}
         {genre}
       </nav>
@@ -81,13 +82,13 @@ export default async function GenrePage({ params }: Props) {
           {allGenres
             .filter((g) => g !== genre)
             .map((g) => (
-              <a
+              <Link
                 key={g}
                 href={`/genre/${encodeURIComponent(g)}`}
                 className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
               >
                 {g}
-              </a>
+              </Link>
             ))}
         </div>
       </nav>

@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter, useSearchParams } from "next/navigation";
-import { useState } from "react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { track } from "@vercel/analytics";
 
 type Props = {
@@ -36,20 +36,35 @@ export function FilterBar({
   activeDatedOnly,
 }: Props) {
   const router = useRouter();
-  const searchParams = useSearchParams();
   const [queryInput, setQueryInput] = useState(activeQuery);
+  // 絞り込みは force-dynamic ページの再取得（Turso問い合わせ）を伴うため待ちが出る。
+  // isPending でその間だけ一覧を薄く表示し、「押したのに無反応」に見えるのを防ぐ。
+  const [isPending, startTransition] = useTransition();
 
+  // 現在の絞り込み状態は全て props で受け取っているので、そこから URL パラメータを
+  // 再構築する。以前は useSearchParams() を使っていたが、それがこの Client Component を
+  // Suspense 境界のクライアント専用描画に落とし込み、本番で境界がフォールバック
+  // （空白）のまま固まって「フィルタUIが丸ごと消える」不具合の原因になっていた。
   function updateParam(updates: Record<string, string | null>) {
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams();
+    if (activeGenre) params.set("genre", activeGenre);
+    if (activeQuery) params.set("q", activeQuery);
+    if (activeStatus) params.set("status", activeStatus);
+    if (activeWhen) params.set("when", activeWhen);
+    if (activeDatedOnly) params.set("dated", "1");
     for (const [key, value] of Object.entries(updates)) {
       if (value) params.set(key, value);
       else params.delete(key);
     }
-    router.push(`/?${params.toString()}`);
+    const qs = params.toString();
+    startTransition(() => router.push(qs ? `/?${qs}` : "/"));
   }
 
   return (
-    <div className="flex flex-col gap-3">
+    <div
+      className={`flex flex-col gap-3 transition-opacity ${isPending ? "pointer-events-none opacity-50" : ""}`}
+      aria-busy={isPending}
+    >
       <form
         onSubmit={(e) => {
           e.preventDefault();
