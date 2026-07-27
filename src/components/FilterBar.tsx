@@ -1,16 +1,23 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useState } from "react";
 import { track } from "@vercel/analytics";
+
+// 制御コンポーネント化: 絞り込みはサーバー往復ではなく親(ItemBrowser)のローカル状態で
+// 即時に行う。ここは値を表示し、変更を onChange で親に伝えるだけ。
+export type FilterValues = {
+  genre: string;
+  query: string;
+  status: string;
+  when: string;
+  datedOnly: boolean;
+};
 
 type Props = {
   genres: { genre: string; count: number }[];
-  activeGenre: string;
-  activeQuery: string;
-  activeStatus: string;
-  activeWhen: string;
-  activeDatedOnly: boolean;
+  values: FilterValues;
+  onChange: (patch: Partial<FilterValues>) => void;
+  onClear: () => void;
 };
 
 const STATUS_TABS: { value: string; label: string }[] = [
@@ -27,64 +34,27 @@ const WHEN_TABS: { value: string; label: string }[] = [
   { value: "month", label: "今月" },
 ];
 
-export function FilterBar({
-  genres,
-  activeGenre,
-  activeQuery,
-  activeStatus,
-  activeWhen,
-  activeDatedOnly,
-}: Props) {
-  const router = useRouter();
-  const [queryInput, setQueryInput] = useState(activeQuery);
-  // 絞り込みは force-dynamic ページの再取得（Turso問い合わせ）を伴うため待ちが出る。
-  // isPending でその間だけ一覧を薄く表示し、「押したのに無反応」に見えるのを防ぐ。
-  const [isPending, startTransition] = useTransition();
+export function FilterBar({ genres, values, onChange, onClear }: Props) {
+  const { genre, status, when, datedOnly } = values;
+  // 検索欄だけは入力中の未確定文字を持つためローカル state。確定(送信)で親へ反映。
+  const [queryInput, setQueryInput] = useState(values.query);
 
-  // 「絞り込みをリセット」等で activeQuery が外部から変わったとき、検索欄の表示も
-  // 追従させる（クライアント遷移では再マウントされず入力文字が残ってしまうため）。
-  // effect ではなくレンダー中に前回値と比較して調整する React 公式パターン。
-  const [prevQuery, setPrevQuery] = useState(activeQuery);
-  if (activeQuery !== prevQuery) {
-    setPrevQuery(activeQuery);
-    setQueryInput(activeQuery);
+  // 「条件をクリア」等で外部から query が変わったら入力欄も追従（レンダー中に調整）。
+  const [prevQuery, setPrevQuery] = useState(values.query);
+  if (values.query !== prevQuery) {
+    setPrevQuery(values.query);
+    setQueryInput(values.query);
   }
 
   const anyActive =
-    Boolean(activeGenre) ||
-    Boolean(activeQuery) ||
-    Boolean(activeStatus) ||
-    Boolean(activeWhen) ||
-    activeDatedOnly;
-
-  // 現在の絞り込み状態は全て props で受け取っているので、そこから URL パラメータを
-  // 再構築する。以前は useSearchParams() を使っていたが、それがこの Client Component を
-  // Suspense 境界のクライアント専用描画に落とし込み、本番で境界がフォールバック
-  // （空白）のまま固まって「フィルタUIが丸ごと消える」不具合の原因になっていた。
-  function updateParam(updates: Record<string, string | null>) {
-    const params = new URLSearchParams();
-    if (activeGenre) params.set("genre", activeGenre);
-    if (activeQuery) params.set("q", activeQuery);
-    if (activeStatus) params.set("status", activeStatus);
-    if (activeWhen) params.set("when", activeWhen);
-    if (activeDatedOnly) params.set("dated", "1");
-    for (const [key, value] of Object.entries(updates)) {
-      if (value) params.set(key, value);
-      else params.delete(key);
-    }
-    const qs = params.toString();
-    startTransition(() => router.push(qs ? `/?${qs}` : "/"));
-  }
+    Boolean(genre) || Boolean(values.query) || Boolean(status) || Boolean(when) || datedOnly;
 
   return (
-    <div
-      className={`flex flex-col gap-3 transition-opacity ${isPending ? "pointer-events-none opacity-50" : ""}`}
-      aria-busy={isPending}
-    >
+    <div className="flex flex-col gap-3">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          updateParam({ q: queryInput.trim() || null });
+          onChange({ query: queryInput.trim() });
         }}
         className="flex gap-2"
       >
@@ -104,23 +74,20 @@ export function FilterBar({
       </form>
 
       <div className="flex flex-wrap items-center gap-2">
-        <button
-          onClick={() => updateParam({ genre: null })}
-          className={chipClass(activeGenre === "")}
-        >
+        <button onClick={() => onChange({ genre: "" })} className={chipClass(genre === "")}>
           すべて
         </button>
-        {genres.map(({ genre, count }) => (
+        {genres.map(({ genre: g, count }) => (
           <button
-            key={genre}
+            key={g}
             onClick={() => {
               // どのジャンルが見られているかを解析できるようにイベント記録
-              track("genre_select", { genre });
-              updateParam({ genre });
+              track("genre_select", { genre: g });
+              onChange({ genre: g });
             }}
-            className={chipClass(activeGenre === genre)}
+            className={chipClass(genre === g)}
           >
-            {genre}
+            {g}
             <span className="ml-1 opacity-60">{count}</span>
           </button>
         ))}
@@ -132,8 +99,8 @@ export function FilterBar({
           {STATUS_TABS.map((t) => (
             <button
               key={t.value}
-              onClick={() => updateParam({ status: t.value || null })}
-              className={pillClass(activeStatus === t.value, t.value === "lottery")}
+              onClick={() => onChange({ status: t.value })}
+              className={pillClass(status === t.value, t.value === "lottery")}
             >
               {t.label}
             </button>
@@ -144,25 +111,22 @@ export function FilterBar({
           {WHEN_TABS.map((t) => (
             <button
               key={t.value}
-              onClick={() => updateParam({ when: t.value || null })}
-              className={pillClass(activeWhen === t.value, false)}
+              onClick={() => onChange({ when: t.value })}
+              className={pillClass(when === t.value, false)}
             >
               {t.label}
             </button>
           ))}
         </div>
         <button
-          onClick={() => updateParam({ dated: activeDatedOnly ? null : "1" })}
-          className={pillClass(activeDatedOnly, false)}
+          onClick={() => onChange({ datedOnly: !datedOnly })}
+          className={pillClass(datedOnly, false)}
         >
           日付未定を隠す
         </button>
         {anyActive && (
           <button
-            onClick={() => {
-              setQueryInput("");
-              startTransition(() => router.push("/"));
-            }}
+            onClick={onClear}
             className="rounded-md px-3 py-1.5 text-neutral-500 underline-offset-2 hover:text-rose-600 hover:underline dark:text-neutral-400 dark:hover:text-rose-400"
           >
             条件をクリア
@@ -191,4 +155,3 @@ function pillClass(active: boolean, isLottery: boolean): string {
     : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800";
   return `rounded-md px-3 py-1.5 ${idle}`;
 }
-

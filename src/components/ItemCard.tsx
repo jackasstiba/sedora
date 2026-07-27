@@ -1,15 +1,16 @@
 import Link from "next/link";
-import { sourceLabel } from "@/lib/items";
+import { sourceLabel } from "@/lib/itemFilter";
 import { formatShort } from "@/lib/date";
 
-type Item = {
+// eventDate は Date（サーバー）／ISO文字列（クライアントへ渡した後）どちらも受ける。
+export type Item = {
   id: number;
   source: string;
   title: string;
   genre: string;
   subGenre: string | null;
   eventType: string;
-  eventDate: Date | null;
+  eventDate: Date | string | null;
   eventDateText: string | null;
   price: string | null;
   url: string;
@@ -42,7 +43,7 @@ function eventColor(eventType: string): string {
   return EVENT_COLORS[eventType] ?? "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200";
 }
 
-function formatDate(date: Date | null): string | null {
+function formatDate(date: Date | string | null): string | null {
   return date ? formatShort(date) : null;
 }
 

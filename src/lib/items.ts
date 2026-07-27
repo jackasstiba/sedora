@@ -1,9 +1,12 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
+import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, type ItemStatus, type ItemWhen } from "./itemFilter";
 
-export type ItemStatus = "reserve" | "lottery" | "release" | "now";
-export type ItemWhen = "week" | "month";
+// 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
+// クライアント側フィルタと共有する。ここではそれらを再エクスポートして使う。
+export { STATUS_EVENT_TYPES, groupItemsByDate, sourceLabel } from "./itemFilter";
+export type { ItemStatus, ItemWhen } from "./itemFilter";
 
 export type ItemFilter = {
   genre?: string;
@@ -14,34 +17,6 @@ export type ItemFilter = {
   when?: ItemWhen;
   datedOnly?: boolean;
 };
-
-// 日付なしのうち「日程未定の予定品」を表す eventType（＝いま買えるわけではない）。
-const TBD_EVENT_TYPES = ["登場予定", "開催"];
-
-// バラバラな eventType 文字列を、せどり視点の3グループに正規化する。
-export const STATUS_EVENT_TYPES: Record<Exclude<ItemStatus, "now">, string[]> = {
-  reserve: ["予約開始", "予約受付中", "受付開始"],
-  lottery: ["抽選"],
-  release: ["発売", "販売開始", "登場予定", "開催", "再販"],
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  figisland: "フィギュアーランド",
-  figisland_pb: "プレミアムバンダイ",
-  koretore: "コレトレ!!",
-  torecamap: "トレカの地図",
-  snkrdunk: "スニーカーダンク",
-  rarecheck: "レアチェック",
-  channeltono: "ちゃんねらー速報",
-  collabo_cafe: "コラボカフェ",
-  ichiban_kuji: "一番くじ倶楽部",
-  pokemon_goods: "ポケモン公式",
-  pokemoncard: "ポケモンカード公式",
-};
-
-export function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? source;
-}
 
 export async function getGenres(): Promise<{ genre: string; count: number }[]> {
   const rows = await prisma.item.groupBy({
@@ -119,43 +94,6 @@ export async function getItems(filter: ItemFilter) {
     orderBy: [...orderBy],
     take: 1000,
   });
-}
-
-/** 発売日順のアイテムを「今日/明日/今週/それ以降/日付未定」に分けて見出し表示しやすくする */
-export function groupItemsByDate<T extends { eventDate: Date | null }>(
-  items: T[]
-): { label: string; items: T[] }[] {
-  const today = todayJst();
-  const t0 = today.getTime();
-  const day = 24 * 60 * 60 * 1000;
-  const tomorrow = t0 + day;
-  const dayAfter = t0 + 2 * day;
-  const dow = today.getUTCDay();
-  const nextMon = t0 + (((8 - dow) % 7) || 7) * day;
-
-  const buckets: Record<string, T[]> = {
-    今日: [],
-    明日: [],
-    今週: [],
-    それ以降: [],
-    日付未定: [],
-  };
-  for (const it of items) {
-    if (!it.eventDate) {
-      buckets["日付未定"].push(it);
-      continue;
-    }
-    const d = new Date(it.eventDate);
-    // 暦日として正規化（保存値の時刻ゆらぎに影響されないように）
-    const ms = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-    if (ms < tomorrow) buckets["今日"].push(it);
-    else if (ms < dayAfter) buckets["明日"].push(it);
-    else if (ms < nextMon) buckets["今週"].push(it);
-    else buckets["それ以降"].push(it);
-  }
-  return Object.entries(buckets)
-    .filter(([, arr]) => arr.length > 0)
-    .map(([label, arr]) => ({ label, items: arr }));
 }
 
 export async function getStats() {

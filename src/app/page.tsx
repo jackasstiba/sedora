@@ -1,14 +1,13 @@
 import Link from "next/link";
-import { FilterBar } from "@/components/FilterBar";
-import { ItemCard } from "@/components/ItemCard";
-import { LoadMore } from "@/components/LoadMore";
-import { getGenres, getItems, getStats, groupItemsByDate } from "@/lib/items";
+import { ItemBrowser } from "@/components/ItemBrowser";
+import { type Item } from "@/components/ItemCard";
+import { type FilterValues } from "@/components/FilterBar";
+import { getItems, getStats } from "@/lib/items";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
 
-// 初期表示件数。全件（約800件・画像数百枚）を一度に描画するとHTML/RSCが数MBに
-// 膨らみ初回表示が重いため、まずこの件数だけ描画し「もっと見る」で継ぎ足す。
+// 「もっと見る」の初期表示件数（ItemBrowser 側と一致させる）。
 const PAGE_SIZE = 120;
 
 export default async function Home({
@@ -26,35 +25,54 @@ export default async function Home({
   const params = await searchParams;
   const genre = params.genre ?? "";
   const query = params.q ?? "";
-  // 表示件数（?show）。不正値は既定に丸め、下限は PAGE_SIZE。
-  const parsedShow = Number.parseInt(params.show ?? "", 10);
-  const show =
-    Number.isFinite(parsedShow) && parsedShow > 0
-      ? Math.max(PAGE_SIZE, parsedShow)
-      : PAGE_SIZE;
   const status =
     params.status === "reserve" ||
     params.status === "lottery" ||
     params.status === "release" ||
     params.status === "now"
       ? params.status
-      : undefined;
-  const when = params.when === "week" || params.when === "month" ? params.when : undefined;
+      : "";
+  const when = params.when === "week" || params.when === "month" ? params.when : "";
   const datedOnly = params.dated === "1";
+  const parsedShow = Number.parseInt(params.show ?? "", 10);
+  const initialShow =
+    Number.isFinite(parsedShow) && parsedShow > 0 ? Math.max(PAGE_SIZE, parsedShow) : PAGE_SIZE;
 
-  const [genres, items, stats, months] = await Promise.all([
-    getGenres(),
-    getItems({ genre: genre || undefined, query: query || undefined, status, when, datedOnly }),
+  // 「今後の予定＋日付未定（過去は除外）」の全件を一度だけ取得し、以降の絞り込み・
+  // ページングはブラウザ内で即時に行う（サーバー往復ゼロ＝フィルタが速い）。
+  const [baseItems, stats, months] = await Promise.all([
+    getItems({}),
     getStats(),
     getMonthsWithItems(),
   ]);
 
-  // 初期表示は先頭 show 件だけ描画し、残りは「もっと見る」で継ぎ足す（ペイロード軽量化）。
-  const visibleItems = items.slice(0, show);
-  const remaining = items.length - visibleItems.length;
+  // クライアントへ渡せるようシリアライズ（eventDate は ISO 文字列）。表示に使う分だけ。
+  const items: Item[] = baseItems.map((it) => ({
+    id: it.id,
+    source: it.source,
+    title: it.title,
+    genre: it.genre,
+    subGenre: it.subGenre,
+    eventType: it.eventType,
+    eventDate: it.eventDate ? it.eventDate.toISOString() : null,
+    eventDateText: it.eventDateText,
+    price: it.price,
+    url: it.url,
+    imageUrl: it.imageUrl,
+    marketPriceText: it.marketPriceText,
+  }));
 
-  // 常に発売日で並べ、日付見出し（今日/明日/今週/それ以降/日付未定）でグループ化する。
-  const groups = groupItemsByDate(visibleItems);
+  // ジャンル別件数（表示対象＝今後＋未定 のスコープで数える）。件数降順。
+  const genreCounts = Object.entries(
+    items.reduce<Record<string, number>>((m, it) => {
+      m[it.genre] = (m[it.genre] ?? 0) + 1;
+      return m;
+    }, {})
+  )
+    .map(([g, count]) => ({ genre: g, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const initial: FilterValues = { genre, query, status, when, datedOnly };
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -75,63 +93,14 @@ export default async function Home({
         </p>
       </header>
 
-      <div className="mb-6">
-        <FilterBar
-          genres={genres}
-          activeGenre={genre}
-          activeQuery={query}
-          activeStatus={status ?? ""}
-          activeWhen={when ?? ""}
-          activeDatedOnly={datedOnly}
-        />
-      </div>
-
-      {items.length === 0 ? (
-        <div className="py-16 text-center">
-          <p className="text-neutral-500">該当する商品が見つかりませんでした。</p>
-          <Link
-            href="/"
-            className="mt-4 inline-block rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-rose-400 hover:text-rose-600 dark:border-neutral-700 dark:text-neutral-200"
-          >
-            絞り込みをリセット
-          </Link>
-        </div>
-      ) : (
-        <div className="flex flex-col gap-8">
-          {groups.map((g) => (
-            <section key={g.label}>
-              <h2 className="mb-3 flex items-baseline gap-2 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-                {g.label}
-                <span className="text-sm font-normal text-neutral-400">{g.items.length}</span>
-              </h2>
-              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-                {g.items.map((item) => (
-                  <ItemCard key={item.id} item={item} />
-                ))}
-              </div>
-            </section>
-          ))}
-        </div>
-      )}
-
-      {remaining > 0 && (
-        <LoadMore
-          activeGenre={genre}
-          activeQuery={query}
-          activeStatus={status ?? ""}
-          activeWhen={when ?? ""}
-          activeDatedOnly={datedOnly}
-          nextShow={show + PAGE_SIZE}
-          remaining={remaining}
-        />
-      )}
+      <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={initialShow} />
 
       <nav className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
         <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
           ジャンルから探す
         </p>
         <div className="mb-6 flex flex-wrap gap-2">
-          {genres.map(({ genre: g }) => (
+          {genreCounts.map(({ genre: g }) => (
             <Link
               key={g}
               href={`/genre/${encodeURIComponent(g)}`}
