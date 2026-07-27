@@ -71,7 +71,15 @@ export default async function Home({
       </div>
 
       {items.length === 0 ? (
-        <p className="py-16 text-center text-neutral-500">該当する商品が見つかりませんでした。</p>
+        <div className="py-16 text-center">
+          <p className="text-neutral-500">該当する商品が見つかりませんでした。</p>
+          <Link
+            href="/"
+            className="mt-4 inline-block rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-rose-400 hover:text-rose-600 dark:border-neutral-700 dark:text-neutral-200"
+          >
+            絞り込みをリセット
+          </Link>
+        </div>
       ) : (
         <div className="flex flex-col gap-8">
           {groups.map((g) => (

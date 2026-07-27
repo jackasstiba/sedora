@@ -41,6 +41,22 @@ export function FilterBar({
   // isPending でその間だけ一覧を薄く表示し、「押したのに無反応」に見えるのを防ぐ。
   const [isPending, startTransition] = useTransition();
 
+  // 「絞り込みをリセット」等で activeQuery が外部から変わったとき、検索欄の表示も
+  // 追従させる（クライアント遷移では再マウントされず入力文字が残ってしまうため）。
+  // effect ではなくレンダー中に前回値と比較して調整する React 公式パターン。
+  const [prevQuery, setPrevQuery] = useState(activeQuery);
+  if (activeQuery !== prevQuery) {
+    setPrevQuery(activeQuery);
+    setQueryInput(activeQuery);
+  }
+
+  const anyActive =
+    Boolean(activeGenre) ||
+    Boolean(activeQuery) ||
+    Boolean(activeStatus) ||
+    Boolean(activeWhen) ||
+    activeDatedOnly;
+
   // 現在の絞り込み状態は全て props で受け取っているので、そこから URL パラメータを
   // 再構築する。以前は useSearchParams() を使っていたが、それがこの Client Component を
   // Suspense 境界のクライアント専用描画に落とし込み、本番で境界がフォールバック
@@ -141,13 +157,24 @@ export function FilterBar({
         >
           日付未定を隠す
         </button>
+        {anyActive && (
+          <button
+            onClick={() => {
+              setQueryInput("");
+              startTransition(() => router.push("/"));
+            }}
+            className="rounded-md px-3 py-1.5 text-neutral-500 underline-offset-2 hover:text-rose-600 hover:underline dark:text-neutral-400 dark:hover:text-rose-400"
+          >
+            条件をクリア
+          </button>
+        )}
       </div>
     </div>
   );
 }
 
 function chipClass(active: boolean): string {
-  return `rounded-full border px-3 py-1 text-sm transition ${
+  return `rounded-full border px-3 py-1.5 text-sm transition ${
     active
       ? "border-rose-600 bg-rose-600 text-white"
       : "border-neutral-300 bg-white text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
@@ -157,11 +184,11 @@ function chipClass(active: boolean): string {
 function pillClass(active: boolean, isLottery: boolean): string {
   if (active) {
     const color = isLottery ? "bg-purple-600" : "bg-neutral-800 dark:bg-neutral-200 dark:text-neutral-900";
-    return `rounded-md px-2.5 py-1 font-semibold text-white ${color}`;
+    return `rounded-md px-3 py-1.5 font-semibold text-white ${color}`;
   }
   const idle = isLottery
     ? "text-purple-700 hover:bg-purple-50 dark:text-purple-300 dark:hover:bg-purple-900/30"
     : "text-neutral-600 hover:bg-neutral-100 dark:text-neutral-300 dark:hover:bg-neutral-800";
-  return `rounded-md px-2.5 py-1 ${idle}`;
+  return `rounded-md px-3 py-1.5 ${idle}`;
 }
 
