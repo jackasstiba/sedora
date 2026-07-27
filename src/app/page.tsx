@@ -1,10 +1,15 @@
 import Link from "next/link";
 import { FilterBar } from "@/components/FilterBar";
 import { ItemCard } from "@/components/ItemCard";
+import { LoadMore } from "@/components/LoadMore";
 import { getGenres, getItems, getStats, groupItemsByDate } from "@/lib/items";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
+
+// 初期表示件数。全件（約800件・画像数百枚）を一度に描画するとHTML/RSCが数MBに
+// 膨らみ初回表示が重いため、まずこの件数だけ描画し「もっと見る」で継ぎ足す。
+const PAGE_SIZE = 120;
 
 export default async function Home({
   searchParams,
@@ -15,11 +20,18 @@ export default async function Home({
     status?: string;
     when?: string;
     dated?: string;
+    show?: string;
   }>;
 }) {
   const params = await searchParams;
   const genre = params.genre ?? "";
   const query = params.q ?? "";
+  // 表示件数（?show）。不正値は既定に丸め、下限は PAGE_SIZE。
+  const parsedShow = Number.parseInt(params.show ?? "", 10);
+  const show =
+    Number.isFinite(parsedShow) && parsedShow > 0
+      ? Math.max(PAGE_SIZE, parsedShow)
+      : PAGE_SIZE;
   const status =
     params.status === "reserve" ||
     params.status === "lottery" ||
@@ -37,8 +49,12 @@ export default async function Home({
     getMonthsWithItems(),
   ]);
 
+  // 初期表示は先頭 show 件だけ描画し、残りは「もっと見る」で継ぎ足す（ペイロード軽量化）。
+  const visibleItems = items.slice(0, show);
+  const remaining = items.length - visibleItems.length;
+
   // 常に発売日で並べ、日付見出し（今日/明日/今週/それ以降/日付未定）でグループ化する。
-  const groups = groupItemsByDate(items);
+  const groups = groupItemsByDate(visibleItems);
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -96,6 +112,18 @@ export default async function Home({
             </section>
           ))}
         </div>
+      )}
+
+      {remaining > 0 && (
+        <LoadMore
+          activeGenre={genre}
+          activeQuery={query}
+          activeStatus={status ?? ""}
+          activeWhen={when ?? ""}
+          activeDatedOnly={datedOnly}
+          nextShow={show + PAGE_SIZE}
+          remaining={remaining}
+        />
       )}
 
       <nav className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
