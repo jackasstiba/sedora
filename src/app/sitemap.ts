@@ -1,13 +1,15 @@
 import type { MetadataRoute } from "next";
 import { getAllItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
+import { getTcgTitleCounts } from "@/lib/tcg";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
-  const [genres, months, items] = await Promise.all([
+  const [genres, months, items, tcgTitles] = await Promise.all([
     getGenreList(),
     getMonthsWithItems(),
     getAllItemRefs(),
+    getTcgTitleCounts(),
   ]);
 
   const now = new Date();
@@ -31,6 +33,16 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
       lastModified: now,
       changeFrequency: "daily",
       priority: 0.7,
+    });
+  }
+
+  for (const t of tcgTitles) {
+    if (t.count < 2) continue; // 事前生成(generateStaticParams)と同じ閾値
+    entries.push({
+      url: `${base}/tcg/${encodeURIComponent(t.label)}`,
+      lastModified: now,
+      changeFrequency: "daily",
+      priority: 0.8,
     });
   }
 

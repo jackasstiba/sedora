@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { getItemsByGenre, getGenreList } from "@/lib/seo";
+import { getTcgTitleCounts } from "@/lib/tcg";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -34,6 +35,9 @@ export default async function GenrePage({ params }: Props) {
 
   const [items, allGenres] = await Promise.all([getItemsByGenre(genre), getGenreList()]);
   if (items.length === 0) notFound();
+
+  // トレカは「カードゲーム別」ページ（/tcg/[title]）への導線を出す（競合と同じSEO構造）
+  const tcgTitles = genre === "トレカ" ? await getTcgTitleCounts() : [];
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -67,6 +71,26 @@ export default async function GenrePage({ params }: Props) {
           発売日が近い順・{items.length}件
         </p>
       </header>
+
+      {tcgTitles.length > 0 && (
+        <nav className="mb-6" aria-label="カードゲーム別">
+          <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+            カードゲーム別に見る
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {tcgTitles.map((c) => (
+              <Link
+                key={c.label}
+                href={`/tcg/${encodeURIComponent(c.label)}`}
+                className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+              >
+                {c.label}
+                <span className="ml-1 text-xs text-neutral-400">{c.count}</span>
+              </Link>
+            ))}
+          </div>
+        </nav>
+      )}
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {items.map((item) => (

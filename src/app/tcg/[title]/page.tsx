@@ -1,0 +1,116 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ItemCard } from "@/components/ItemCard";
+import { getItemsByTcgTitle, getTcgTitleCounts, isTcgTitle } from "@/lib/tcg";
+
+export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
+
+const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+
+export async function generateStaticParams() {
+  const counts = await getTcgTitleCounts();
+  // 中身が薄すぎるページを事前生成しない（1件のみは載せない）。訪問時はISRで解決。
+  return counts.filter((c) => c.count >= 2).map((c) => ({ title: c.label }));
+}
+
+type Props = { params: Promise<{ title: string }> };
+
+export async function generateMetadata({ params }: Props): Promise<Metadata> {
+  const { title: raw } = await params;
+  const title = decodeURIComponent(raw);
+  const pageTitle = `${title}の予約・抽選・発売スケジュール一覧 | レアレーダー`;
+  const description = `${title}の予約開始・抽選販売・発売の最新スケジュールを、発売日が近い順にまとめて掲載。`;
+  return {
+    title: pageTitle,
+    description,
+    alternates: SITE ? { canonical: `${SITE}/tcg/${encodeURIComponent(title)}` } : undefined,
+    openGraph: { title: pageTitle, description, type: "website" },
+  };
+}
+
+export default async function TcgTitlePage({ params }: Props) {
+  const { title: raw } = await params;
+  const title = decodeURIComponent(raw);
+  if (!isTcgTitle(title)) notFound();
+
+  const [items, counts] = await Promise.all([getItemsByTcgTitle(title), getTcgTitleCounts()]);
+  if (items.length === 0) notFound();
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "レアレーダー", item: SITE || undefined },
+      {
+        "@type": "ListItem",
+        position: 2,
+        name: "トレカ",
+        item: SITE ? `${SITE}/genre/${encodeURIComponent("トレカ")}` : undefined,
+      },
+      { "@type": "ListItem", position: 3, name: title },
+    ],
+  };
+
+  return (
+    <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
+
+      <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
+        <Link href="/" className="hover:underline">
+          レアレーダー
+        </Link>
+        {" ／ "}
+        <Link href={`/genre/${encodeURIComponent("トレカ")}`} className="hover:underline">
+          トレカ
+        </Link>
+        {" ／ "}
+        {title}
+      </nav>
+
+      <header className="mb-6">
+        <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50">
+          {title}の予約・抽選・発売スケジュール
+        </h1>
+        <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
+          発売日が近い順・{items.length}件
+        </p>
+      </header>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+        {items.map((item) => (
+          <ItemCard key={item.id} item={item} />
+        ))}
+      </div>
+
+      <nav className="mt-10 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+        <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+          他のカードゲーム
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {counts
+            .filter((c) => c.label !== title)
+            .map((c) => (
+              <Link
+                key={c.label}
+                href={`/tcg/${encodeURIComponent(c.label)}`}
+                className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+              >
+                {c.label}
+                <span className="ml-1 text-xs text-neutral-400">{c.count}</span>
+              </Link>
+            ))}
+          <Link
+            href={`/genre/${encodeURIComponent("トレカ")}`}
+            className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+          >
+            トレカすべて
+          </Link>
+        </div>
+      </nav>
+    </main>
+  );
+}
