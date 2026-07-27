@@ -27,6 +27,14 @@ model Item {
   imageUrl      String?
   scrapedAt     DateTime @default(now())
 
+  // 相場（中古市場価格）。発売済み商品に対してベストエフォートで付与する。
+  // 未発売品には市場が無いため null のまま（＝表示しない）。source非依存の汎用列。
+  marketPrice     Int?      // 代表価格（円・数値）。ソート/急上昇の将来利用向け
+  marketPriceText String?   // 表示用ラベル（例: "中古 ¥3,980"）
+  marketUrl       String?   // 相場元の商品ページ
+  marketSource    String?   // "surugaya" など
+  marketCheckedAt DateTime? // 相場を取得した時刻
+
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])

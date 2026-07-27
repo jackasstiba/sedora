@@ -14,6 +14,7 @@ type Item = {
   price: string | null;
   url: string;
   imageUrl: string | null;
+  marketPriceText?: string | null;
 };
 
 const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
@@ -92,6 +93,14 @@ export function ItemCard({ item }: { item: Item }) {
           <span className="truncate">{sourceLabel(item.source)}</span>
           {item.price && <span className="font-medium text-neutral-700 dark:text-neutral-200">{item.price.split(" / ")[0]}</span>}
         </div>
+
+        {item.marketPriceText && (
+          <div className="-mt-1 flex items-center gap-1 text-xs">
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+              相場 {item.marketPriceText}
+            </span>
+          </div>
+        )}
       </div>
     </Link>
   );

@@ -12,7 +12,12 @@ CREATE TABLE "Item" (
     "price" TEXT,
     "url" TEXT NOT NULL,
     "imageUrl" TEXT,
-    "scrapedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+    "scrapedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "marketPrice" INTEGER,
+    "marketPriceText" TEXT,
+    "marketUrl" TEXT,
+    "marketSource" TEXT,
+    "marketCheckedAt" DATETIME
 );
 
 -- CreateIndex

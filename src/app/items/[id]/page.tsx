@@ -145,6 +145,26 @@ export default async function ItemPage({ params }: Props) {
                 <dd className="text-neutral-800 dark:text-neutral-100">{item.price}</dd>
               </>
             )}
+            {item.marketPriceText && (
+              <>
+                <dt className="text-neutral-500 dark:text-neutral-400">相場</dt>
+                <dd className="text-neutral-800 dark:text-neutral-100">
+                  <span className="font-semibold text-amber-700 dark:text-amber-400">
+                    {item.marketPriceText}
+                  </span>
+                  {item.marketUrl && (
+                    <a
+                      href={item.marketUrl}
+                      target="_blank"
+                      rel="nofollow noopener noreferrer"
+                      className="ml-2 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
+                    >
+                      駿河屋で見る
+                    </a>
+                  )}
+                </dd>
+              </>
+            )}
             <dt className="text-neutral-500 dark:text-neutral-400">配信元</dt>
             <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
