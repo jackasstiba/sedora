@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
+import { NoImage } from "@/components/NoImage";
 import { sourceLabel } from "@/lib/items";
 import { computeMargin, formatDiff, formatPct } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
@@ -107,9 +108,7 @@ export default async function ItemPage({ params }: Props) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-neutral-400">
-              画像なし
-            </div>
+            <NoImage genre={item.genre} source={item.source} />
           )}
         </div>
 

@@ -10,6 +10,7 @@
     "lint": "eslint",
     "scrape": "node --env-file-if-exists=.env --import tsx scripts/scrape.ts",
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
+    "scrape:images": "node --env-file-if-exists=.env --import tsx scripts/backfillImages.ts",
   "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "db:deploy": "prisma migrate deploy"

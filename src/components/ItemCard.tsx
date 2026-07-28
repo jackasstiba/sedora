@@ -2,6 +2,8 @@ import Link from "next/link";
 import { sourceLabel } from "@/lib/itemFilter";
 import { formatShort } from "@/lib/date";
 import { computeMargin, formatPct } from "@/lib/margin";
+import { cleanListTitle } from "@/lib/title";
+import { NoImage } from "./NoImage";
 
 // eventDate は Date（サーバー）／ISO文字列（クライアントへ渡した後）どちらも受ける。
 export type Item = {
@@ -52,6 +54,8 @@ function formatDate(date: Date | string | null): string | null {
 export function ItemCard({ item }: { item: Item }) {
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
   const margin = computeMargin(item.price, item.marketPrice);
+  // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
+  const displayTitle = cleanListTitle(item.source, item.title);
 
   return (
     <Link
@@ -68,9 +72,7 @@ export function ItemCard({ item }: { item: Item }) {
             className="h-full w-full object-cover transition group-hover:scale-105"
           />
         ) : (
-          <div className="flex h-full w-full items-center justify-center text-neutral-400">
-            <span className="text-sm">画像なし</span>
-          </div>
+          <NoImage genre={item.genre} source={item.source} />
         )}
         <span
           className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(item.eventType)}`}
@@ -90,7 +92,7 @@ export function ItemCard({ item }: { item: Item }) {
         </div>
 
         <h3 className="line-clamp-3 flex-1 text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
-          {item.title}
+          {displayTitle}
         </h3>
 
         <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
