@@ -3,6 +3,7 @@ import { ItemBrowser } from "@/components/ItemBrowser";
 import { type Item } from "@/components/ItemCard";
 import { type FilterValues } from "@/components/FilterBar";
 import { getItems, getStats } from "@/lib/items";
+import { formatDateTimeJst } from "@/lib/date";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
 export const dynamic = "force-dynamic";
@@ -88,7 +89,7 @@ export default async function Home({
           掲載 {stats.total} 件
           {stats.lastUpdated && (
             <>
-              {" ・ "}最終更新 {new Date(stats.lastUpdated).toLocaleString("ja-JP")}
+              {" ・ "}最終更新 {formatDateTimeJst(stats.lastUpdated)}
             </>
           )}
         </p>

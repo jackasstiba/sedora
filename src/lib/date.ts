@@ -46,4 +46,20 @@ export function parts(d: Date | string): { y: number; m: number; day: number; do
   };
 }
 
+/** 実時刻（scrapedAt 等のタイムスタンプ）を日本時間で "2026/7/28 9:09" に整形する。
+ *  ※ 発売日などの「暦日」ではなく、実際の瞬間を表す値に使う。
+ *  toLocaleString は timeZone 未指定だと実行環境のTZ（本番Vercel=UTC）になり、
+ *  JST早朝に走ったスクレイプ(UTCでは前日夜)が「最終更新 前日」に見えてしまう。
+ *  必ず Asia/Tokyo を指定して、どのサーバーでも日本時間で表示する。 */
+export function formatDateTimeJst(d: Date | string): string {
+  return new Date(d).toLocaleString("ja-JP", {
+    timeZone: "Asia/Tokyo",
+    year: "numeric",
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 export const WEEKDAY_LABELS = DAYS;
