@@ -11,6 +11,7 @@ const OFFICIAL_URL_SOURCES = new Set([
   "pokemon_goods", // ポケモン公式グッズ(メーカー/取扱店の商品ページ)
   "ichiban_kuji", // 一番くじ倶楽部(BANDAI SPIRITS公式)
   "torecamap", // 各商品の公式販売ページに直リンク
+  "nike_snkrs", // Nike SNKRS 公式の商品(launch/t)ページに直リンク
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -30,6 +31,7 @@ const SEARCHABLE_SOURCES = new Set([
   "pokemoncard",
   "pokemon_goods",
   "ichiban_kuji",
+  "nike_snkrs",
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */
