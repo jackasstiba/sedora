@@ -54,7 +54,7 @@ export default async function ItemPage({ params }: Props) {
   const item = await getItemById(Number(id));
   if (!item) notFound();
 
-  const related = await getRelatedItems(item.genre, item.id);
+  const related = await getRelatedItems(item);
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
   const margin = computeMargin(item.price, item.marketPrice);
 
@@ -224,13 +224,26 @@ export default async function ItemPage({ params }: Props) {
         </div>
       </div>
 
-      {related.length > 0 && (
+      {related.series.length > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            「{related.seriesLabel}」の関連アイテム
+          </h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {related.series.map((r) => (
+              <ItemCard key={r.id} item={r} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {related.genre.length > 0 && (
         <section className="mt-10">
           <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
             {item.genre}の予約・発売予定
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {related.map((r) => (
+            {related.genre.map((r) => (
               <ItemCard key={r.id} item={r} />
             ))}
           </div>

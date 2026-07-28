@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
+import { franchiseAliases, franchiseLabel } from "./franchise";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
 
@@ -20,18 +21,48 @@ export async function getItemById(id: number) {
   return prisma.item.findUnique({ where: { id } });
 }
 
-/** 同じジャンルの、これから予約・発売の関連アイテム（自分自身は除く） */
-export async function getRelatedItems(genre: string, excludeId: number, take = 12) {
+/**
+ * 関連アイテムを2系統で返す（自分自身は除く）。
+ * - series: タイトルから作品を判定し、同じ作品の予約/発売（ジャンル横断）。関連性が高い。
+ * - genre:  同ジャンルの新着（作品で拾えない/枠が余った分の補完）。series と重複しない。
+ */
+export async function getRelatedItems(
+  item: { id: number; genre: string; title: string },
+  take = 12
+) {
   const today = todayJst();
-  return prisma.item.findMany({
-    where: {
-      genre,
-      id: { not: excludeId },
-      OR: [{ eventDate: { gte: today } }, { eventDate: null }],
-    },
-    orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
-    take,
-  });
+  const upcoming = { OR: [{ eventDate: { gte: today } }, { eventDate: null }] };
+  const orderBy = [
+    { eventDate: { sort: "asc" as const, nulls: "last" as const } },
+    { id: "desc" as const },
+  ];
+
+  // 1) 同じ作品（ジャンル横断）。ワンピのフィギュアとカードを互いに関連づける等。
+  const aliases = franchiseAliases(item.title);
+  const series = aliases.length
+    ? await prisma.item.findMany({
+        where: {
+          id: { not: item.id },
+          AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming],
+        },
+        orderBy,
+        take,
+      })
+    : [];
+
+  // 2) 同ジャンルで補完（series と自分自身は除外）。
+  const excludeIds = [item.id, ...series.map((s) => s.id)];
+  const need = take - series.length;
+  const genre =
+    need > 0
+      ? await prisma.item.findMany({
+          where: { genre: item.genre, id: { notIn: excludeIds }, ...upcoming },
+          orderBy,
+          take: need,
+        })
+      : [];
+
+  return { seriesLabel: franchiseLabel(item.title), series, genre };
 }
 
 /** ジャンルページ用：今後の予定＋日付未定を発売日順で */
