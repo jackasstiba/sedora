@@ -28,6 +28,7 @@ const SOURCE_LABELS: Record<string, string> = {
   pokemon_goods: "ポケモン公式",
   pokemoncard: "ポケモンカード公式",
   nike_snkrs: "Nike SNKRS",
+  torecasoku: "トレカ速報",
 };
 
 export function sourceLabel(source: string): string {

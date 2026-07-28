@@ -32,6 +32,7 @@ const SEARCHABLE_SOURCES = new Set([
   "pokemon_goods",
   "ichiban_kuji",
   "nike_snkrs",
+  "torecasoku",
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */
