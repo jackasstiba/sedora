@@ -5,6 +5,13 @@ import { fetchHtml, parseSlashMonthDay, sleep } from "./util";
 const BASE = "https://snkrdunk.com/calendars";
 const MONTHS_AHEAD = 2; // 今月＋2ヶ月分
 
+// snkrdunkのカレンダーには「実際の発売エントリ」と「編集記事（◯選/ランキング/コラム）」が混在する。
+// 発売エントリは必ずタイトル末尾が「｜抽選/販売/定価情報」の構造化フォーマットで、日付・定価も正確。
+// 編集記事（「…10選！」「TOP50！」「…をチェック！」等）はこの接尾辞を持たず、
+// 価格も記事内の一商品を拾うだけで無意味、日付もカレンダー上の任意日（今日など）になり
+// “今日発売”の誤情報になる。→ 発売エントリのみ採用する。
+export const SNKRDUNK_RELEASE_TITLE = /抽選\s*[／/]\s*販売\s*[／/]\s*定価情報/;
+
 function monthKeys(): { key: string; year: number; month: number }[] {
   const out: { key: string; year: number; month: number }[] = [];
   const now = new Date();
@@ -35,6 +42,8 @@ export async function scrapeSnkrdunk(): Promise<ScrapedItem[]> {
       const href = link.attr("href") ?? "";
       const title = link.text().trim();
       if (!title || !href) return;
+      // 編集記事（◯選/ランキング/コラム）を除外。発売エントリのみ採用。
+      if (!SNKRDUNK_RELEASE_TITLE.test(title)) return;
 
       const dateText = article.find("div.date").first().text().trim();
       const eventDate = parseSlashMonthDay(dateText, year, month);

@@ -3,6 +3,8 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { sourceLabel } from "@/lib/items";
+import { computeMargin, formatDiff, formatPct } from "@/lib/margin";
+import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
 
@@ -53,6 +55,7 @@ export default async function ItemPage({ params }: Props) {
 
   const related = await getRelatedItems(item.genre, item.id);
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  const margin = computeMargin(item.price, item.marketPrice);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -165,21 +168,59 @@ export default async function ItemPage({ params }: Props) {
                 </dd>
               </>
             )}
+            {margin && (
+              <>
+                <dt className="text-neutral-500 dark:text-neutral-400">定価比</dt>
+                <dd>
+                  <span
+                    className={`font-semibold ${
+                      margin.isPremium
+                        ? "text-rose-600 dark:text-rose-400"
+                        : "text-neutral-700 dark:text-neutral-200"
+                    }`}
+                  >
+                    {formatPct(margin.pct)}（{formatDiff(margin.diff)}）
+                  </span>
+                  <span className="ml-2 text-xs text-neutral-500 dark:text-neutral-400">
+                    定価 ¥{margin.teika.toLocaleString("ja-JP")} → 相場 ¥
+                    {margin.market.toLocaleString("ja-JP")}
+                  </span>
+                  {margin.isPremium && (
+                    <span className="ml-1 text-xs text-rose-500">（プレ値）</span>
+                  )}
+                </dd>
+              </>
+            )}
             <dt className="text-neutral-500 dark:text-neutral-400">配信元</dt>
             <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
 
-          {/* 外部の公式・販売ページへ（将来アフィリエイトリンクを差し込む箇所） */}
-          <a
-            href={item.url}
-            target="_blank"
-            rel="nofollow noopener noreferrer"
-            className="mt-2 inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
-          >
-            公式・販売ページで見る →
-          </a>
+          {/* 情報元 / 購入導線。item.url の実態(公式 or まとめ・告知)に合わせてラベルを出し分ける。 */}
+          <div className="mt-2 flex flex-col gap-2">
+            <a
+              href={item.url}
+              target="_blank"
+              rel="nofollow noopener noreferrer"
+              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+            >
+              {isOfficialUrl(item.source)
+                ? "公式ページで見る →"
+                : `情報元（${sourceLabel(item.source)}）で見る →`}
+            </a>
+            {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。 */}
+            {hasSearchableTitle(item.source) && (
+              <a
+                href={rakutenSearchUrl(item.title)}
+                target="_blank"
+                rel="nofollow noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-950"
+              >
+                楽天で探す →
+              </a>
+            )}
+          </div>
           <p className="text-xs text-neutral-400">
-            ※ 予約・購入は各リンク先の公式・販売ページをご確認ください。
+            ※ 情報元は各所のまとめ・告知ページを含みます。予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
           </p>
         </div>
       </div>

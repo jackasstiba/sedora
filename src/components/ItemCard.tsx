@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { sourceLabel } from "@/lib/itemFilter";
 import { formatShort } from "@/lib/date";
+import { computeMargin, formatPct } from "@/lib/margin";
 
 // eventDate は Date（サーバー）／ISO文字列（クライアントへ渡した後）どちらも受ける。
 export type Item = {
@@ -15,6 +16,7 @@ export type Item = {
   price: string | null;
   url: string;
   imageUrl: string | null;
+  marketPrice?: number | null;
   marketPriceText?: string | null;
 };
 
@@ -49,6 +51,7 @@ function formatDate(date: Date | string | null): string | null {
 
 export function ItemCard({ item }: { item: Item }) {
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  const margin = computeMargin(item.price, item.marketPrice);
 
   return (
     <Link
@@ -96,10 +99,22 @@ export function ItemCard({ item }: { item: Item }) {
         </div>
 
         {item.marketPriceText && (
-          <div className="-mt-1 flex items-center gap-1 text-xs">
+          <div className="-mt-1 flex flex-wrap items-center gap-1 text-xs">
             <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
               相場 {item.marketPriceText}
             </span>
+            {margin && (
+              <span
+                className={`rounded px-1.5 py-0.5 font-semibold ${
+                  margin.isPremium
+                    ? "bg-rose-600 text-white"
+                    : "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"
+                }`}
+                title={`定価 ¥${margin.teika.toLocaleString("ja-JP")} → 相場 ¥${margin.market.toLocaleString("ja-JP")}`}
+              >
+                定価比 {formatPct(margin.pct)}
+              </span>
+            )}
           </div>
         )}
       </div>

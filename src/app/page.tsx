@@ -59,6 +59,7 @@ export default async function Home({
     price: it.price,
     url: it.url,
     imageUrl: it.imageUrl,
+    marketPrice: it.marketPrice,
     marketPriceText: it.marketPriceText,
   }));
 

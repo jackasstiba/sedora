@@ -20,7 +20,13 @@ export function parseYyyymmdd(id: string): Date | null {
   const m = id.match(/^(\d{4})(\d{2})(\d{2})$/);
   if (!m) return null;
   const [, y, mo, d] = m;
-  return calDate(Number(y), Number(mo), Number(d));
+  const month = Number(mo);
+  const day = Number(d);
+  // figislandには「2026年08月登場予定」(日未定)を id=20260800 で表す見出しがある。
+  // 日=00 のまま calDate に渡すと「前月末日」に化け（20260800→7/31, 20260700→6/30＝過去落ちで非表示）、
+  // 月しか分からない商品を誤った特定日に見せてしまう。範囲外は日付未定(null)として扱う。
+  if (month < 1 || month > 12 || day < 1 || day > 31) return null;
+  return calDate(Number(y), month, day);
 }
 
 /** "2026年8月6日" -> Date */
