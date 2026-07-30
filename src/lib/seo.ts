@@ -65,8 +65,10 @@ export async function getRelatedItems(
   return { seriesLabel: franchiseLabel(item.title), series, genre };
 }
 
-/** ジャンルページ用：今後の予定＋日付未定を発売日順で */
-export async function getItemsByGenre(genre: string, take = 200) {
+/** ジャンルページ用：今後の予定＋日付未定を発売日順で。
+ *  take はジャンル最大件数（フィギュアは400件超）を賄えるだけ確保する。
+ *  以前は 200 で頭打ちになり、フィギュアで約200件が欠落し見出しの件数も過少だった。 */
+export async function getItemsByGenre(genre: string, take = 1500) {
   const today = todayJst();
   return prisma.item.findMany({
     where: { genre, OR: [{ eventDate: { gte: today } }, { eventDate: null }] },

@@ -92,7 +92,10 @@ export async function getItems(filter: ItemFilter) {
   return prisma.item.findMany({
     where,
     orderBy: [...orderBy],
-    take: 1000,
+    // 表示スコープ（今後＋日付未定）の全件を返す。以前は 1000 で頭打ちになり、
+    // 件数が 1000 を超えると日付未定分が末尾から欠落し「掲載 N件」と実データが
+    // 食い違っていた（getStats は全件を数えるため）。余裕を持った上限にする。
+    take: 5000,
   });
 }
 
