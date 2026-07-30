@@ -52,7 +52,15 @@ export async function getItems(filter: ItemFilter) {
   } else if (filter.status === "lottery") {
     // 抽選は eventType が「抽選」のものに加え、タイトルに「抽選」を含むものも拾う
     // （例: eventType=登場予定 だが「抽選販売」の商品）。せどり的に取りこぼさない。
-    and.push({ OR: [{ eventType: "抽選" }, { title: { contains: "抽選" } }] });
+    // ただし snkrdunk は全商品のタイトル末尾に「｜抽選/販売/定価情報」という定型ラベルが
+    // 付くため、タイトル推定からは除外する（通常発売品の誤混入を防ぐ）。クライアント側の
+    // isLotteryItem と同じ意味論。真のスニーカー抽選は nike_snkrs(eventType=抽選)で拾う。
+    and.push({
+      OR: [
+        { eventType: "抽選" },
+        { AND: [{ title: { contains: "抽選" } }, { source: { not: "snkrdunk" } }] },
+      ],
+    });
   } else if (filter.status === "reserve" || filter.status === "release") {
     where.eventType = { in: STATUS_EVENT_TYPES[filter.status] };
   }

@@ -35,6 +35,26 @@ export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
+/**
+ * 「抽選」種別に該当するかの純粋述語（サーバーのPrisma版 getItems と意味論を共有）。
+ * eventType が「抽選」のものに加え、タイトルに「抽選」を含むもの（例: eventType=登場予定
+ * だが「抽選販売」）も拾う。
+ *
+ * ただし snkrdunk（スニーカーダンク）は発売カレンダー由来で全商品のタイトル末尾に
+ * 「｜抽選/販売/定価情報」という定型ラベルが付くため、title.includes("抽選") で拾うと
+ * 通常発売品まで抽選タブに誤混入する（実測 抽選タブ55件中44件が snkrdunk の発売品）。
+ * よってタイトル推定の対象から snkrdunk を除外する。真のスニーカー抽選は nike_snkrs
+ * （eventType="抽選"）で拾えるので取りこぼさない。
+ */
+export function isLotteryItem(it: {
+  eventType: string;
+  title: string;
+  source: string;
+}): boolean {
+  if (it.eventType === "抽選") return true;
+  return it.source !== "snkrdunk" && it.title.includes("抽選");
+}
+
 export type ClientFilter = {
   genre?: string;
   query?: string;
@@ -48,6 +68,7 @@ type FilterableItem = {
   title: string;
   eventType: string;
   eventDate: Date | string | null;
+  source: string;
 };
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -80,8 +101,8 @@ export function filterItems<T extends FilterableItem>(items: T[], f: ClientFilte
       return !TBD_EVENT_TYPES.includes(it.eventType);
     }
     if (f.status === "lottery") {
-      // 抽選は eventType「抽選」＋タイトルに「抽選」を含むものも拾う
-      if (!(it.eventType === "抽選" || it.title.includes("抽選"))) return false;
+      // 抽選判定は共有述語に集約（snkrdunk の定型ラベル誤混入を除外）
+      if (!isLotteryItem(it)) return false;
     } else if (f.status === "reserve" || f.status === "release") {
       if (!STATUS_EVENT_TYPES[f.status].includes(it.eventType)) return false;
     }
