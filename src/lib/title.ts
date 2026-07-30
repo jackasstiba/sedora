@@ -14,9 +14,15 @@ const COMMENTARY =
 // 商品タグ（ここから商品名が始まることが多い）。
 const PRODUCT_TAG = /【(?:特典|限定販売|あみあみ限定特典|予約特典|数量限定|再販)/;
 
-// 先頭の日時・店舗告知（「7月28日10時より楽天ブックスで」「5/5 13時より」等）。
+// 先頭の日付・締切・時刻告知（「7月28日10時より」「本日7月30日まで！」「5/5 13時より」
+// 「8月5日まで！」等）。日付・締切は決して商品名ではないので安全に剥がせる。
+// 日付範囲（「7月30日より8月4日まで！」）は stripLeading のループで1節ずつ順に除去される。
+// 日付部の直後に「月」「日」が続く場合は連続する月・日の列挙（「10月11月12月出荷分」等の
+// 出荷月スペック）なので、途中で切らないよう負の先読み (?!\s*[月日]) でマッチさせない。
+// 各桁グループ直後の (?!\d) は最大一致を強制し、連続月（「10月11月12月」）で先読みが
+// 失敗したとき桁を縮めて途中マッチする（「10月1」→「2月出荷分」化）バックトラックを防ぐ。
 const LEADING_DATE =
-  /^\s*\d{1,2}\s*[月\/]\s*\d{1,2}\s*[日]?\s*(?:\([月火水木金土日]\))?\s*(?:\d{1,2}時)?\s*(?:より|から)?\s*/;
+  /^\s*(?:本日|明日|もうすぐ|まもなく)?\s*\d{1,2}(?!\d)\s*[月\/]\s*\d{1,2}(?!\d)\s*[日]?(?!\s*[月日])\s*(?:\([月火水木金土日]\))?\s*(?:\d{1,2}\s*時(?:\d{1,2}\s*分)?)?\s*(?:より|から|まで(?:に)?)?\s*[！!、]?\s*/;
 
 /** 『...』または「...」で囲まれた最初の商品名（長さ4以上）を取り出す */
 function firstBracketed(title: string): string | null {
@@ -24,20 +30,23 @@ function firstBracketed(title: string): string | null {
   return m ? m[1].trim() : null;
 }
 
-/** 先頭側の実況コメント（！。で区切られ、コメント語を含む節）を繰り返し剥がす。
- *  商品タグ【…】や『』を含む節は商品名の一部なので剥がさない（安全側）。 */
+/** 先頭側の告知を繰り返し剥がす。1周ごとに
+ *  (a) 日付・締切・時刻告知（LEADING_DATE。商品名ではないので安全）と
+ *  (b) 実況コメント節（！。区切りでコメント語を含む節）を順に試す。
+ *  日付とコメントが交互に来ても（「7月30日より8月4日まで！あみあみで予約開始！商品名」等）
+ *  ループで剥がしきれる。商品タグ【…】や『』を含む節は商品名の一部なので剥がさない（安全側）。 */
 function stripLeadingCommentary(title: string): string {
-  let t = title;
-  for (let i = 0; i < 5; i++) {
+  let t = title.trim();
+  for (let i = 0; i < 8; i++) {
+    const before = t;
+    // (a) 先頭の日付・締切・時刻告知を除去
+    t = t.replace(LEADING_DATE, "").trim();
+    // (b) 先頭の実況コメント節（！。で区切られコメント語を含む）を除去
     const m = t.match(/^([^！!。]{2,40}[！!。])\s*(.+)$/);
-    if (!m) break;
-    const head = m[1];
-    const rest = m[2].trim();
-    if (COMMENTARY.test(head) && !/[【『「]/.test(head) && rest.length >= 6) {
-      t = rest;
-    } else {
-      break;
+    if (m && COMMENTARY.test(m[1]) && !/[【『「]/.test(m[1]) && m[2].trim().length >= 6) {
+      t = m[2].trim();
     }
+    if (t === before) break;
   }
   return t;
 }
@@ -73,11 +82,9 @@ export function cleanListTitle(source: string, title: string): string {
     if (fromTag.length >= 6) return fromTag;
   }
 
-  // 3) 先頭の日時・店舗告知を除去。
-  let t = raw.replace(LEADING_DATE, "").trim();
-
-  // 4) 先頭・末尾の実況コメントを（コメント語を含む節だけ）剥がす。
-  t = stripLeadingCommentary(t);
+  // 3-4) 先頭の日付・店舗告知＋実況コメント、末尾の実況コメントを剥がす
+  //      （コメント語を含む節・日付締切だけ。商品タグ/『』は保護＝安全側）。
+  let t = stripLeadingCommentary(raw);
   t = stripTrailingCommentary(t);
   t = t.trim();
 
