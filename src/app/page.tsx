@@ -6,39 +6,19 @@ import { getItems, getStats } from "@/lib/items";
 import { formatDateTimeJst } from "@/lib/date";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
-export const dynamic = "force-dynamic";
+// トップは静的プリレンダー＋ISR（15分）でCDNキャッシュから配信する。
+// force-dynamic だと毎リクエストで Turso 全件クエリ＋全件シリアライズが走り、TTFB が重く
+// Turso の読み取り枠も消費する。データ更新は1日2回程度なので 15分の再生成で十分新しい。
+// 注意: この改変版 Next では searchParams を await するとページが動的レンダリングに落ちて
+// ISR が効かなくなるため、初期フィルタURL（?genre= 等）の復元は ItemBrowser（クライアント）が
+// マウント時に window.location.search から行う。トップの静的HTMLは常に全件（未絞り込み）で、
+// これは共有URLがSEO上の重複ページにならない点でも望ましい。
+export const revalidate = 900;
 
 // 「もっと見る」の初期表示件数（ItemBrowser 側と一致させる）。
 const PAGE_SIZE = 120;
 
-export default async function Home({
-  searchParams,
-}: {
-  searchParams: Promise<{
-    genre?: string;
-    q?: string;
-    status?: string;
-    when?: string;
-    dated?: string;
-    show?: string;
-  }>;
-}) {
-  const params = await searchParams;
-  const genre = params.genre ?? "";
-  const query = params.q ?? "";
-  const status =
-    params.status === "reserve" ||
-    params.status === "lottery" ||
-    params.status === "release" ||
-    params.status === "now"
-      ? params.status
-      : "";
-  const when = params.when === "week" || params.when === "month" ? params.when : "";
-  const datedOnly = params.dated === "1";
-  const parsedShow = Number.parseInt(params.show ?? "", 10);
-  const initialShow =
-    Number.isFinite(parsedShow) && parsedShow > 0 ? Math.max(PAGE_SIZE, parsedShow) : PAGE_SIZE;
-
+export default async function Home() {
   // 「今後の予定＋日付未定（過去は除外）」の全件を一度だけ取得し、以降の絞り込み・
   // ページングはブラウザ内で即時に行う（サーバー往復ゼロ＝フィルタが速い）。
   const [baseItems, stats, months] = await Promise.all([
@@ -74,7 +54,9 @@ export default async function Home({
     .map(([g, count]) => ({ genre: g, count }))
     .sort((a, b) => b.count - a.count);
 
-  const initial: FilterValues = { genre, query, status, when, datedOnly };
+  // 初期状態は常に「未絞り込み・先頭ページ」。URLの絞り込みは ItemBrowser が
+  // マウント時にクライアント側で復元する（このページを静的キャッシュ可能に保つため）。
+  const initial: FilterValues = { genre: "", query: "", status: "", when: "", datedOnly: false };
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
@@ -97,7 +79,7 @@ export default async function Home({
         </p>
       </header>
 
-      <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={initialShow} />
+      <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} />
 
       <nav className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
         <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">

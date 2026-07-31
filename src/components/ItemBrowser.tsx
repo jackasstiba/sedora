@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { FilterBar, type FilterValues } from "./FilterBar";
 import { ItemCard, type Item } from "./ItemCard";
 import { filterItems, groupItemsByDate, type ItemStatus, type ItemWhen } from "@/lib/itemFilter";
@@ -20,6 +20,37 @@ type Props = {
 export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
   const [values, setValues] = useState<FilterValues>(initial);
   const [show, setShow] = useState(initialShow);
+
+  // トップは静的HTML（常に未絞り込み）で配信されるため、共有・リロードされた絞り込みURL
+  // （?genre=・?q=・?status=・?when=・?dated=1・?show=N）はマウント後にクライアント側で
+  // 復元する。サーバーで searchParams を読まずに済ませ、ページをキャッシュ可能に保つための対応。
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    const rawStatus = sp.get("status") ?? "";
+    const status =
+      rawStatus === "reserve" || rawStatus === "lottery" || rawStatus === "release" || rawStatus === "now"
+        ? rawStatus
+        : "";
+    const rawWhen = sp.get("when") ?? "";
+    const when = rawWhen === "week" || rawWhen === "month" ? rawWhen : "";
+    const restored: FilterValues = {
+      genre: sp.get("genre") ?? "",
+      query: sp.get("q") ?? "",
+      status,
+      when,
+      datedOnly: sp.get("dated") === "1",
+    };
+    const parsedShow = Number.parseInt(sp.get("show") ?? "", 10);
+    const restoredShow =
+      Number.isFinite(parsedShow) && parsedShow > PAGE_SIZE ? parsedShow : PAGE_SIZE;
+    const hasFilter =
+      Boolean(restored.genre || restored.query || restored.status || restored.when || restored.datedOnly);
+    // URL（外部システム）の状態をマウント後に一度だけ React 状態へ取り込む。SSR では window が
+    // 無く、初期状態でこれを読むとハイドレーション不整合になるため effect で行う必要がある。
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (hasFilter) setValues(restored);
+    if (restoredShow > PAGE_SIZE) setShow(restoredShow);
+  }, []);
 
   const filtered = useMemo(
     () =>
