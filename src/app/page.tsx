@@ -42,6 +42,8 @@ export default async function Home() {
     imageUrl: it.imageUrl,
     marketPrice: it.marketPrice,
     marketPriceText: it.marketPriceText,
+    highlights: it.highlights,
+    hasLottery: it.hasLottery,
   }));
 
   // ジャンル別件数（表示対象＝今後＋未定 のスコープで数える）。件数降順。

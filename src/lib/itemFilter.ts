@@ -51,8 +51,12 @@ export function isLotteryItem(it: {
   eventType: string;
   title: string;
   source: string;
+  hasLottery?: boolean | null;
 }): boolean {
   if (it.eventType === "抽選") return true;
+  // コラボ記事本文から抽選/ランダム賞品を検出したイベント（例: ホロライブ×極楽湯の
+  // ランダム配布タオル）も抽選タブで拾う。イベント自体は eventType=開催 だが中身は抽選。
+  if (it.hasLottery) return true;
   return it.source !== "snkrdunk" && it.title.includes("抽選");
 }
 

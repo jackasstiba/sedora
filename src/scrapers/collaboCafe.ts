@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { analyzeCollab, extractArticleBody } from "./collaboEnrich";
 import {
   classifyGenre,
   extractDateAndEventFromText,
@@ -106,5 +107,25 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
     await sleep(500);
   }
 
-  return [...byId.values()];
+  const items = [...byId.values()];
+
+  // 一覧カードでは「開催」1行止まりで、その中の“抽選で当たる高額賞品”（例: ホロライブ×極楽湯の
+  // ランダム配布マフラータオル）に届かない。各記事本文を開いて抽選/ランダム/数量限定の有無と
+  // 注目賞品名を抽出し付与する（レート制限つき。失敗時は素の1行のまま＝壊さない）。
+  for (const item of items) {
+    try {
+      const html = await fetchHtml(item.url);
+      const body = extractArticleBody(html);
+      if (body) {
+        const enr = analyzeCollab(body);
+        item.highlights = enr.highlights;
+        item.hasLottery = enr.hasLottery;
+      }
+    } catch {
+      // 本文取得に失敗しても一覧情報は活かす（深掘りだけ諦める）
+    }
+    await sleep(400);
+  }
+
+  return items;
 }

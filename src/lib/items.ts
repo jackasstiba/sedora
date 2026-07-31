@@ -58,6 +58,7 @@ export async function getItems(filter: ItemFilter) {
     and.push({
       OR: [
         { eventType: "抽選" },
+        { hasLottery: true }, // コラボ記事本文から抽選/ランダム賞品を検出したイベント
         { AND: [{ title: { contains: "抽選" } }, { source: { not: "snkrdunk" } }] },
       ],
     });

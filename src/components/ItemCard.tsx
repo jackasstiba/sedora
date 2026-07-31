@@ -20,6 +20,8 @@ export type Item = {
   imageUrl: string | null;
   marketPrice?: number | null;
   marketPriceText?: string | null;
+  highlights?: string | null;
+  hasLottery?: boolean | null;
 };
 
 const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
@@ -94,6 +96,20 @@ export function ItemCard({ item }: { item: Item }) {
         <h3 className="line-clamp-3 flex-1 text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
           {displayTitle}
         </h3>
+
+        {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */}
+        {item.highlights && (
+          <p
+            className={`line-clamp-2 rounded px-1.5 py-1 text-xs leading-snug ${
+              item.hasLottery
+                ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200"
+                : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+            }`}
+          >
+            {item.hasLottery ? "🎯 " : "🛍 "}
+            {item.highlights}
+          </p>
+        )}
 
         <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
           <span className="truncate">{sourceLabel(item.source)}</span>

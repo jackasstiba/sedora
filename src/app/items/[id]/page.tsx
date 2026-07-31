@@ -198,6 +198,25 @@ export default async function ItemPage({ params }: Props) {
             <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
 
+          {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */}
+          {item.highlights && (
+            <div
+              className={`rounded-lg px-3 py-2 text-sm ${
+                item.hasLottery
+                  ? "bg-purple-50 text-purple-900 dark:bg-purple-950/40 dark:text-purple-200"
+                  : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+              }`}
+            >
+              <span className="font-semibold">{item.hasLottery ? "🎯 注目賞品" : "🛍 注目グッズ"}</span>
+              <span className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
+              {item.hasLottery && (
+                <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
+                  抽選・ランダムで当たる賞品を含みます。転売相場が付きやすいので要チェック。
+                </p>
+              )}
+            </div>
+          )}
+
           {/* 情報元 / 購入導線。item.url の実態(公式 or まとめ・告知)に合わせてラベルを出し分ける。 */}
           <div className="mt-2 flex flex-col gap-2">
             <a

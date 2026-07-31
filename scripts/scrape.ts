@@ -36,6 +36,8 @@ async function main() {
           price: item.price,
           url: item.url,
           imageUrl: item.imageUrl,
+          highlights: item.highlights ?? null,
+          hasLottery: item.hasLottery ?? null,
           scrapedAt: new Date(),
         },
       });

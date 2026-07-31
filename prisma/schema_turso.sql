@@ -17,7 +17,9 @@ CREATE TABLE "Item" (
     "marketPriceText" TEXT,
     "marketUrl" TEXT,
     "marketSource" TEXT,
-    "marketCheckedAt" DATETIME
+    "marketCheckedAt" DATETIME,
+    "highlights" TEXT,
+    "hasLottery" BOOLEAN
 );
 
 -- CreateIndex

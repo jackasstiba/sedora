@@ -15,4 +15,7 @@ export type ScrapedItem = {
   price: string | null;
   url: string;
   imageUrl: string | null;
+  // コラボ記事本文からの深掘り（collabo_cafe のみ設定。他ソースは未設定＝null）。
+  highlights?: string | null;
+  hasLottery?: boolean | null;
 };

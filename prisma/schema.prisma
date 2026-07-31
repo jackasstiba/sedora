@@ -35,6 +35,11 @@ model Item {
   marketSource    String?   // "surugaya" など
   marketCheckedAt DateTime? // 相場を取得した時刻
 
+  // コラボ記事本文から抽出した“深い”情報。イベント1行では拾えない賞品ラインナップの要約。
+  // 例: ホロライブ×極楽湯 → highlights="抽選・ランダム賞品：マフラータオル / …", hasLottery=true。
+  highlights  String?  // カード/詳細に出す注目賞品の要約（抽選/ランダム/数量限定を含む）
+  hasLottery  Boolean? // 抽選・ランダム性のある賞品を含む（抽選タブで拾う）
+
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])
