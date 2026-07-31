@@ -18,4 +18,5 @@ export type ScrapedItem = {
   // コラボ記事本文からの深掘り（collabo_cafe のみ設定。他ソースは未設定＝null）。
   highlights?: string | null;
   hasLottery?: boolean | null;
+  officialUrl?: string | null; // 記事から辿った一次情報（公式キャンペーン/ストア）
 };

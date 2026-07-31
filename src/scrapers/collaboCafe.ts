@@ -1,5 +1,11 @@
 import { ScrapedItem } from "./types";
-import { analyzeCollab, extractArticleBody } from "./collaboEnrich";
+import {
+  analyzeCollab,
+  extractArticleBody,
+  extractOfficialSale,
+  extractOfficialUrl,
+  formatSale,
+} from "./collaboEnrich";
 import {
   classifyGenre,
   extractDateAndEventFromText,
@@ -109,23 +115,50 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
 
   const items = [...byId.values()];
 
-  // 一覧カードでは「開催」1行止まりで、その中の“抽選で当たる高額賞品”（例: ホロライブ×極楽湯の
-  // ランダム配布マフラータオル）に届かない。各記事本文を開いて抽選/ランダム/数量限定の有無と
-  // 注目賞品名を抽出し付与する（レート制限つき。失敗時は素の1行のまま＝壊さない）。
+  // 一覧カードでは「開催」1行止まりで、そのコラボで“何が売られる/当たる”かに届かない。
+  // 各イベントについて (a) collabo-cafe 記事本文から抽選/ランダム有無＋注目賞品名を、
+  // (b) 記事内の一次情報（公式キャンペーン/ストア）ページへ飛んで販売商品の価格帯・点数を
+  // 取得して合成する。レート制限つき・失敗時は取れた分だけ活かす（壊さない）。
   for (const item of items) {
     try {
       const html = await fetchHtml(item.url);
-      const body = extractArticleBody(html);
-      if (body) {
-        const enr = analyzeCollab(body);
-        item.highlights = enr.highlights;
-        item.hasLottery = enr.hasLottery;
+      const enr = analyzeCollab(extractArticleBody(html));
+      item.hasLottery = enr.hasLottery;
+
+      // 一次情報（公式）へ飛んで販売商品の価格帯を取る（best-effort・12秒でアボート）。
+      const official = extractOfficialUrl(html);
+      item.officialUrl = official;
+      let saleText: string | null = null;
+      if (official) {
+        const officialHtml = await fetchOfficial(official);
+        const sale = officialHtml ? extractOfficialSale(officialHtml) : null;
+        if (sale) saleText = formatSale(sale);
+        await sleep(300);
       }
+
+      // 「何が売られるか」＝賞品名（記事）＋価格帯（公式）を合成して highlights に。
+      const parts = [enr.highlights, saleText].filter(Boolean);
+      item.highlights = parts.length ? parts.join(" ｜ ") : null;
     } catch {
-      // 本文取得に失敗しても一覧情報は活かす（深掘りだけ諦める）
+      // 本文/公式の取得に失敗しても一覧情報は活かす（深掘りだけ諦める）
     }
     await sleep(400);
   }
 
   return items;
+}
+
+// 公式サイトは各社バラバラ（遅い/SPA/別文字コード）なので、タイムアウトを付けて
+// スクレイプ全体が止まらないようにする。失敗（遅延/非200/例外）は null で握りつぶす。
+async function fetchOfficial(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SedoriRadar/1.0)" },
+      signal: AbortSignal.timeout(12000),
+    });
+    if (!res.ok) return null;
+    return await res.text();
+  } catch {
+    return null;
+  }
 }

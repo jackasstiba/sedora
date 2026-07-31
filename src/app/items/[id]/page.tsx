@@ -229,6 +229,17 @@ export default async function ItemPage({ params }: Props) {
                 ? "公式ページで見る →"
                 : `情報元（${sourceLabel(item.source)}）で見る →`}
             </a>
+            {/* コラボ記事から辿った一次情報（公式キャンペーン/ストア）。何が売られるかの原典。 */}
+            {item.officialUrl && (
+              <a
+                href={item.officialUrl}
+                target="_blank"
+                rel="nofollow noopener noreferrer"
+                className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-950"
+              >
+                公式（一次情報）で販売内容を見る →
+              </a>
+            )}
             {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。 */}
             {hasSearchableTitle(item.source) && (
               <a

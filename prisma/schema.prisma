@@ -39,6 +39,7 @@ model Item {
   // 例: ホロライブ×極楽湯 → highlights="抽選・ランダム賞品：マフラータオル / …", hasLottery=true。
   highlights  String?  // カード/詳細に出す注目賞品の要約（抽選/ランダム/数量限定を含む）
   hasLottery  Boolean? // 抽選・ランダム性のある賞品を含む（抽選タブで拾う）
+  officialUrl String?  // 記事から辿った一次情報（公式キャンペーン/ストア）ページ
 
   @@unique([source, sourceId])
   @@index([genre])

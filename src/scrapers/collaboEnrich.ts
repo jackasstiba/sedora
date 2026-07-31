@@ -6,14 +6,68 @@
 // たどり着けなかった。記事本文は表組みでなく散文なので A賞/B賞 の構造化抽出はできないが、
 // 「抽選/ランダム」等のシグナルと賞品名詞は本文テキストから堅牢に拾える。
 
-// 本文コンテナ #single__container 開始〜フッターウィジェット（新着一覧ナビ）手前までを
-// 取り出し、タグを除去してテキスト化する。ナビの見出しノイズを本文に混ぜないため区切る。
-export function extractArticleBody(html: string): string {
+// 本文コンテナ #single__container 開始〜フッターウィジェット（新着一覧ナビ）手前までの
+// HTML片を返す（リンク抽出などタグが要る処理のため）。
+function articleBodyHtml(html: string): string {
   const start = html.indexOf("single__container");
   if (start < 0) return "";
   const foot = html.indexOf("single__foot__content", start);
-  const slice = foot > start ? html.slice(start, foot) : html.slice(start);
-  return decodeEntities(slice.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  return foot > start ? html.slice(start, foot) : html.slice(start);
+}
+
+// 本文コンテナのテキスト（タグ除去）。ナビの見出しノイズを本文に混ぜないため区切る。
+export function extractArticleBody(html: string): string {
+  const body = articleBodyHtml(html);
+  if (!body) return "";
+  return decodeEntities(body.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+}
+
+// SNS等はコラボの一次情報（何が売られるか）ではないので公式候補から除外する。
+const SOCIAL_RE =
+  /youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|line\.me|tiktok\.com|pinterest\./i;
+
+/**
+ * 記事本文から一次情報（公式キャンペーン/公式ストア）候補URLを1つ選ぶ。
+ * collabo-cafe 自身とSNSを除外し、ルートだけのドメインより「具体的なパスを持つページ」や
+ * store/shop/goods 系を優先する（例: rakuspa.com/hololive_yumeguritabi/ を選ぶ）。
+ */
+export function extractOfficialUrl(html: string): string | null {
+  const region = articleBodyHtml(html) || html;
+  const urls = [...region.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]);
+  const cand = urls.filter((u) => !u.includes("collabo-cafe.com") && !SOCIAL_RE.test(u));
+  if (!cand.length) return null;
+  const score = (u: string): number => {
+    let s = 0;
+    try {
+      if (new URL(u).pathname.replace(/\/$/, "").length > 0) s += 3; // 具体ページ
+    } catch {
+      return -1;
+    }
+    if (/store|shop|goods|\bec\b|\/item|campaign|collab|feature/i.test(u)) s += 2;
+    return s;
+  };
+  const best = [...new Set(cand)].sort((a, b) => score(b) - score(a))[0];
+  return score(best) > 0 ? best : null;
+}
+
+/**
+ * 公式ページ（素HTML）から販売商品の価格帯・点数を抽出する。商品名は各サイトで書式が
+ * バラバラで誤爆しやすいため、堅牢に取れる「価格の範囲＋出現点数」を返す（何が売られるかの
+ * 規模と価格帯を示す）。SPA/文字コード非対応/価格が本文に無いページでは null。
+ */
+export function extractOfficialSale(html: string): { count: number; min: number; max: number } | null {
+  const text = html.replace(/<[^>]+>/g, " ");
+  const prices = [...text.matchAll(/([0-9][0-9,]{1,6})円/g)]
+    .map((m) => Number(m[1].replace(/,/g, "")))
+    .filter((n) => n >= 100 && n <= 500000);
+  if (prices.length < 3) return null;
+  return { count: prices.length, min: Math.min(...prices), max: Math.max(...prices) };
+}
+
+/** 価格帯を表示用に整形（例: "公式: 価格帯 ¥550〜¥5,280・約19点"） */
+export function formatSale(s: { count: number; min: number; max: number }): string {
+  const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
+  return `公式: 価格帯 ${yen(s.min)}〜${yen(s.max)}・約${s.count}点`;
 }
 
 function decodeEntities(s: string): string {

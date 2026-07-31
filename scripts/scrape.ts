@@ -38,6 +38,7 @@ async function main() {
           imageUrl: item.imageUrl,
           highlights: item.highlights ?? null,
           hasLottery: item.hasLottery ?? null,
+          officialUrl: item.officialUrl ?? null,
           scrapedAt: new Date(),
         },
       });

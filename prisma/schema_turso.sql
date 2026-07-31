@@ -19,7 +19,8 @@ CREATE TABLE "Item" (
     "marketSource" TEXT,
     "marketCheckedAt" DATETIME,
     "highlights" TEXT,
-    "hasLottery" BOOLEAN
+    "hasLottery" BOOLEAN,
+    "officialUrl" TEXT
 );
 
 -- CreateIndex
