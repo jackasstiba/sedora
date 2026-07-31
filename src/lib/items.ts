@@ -109,16 +109,13 @@ export async function getItems(filter: ItemFilter) {
   return dedupeItems(rows);
 }
 
-export async function getStats() {
-  // 表示と同じスコープ（今後の予定＋日付未定）で件数を数える。過去に終わった
-  // イベントは表示されないので「掲載 N件」にも含めない。
-  const today = todayJst();
-  const total = await prisma.item.count({
-    where: { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
-  });
+/** 最終更新時刻（最新の scrapedAt）だけを返す。
+ *  以前は表示スコープの total も数えていたが、トップの「掲載 N件」は重複解消後の
+ *  items.length と一致させる方針になり total は未使用になったため、その count クエリは廃止。 */
+export async function getLastUpdated(): Promise<Date | null> {
   const latest = await prisma.item.findFirst({
     orderBy: { scrapedAt: "desc" },
     select: { scrapedAt: true },
   });
-  return { total, lastUpdated: latest?.scrapedAt ?? null };
+  return latest?.scrapedAt ?? null;
 }

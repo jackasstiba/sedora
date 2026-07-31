@@ -2,7 +2,7 @@ import Link from "next/link";
 import { ItemBrowser } from "@/components/ItemBrowser";
 import { type Item } from "@/components/ItemCard";
 import { type FilterValues } from "@/components/FilterBar";
-import { getItems, getStats } from "@/lib/items";
+import { getItems, getLastUpdated } from "@/lib/items";
 import { formatDateTimeJst } from "@/lib/date";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 
@@ -21,9 +21,9 @@ const PAGE_SIZE = 120;
 export default async function Home() {
   // 「今後の予定＋日付未定（過去は除外）」の全件を一度だけ取得し、以降の絞り込み・
   // ページングはブラウザ内で即時に行う（サーバー往復ゼロ＝フィルタが速い）。
-  const [baseItems, stats, months] = await Promise.all([
+  const [baseItems, lastUpdated, months] = await Promise.all([
     getItems({}),
-    getStats(),
+    getLastUpdated(),
     getMonthsWithItems(),
   ]);
 
@@ -68,12 +68,11 @@ export default async function Home() {
           フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの、予約開始・発売・抽選の予定。
         </p>
         <p className="mt-2 text-xs text-neutral-400">
-          {/* 掲載件数は重複解消後の表示リストと一致させる（getStats の生カウントは
-              クロスソース重複を含むため使わない）。 */}
+          {/* 掲載件数は重複解消後の表示リスト（items.length）と一致させる。 */}
           掲載 {items.length} 件
-          {stats.lastUpdated && (
+          {lastUpdated && (
             <>
-              {" ・ "}最終更新 {formatDateTimeJst(stats.lastUpdated)}
+              {" ・ "}最終更新 {formatDateTimeJst(lastUpdated)}
             </>
           )}
         </p>

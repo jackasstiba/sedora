@@ -139,7 +139,17 @@ export async function getGenreList(): Promise<string[]> {
   });
 }
 
-/** サイトマップ用：全アイテムの id と更新日時 */
-export async function getAllItemRefs() {
-  return prisma.item.findMany({ select: { id: true, scrapedAt: true } });
+/** サイトマップ用：クロール価値のあるアイテムの id と更新日時。
+ *  一覧に出る「今後の予定＋日付未定」に加え、直近に終了した分（60日）まで含める。
+ *  ずっと過去の終了イベントは実質“死にページ”で、全件出すとクロール割当を薄め
+ *  ランク付けを妨げるため除外する（サイトの表示スコープとも整合させる）。
+ *  ※ 過去アイテムの個別ページ自体は 200 で残るので、除外しても 404 は生じない。 */
+export async function getSitemapItemRefs() {
+  const today = todayJst();
+  const grace = new Date(today);
+  grace.setUTCDate(grace.getUTCDate() - 60); // 直近60日で終了した分は残す
+  return prisma.item.findMany({
+    where: { OR: [{ eventDate: { gte: grace } }, { eventDate: null }] },
+    select: { id: true, scrapedAt: true },
+  });
 }

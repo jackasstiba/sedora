@@ -1,5 +1,5 @@
 import type { MetadataRoute } from "next";
-import { getAllItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
+import { getSitemapItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
 import { getTcgTitleCounts } from "@/lib/tcg";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
@@ -8,7 +8,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const [genres, months, items, tcgTitles] = await Promise.all([
     getGenreList(),
     getMonthsWithItems(),
-    getAllItemRefs(),
+    getSitemapItemRefs(),
     getTcgTitleCounts(),
   ]);
 
