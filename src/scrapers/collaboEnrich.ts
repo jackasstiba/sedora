@@ -81,8 +81,12 @@ function decodeEntities(s: string): string {
     .replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n)));
 }
 
-// 抽選・ランダム性（＝当たり外れがある＝相場が付く）を示す語。
-const LOTTERY_RE = /抽選|ランダム|くじ引き|くじ|応募|当選|トレーディング|ガチャ|ブラインド/;
+// 真の「抽選/くじ」＝申込んで外れうる or ラストワン等の当選要素（＝抽選タブで拾う核）。
+// ここを絞ることで、ランダム封入グッズを買えるだけの通常コラボまで抽選扱いする誤検出を避ける
+// （旧: ランダム/トレーディング/応募/くじ を含めていたため全コラボの約7割が抽選判定になっていた）。
+const LOTTERY_RE = /抽選|抽籤|当選|当籤|ラストワン|ラスワン|一番くじ|ハズレ無|はずれ無/;
+// ブラインド/ランダム封入（買えるが中身が選べない＝キャラ次第で相場が付く）。抽選とは別軸。
+const RANDOM_RE = /ランダム|トレーディング|ブラインド|ランダム封入|全\d+種.*(コンプ|ランダム)/;
 // 数量限定・先着・受注など「入手性が低い」を示す語（抽選ではないが希少）。
 const SCARCITY_RE = /数量限定|先着|限定生産|受注(生産|販売)?|完全受注|予約限定|会場限定|店舗限定/;
 
@@ -97,18 +101,20 @@ const GOODS_NOUNS = [
   "ラバーストラップ", "アクリルチャーム", "チャーム", "キーホルダー",
   "クリアファイル", "ステッカー", "シール", "コースター",
   "タペストリー", "色紙", "マグカップ", "グラス",
-  "トレカ", "カード",
+  "ポーチ", "巾着", "トレカ", "カード",
 ];
 
 export type CollabEnrichment = {
-  hasLottery: boolean; // 抽選・ランダム性のある賞品がある
+  hasLottery: boolean; // 真の抽選/くじ/ラストワン等（抽選タブで拾う）
+  hasRandom: boolean; // ランダム/ブラインド封入（買えるが中身が選べない）
   hasScarcity: boolean; // 数量限定・受注など希少性がある
   highlights: string | null; // カード/詳細に出す注目賞品の要約
 };
 
-/** 本文テキストから抽選/希少シグナルと注目賞品名を抽出して要約する。 */
+/** 本文テキストから抽選/ランダム/希少シグナルと注目賞品名を抽出して要約する。 */
 export function analyzeCollab(bodyText: string): CollabEnrichment {
   const hasLottery = LOTTERY_RE.test(bodyText);
+  const hasRandom = RANDOM_RE.test(bodyText);
   const hasScarcity = SCARCITY_RE.test(bodyText);
 
   // 本文に出現する注目賞品名を、複合語優先で最大4件まで拾う。
@@ -121,11 +127,71 @@ export function analyzeCollab(bodyText: string): CollabEnrichment {
     if (nouns.length >= 4) break;
   }
 
-  if (!hasLottery && !hasScarcity && nouns.length === 0) {
-    return { hasLottery, hasScarcity, highlights: null };
+  if (!hasLottery && !hasRandom && !hasScarcity && nouns.length === 0) {
+    return { hasLottery, hasRandom, hasScarcity, highlights: null };
   }
 
-  const label = hasLottery ? "抽選・ランダム賞品" : hasScarcity ? "数量限定" : "注目グッズ";
+  const label = hasLottery
+    ? "抽選賞品"
+    : hasRandom
+      ? "ランダム(ブラインド)商品"
+      : hasScarcity
+        ? "数量限定"
+        : "注目グッズ";
   const highlights = nouns.length ? `${label}：${nouns.join(" / ")}` : label + "あり";
-  return { hasLottery, hasScarcity, highlights };
+  return { hasLottery, hasRandom, hasScarcity, highlights };
+}
+
+// ── 公式ページからの商品名＋個別価格の抽出（サイト別パーサ） ──────────────────
+// 公式サイトは各社バラバラなので、書式が安定しているドメインだけ専用パーサを用意し、
+// 未対応ドメインは price 帯のみ（extractOfficialSale）にフォールバックする。
+
+/** rakuspa/極楽湯系の公式ページ。各商品は「<商品名> 店頭 通販 単　品 N円(税込)」で並ぶ。 */
+function parseRakuspaItems(html: string): { name: string; price: number }[] {
+  const text = html.replace(/<[^>]+>/g, " ").replace(/[\s　]+/g, " ");
+  const re = /([^0-9円]{4,60}?)\s*店頭\s*通販\s*単\s*品\s*([0-9,]+)円/g;
+  const out: { name: string; price: number }[] = [];
+  for (const m of text.matchAll(re)) {
+    const price = Number(m[2].replace(/,/g, ""));
+    if (!Number.isFinite(price) || price <= 0) continue;
+    // 名前は前段の【サイズ/材質】や dimension 残渣が付くので、既知の賞品名詞から始まる位置に寄せる。
+    let name = m[1].replace(/【[^】]*】/g, "").replace(/[（(][^）)]*[）)]/g, "");
+    const noun = GOODS_NOUNS.find((n) => name.includes(n));
+    if (noun) name = name.slice(name.indexOf(noun));
+    name = name.replace(/^[\s　・\-—/,、。].*?(?=\S)/, "").trim();
+    if (/ここに商品名|ここに材質/.test(name)) continue; // テンプレ雛形行を除外
+    out.push({ name: name.slice(0, 30), price });
+  }
+  return out;
+}
+
+/** 対応ドメインなら公式ページから {商品名, 価格} を返す。未対応は null。 */
+export function extractOfficialItems(
+  url: string,
+  html: string
+): { name: string; price: number }[] | null {
+  if (/rakuspa\.com|gokurakuyu|store-gk/i.test(url)) {
+    const items = parseRakuspaItems(html);
+    return items.length ? items : null;
+  }
+  return null;
+}
+
+/** 公式の商品を賞品カテゴリ（タオル/缶バッジ等）＋価格帯に正規化して要約。
+ *  例: "公式販売: タオル¥1,430 / 缶バッジ¥550 / アクスタ¥880〜1,540 …" */
+export function formatOfficialItems(items: { name: string; price: number }[]): string | null {
+  const buckets = new Map<string, { min: number; max: number }>();
+  for (const it of items) {
+    const key = GOODS_NOUNS.find((n) => it.name.includes(n));
+    if (!key) continue; // 賞品名詞に紐づかない行（雑多/雛形）は要約に載せない
+    const b = buckets.get(key);
+    if (b) { b.min = Math.min(b.min, it.price); b.max = Math.max(b.max, it.price); }
+    else buckets.set(key, { min: it.price, max: it.price });
+  }
+  if (buckets.size === 0) return null;
+  const yen = (n: number) => `¥${n.toLocaleString("ja-JP")}`;
+  const parts = [...buckets.entries()]
+    .slice(0, 6)
+    .map(([k, b]) => `${k}${b.min === b.max ? yen(b.min) : `${yen(b.min)}〜${yen(b.max)}`}`);
+  return `公式販売: ${parts.join(" / ")}`;
 }

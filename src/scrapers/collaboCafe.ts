@@ -2,8 +2,10 @@ import { ScrapedItem } from "./types";
 import {
   analyzeCollab,
   extractArticleBody,
+  extractOfficialItems,
   extractOfficialSale,
   extractOfficialUrl,
+  formatOfficialItems,
   formatSale,
 } from "./collaboEnrich";
 import {
@@ -125,14 +127,22 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
       const enr = analyzeCollab(extractArticleBody(html));
       item.hasLottery = enr.hasLottery;
 
-      // 一次情報（公式）へ飛んで販売商品の価格帯を取る（best-effort・12秒でアボート）。
+      // 一次情報（公式）へ飛んで販売商品を取る（best-effort・12秒でアボート）。
+      // 対応ドメイン（rakuspa等）は商品名＋個別価格をカテゴリ正規化して要約、
+      // 未対応ドメインは価格帯のみにフォールバック。
       const official = extractOfficialUrl(html);
       item.officialUrl = official;
       let saleText: string | null = null;
       if (official) {
         const officialHtml = await fetchOfficial(official);
-        const sale = officialHtml ? extractOfficialSale(officialHtml) : null;
-        if (sale) saleText = formatSale(sale);
+        if (officialHtml) {
+          const officialItems = extractOfficialItems(official, officialHtml);
+          if (officialItems) saleText = formatOfficialItems(officialItems);
+          if (!saleText) {
+            const sale = extractOfficialSale(officialHtml);
+            if (sale) saleText = formatSale(sale);
+          }
+        }
         await sleep(300);
       }
 
