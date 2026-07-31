@@ -42,6 +42,20 @@ export function computeMargin(
   return { teika, market: marketPrice, diff, pct, isPremium: diff > 0 };
 }
 
+/**
+ * 価格の表記ゆれを表示用に統一する（非破壊・DB値はそのまま）。
+ * ・"¥1,234" → "1,234円"（大多数の源が円表記なので円に寄せる）
+ * ・半角の税表記 "(税込)" → 全角 "（税込）"
+ * 例: "¥18,700" → "18,700円" ／ "2,970円(税込)" → "2,970円（税込）"
+ */
+export function formatPriceDisplay(price: string | null | undefined): string | null {
+  if (!price) return null;
+  return price
+    .trim()
+    .replace(/¥\s*([\d，,]+)/g, "$1円")
+    .replace(/\(税(込|抜|別)\)/g, "（税$1）");
+}
+
 /** "+46%" / "-12%" */
 export function formatPct(pct: number): string {
   return `${pct >= 0 ? "+" : ""}${pct}%`;

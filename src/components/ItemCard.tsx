@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { sourceLabel } from "@/lib/itemFilter";
 import { formatShort } from "@/lib/date";
-import { computeMargin, formatPct } from "@/lib/margin";
+import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle } from "@/lib/title";
 import { NoImage } from "./NoImage";
 
@@ -97,7 +97,7 @@ export function ItemCard({ item }: { item: Item }) {
 
         <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
           <span className="truncate">{sourceLabel(item.source)}</span>
-          {item.price && <span className="font-medium text-neutral-700 dark:text-neutral-200">{item.price.split(" / ")[0]}</span>}
+          {item.price && <span className="font-medium text-neutral-700 dark:text-neutral-200">{formatPriceDisplay(item.price.split(" / ")[0])}</span>}
         </div>
 
         {item.marketPriceText && (

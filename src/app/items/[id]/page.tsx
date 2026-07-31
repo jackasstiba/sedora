@@ -4,10 +4,11 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { sourceLabel } from "@/lib/items";
-import { computeMargin, formatDiff, formatPct } from "@/lib/margin";
+import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
+import { stripSourceLabel } from "@/lib/title";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -25,7 +26,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!item) return { title: "見つかりませんでした | レアレーダー" };
 
   const dateStr = formatDate(item.eventDate) ?? item.eventDateText ?? "";
-  const title = `${item.title} | レアレーダー`;
+  const cleanTitle = stripSourceLabel(item.title);
+  const title = `${cleanTitle} | レアレーダー`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const description = [
     dateStr ? `${item.eventType}日: ${dateStr}` : null,
@@ -57,16 +59,18 @@ export default async function ItemPage({ params }: Props) {
   const related = await getRelatedItems(item);
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
   const margin = computeMargin(item.price, item.marketPrice);
+  // 情報元由来の定型ラベル（snkrdunkの「｜抽選/販売/定価情報」等）は表示・構造化データから除去。
+  const displayTitle = stripSourceLabel(item.title);
 
   const jsonLd = {
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "Product",
-        name: item.title,
+        name: displayTitle,
         image: item.imageUrl ?? undefined,
         category: item.genre,
-        description: `${item.title}の${item.eventType}情報（${item.genre}）`,
+        description: `${displayTitle}の${item.eventType}情報（${item.genre}）`,
         ...(SITE ? { url: `${SITE}/items/${item.id}` } : {}),
       },
       {
@@ -79,7 +83,7 @@ export default async function ItemPage({ params }: Props) {
             name: item.genre,
             item: SITE ? `${SITE}/genre/${encodeURIComponent(item.genre)}` : undefined,
           },
-          { "@type": "ListItem", position: 3, name: item.title },
+          { "@type": "ListItem", position: 3, name: displayTitle },
         ],
       },
     ],
@@ -131,7 +135,7 @@ export default async function ItemPage({ params }: Props) {
           </div>
 
           <h1 className="text-xl font-bold leading-snug text-neutral-900 dark:text-neutral-50">
-            {item.title}
+            {displayTitle}
           </h1>
 
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
@@ -144,7 +148,7 @@ export default async function ItemPage({ params }: Props) {
             {item.price && (
               <>
                 <dt className="text-neutral-500 dark:text-neutral-400">価格</dt>
-                <dd className="text-neutral-800 dark:text-neutral-100">{item.price}</dd>
+                <dd className="text-neutral-800 dark:text-neutral-100">{formatPriceDisplay(item.price)}</dd>
               </>
             )}
             {item.marketPriceText && (

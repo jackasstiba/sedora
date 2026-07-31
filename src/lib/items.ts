@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
-import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeCrossSource, type ItemStatus, type ItemWhen } from "./itemFilter";
+import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeItems, type ItemStatus, type ItemWhen } from "./itemFilter";
 
 // 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
 // クライアント側フィルタと共有する。ここではそれらを再エクスポートして使う。
@@ -105,8 +105,8 @@ export async function getItems(filter: ItemFilter) {
     // 食い違っていた（getStats は全件を数えるため）。余裕を持った上限にする。
     take: 5000,
   });
-  // 複数ソースが同じ商品を載せることによる重複表示（figisland↔koretore 等）を解消。
-  return dedupeCrossSource(rows);
+  // 複数ソースが同じ商品を載せる重複表示を解消（figisland↔koretore／Nike SNKRS↔snkrdunk）。
+  return dedupeItems(rows);
 }
 
 export async function getStats() {

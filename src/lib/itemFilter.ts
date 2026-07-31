@@ -1,6 +1,7 @@
 // サーバー(Prisma)とクライアント(ブラウザ内フィルタ)で共有する、絞り込みの純粋ロジック。
 // prisma を import しないこと（クライアントバンドルに載せるため）。
 import { todayJst } from "./date";
+import { parseYen } from "./margin";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
@@ -123,6 +124,41 @@ export function dedupeCrossSource<T extends DedupeItem>(items: T[]): T[] {
     for (const it of g) if (it.id !== best.id) drop.add(it.id);
   }
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/** 暦日を UTC yyyy-mm-dd に正規化（時刻ゆらぎを無視した突合キー用） */
+function dayISO(d: Date | string): string {
+  return new Date(d).toISOString().slice(0, 10);
+}
+
+/**
+ * スニーカーの日英別名によるクロスソース重複を解消する。
+ * Nike SNKRS（公式・抽選エントリ）と スニーカーダンク（発売カレンダーのミラー）は
+ * 同じ靴を「ナイキ エア ジョーダン…」「Nike Air Jordan…」と別言語タイトルで載せるため、
+ * タイトル正規化ベースの dedupeCrossSource では拾えない。
+ *
+ * 突合キー＝発売日＋定価(円)。本番実データで一致した4ペアは全て同一の靴で、
+ * snkrdunk 内に同キーの別商品は存在しなかった（誤マージ0を検証済み）。
+ * 抽選情報を持つ公式の Nike SNKRS 側を残し、ミラーの snkrdunk 側を落とす。
+ */
+export function dedupeSneakerCrossSource<T extends DedupeItem>(items: T[]): T[] {
+  const nikeKeys = new Set<string>();
+  for (const it of items) {
+    if (it.source !== "nike_snkrs" || !it.eventDate) continue;
+    const y = parseYen(it.price);
+    if (y) nikeKeys.add(`${dayISO(it.eventDate)}|${y}`);
+  }
+  if (nikeKeys.size === 0) return items;
+  return items.filter((it) => {
+    if (it.source !== "snkrdunk" || !it.eventDate) return true;
+    const y = parseYen(it.price);
+    return !y || !nikeKeys.has(`${dayISO(it.eventDate)}|${y}`);
+  });
+}
+
+/** 一覧に出す前の重複解消をまとめて適用（タイトル一致＋スニーカーの日英別名）。 */
+export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
+  return dedupeSneakerCrossSource(dedupeCrossSource(items));
 }
 
 export type ClientFilter = {

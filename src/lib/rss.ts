@@ -1,4 +1,6 @@
 import { getItems, sourceLabel } from "./items";
+import { cleanListTitle } from "./title";
+import { formatPriceDisplay } from "./margin";
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
@@ -31,10 +33,10 @@ export async function buildRss(genre?: string): Promise<string> {
     .map((it) => {
       const link = `${SITE}/items/${it.id}`;
       const desc = `${it.eventType}: ${fmtDate(it.eventDate)}／${it.genre}${
-        it.price ? `／${it.price}` : ""
+        it.price ? `／${formatPriceDisplay(it.price)}` : ""
       }／${sourceLabel(it.source)}`;
       return `    <item>
-      <title>${esc(it.title)}</title>
+      <title>${esc(cleanListTitle(it.source, it.title))}</title>
       <link>${link}</link>
       <guid isPermaLink="true">${link}</guid>
       <category>${esc(it.genre)}</category>
