@@ -86,7 +86,9 @@ export default async function Home({
           フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの、予約開始・発売・抽選の予定。
         </p>
         <p className="mt-2 text-xs text-neutral-400">
-          掲載 {stats.total} 件
+          {/* 掲載件数は重複解消後の表示リストと一致させる（getStats の生カウントは
+              クロスソース重複を含むため使わない）。 */}
+          掲載 {items.length} 件
           {stats.lastUpdated && (
             <>
               {" ・ "}最終更新 {formatDateTimeJst(stats.lastUpdated)}

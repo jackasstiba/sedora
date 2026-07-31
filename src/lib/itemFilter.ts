@@ -55,6 +55,76 @@ export function isLotteryItem(it: {
   return it.source !== "snkrdunk" && it.title.includes("抽選");
 }
 
+// ── クロスソース重複の解消 ───────────────────────────────────────────────
+// 複数の情報源が同じ商品を別々に載せると、一覧に同一カードが2枚以上出てしまう。
+// 主因は figisland（フィギュアーランド）と koretore（コレトレ!!）が同じプライズ
+// フィギュア新作をともに掲載すること（実測86組が重複）。表示層でまとめる。
+
+type DedupeItem = {
+  id: number;
+  source: string;
+  title: string;
+  url: string | null;
+  eventDate: Date | string | null;
+  price: string | null;
+  imageUrl: string | null;
+};
+
+/** 重複判定用のタイトル正規化（記号・空白除去、全角半角/大小の吸収）。
+ *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy" */
+function dedupeKey(title: string): string {
+  return title
+    .normalize("NFKC")
+    .toLowerCase()
+    .replace(/[\s　]+/g, "")
+    .replace(/[-‐-―ー－_,.、。!！?？「」『』【】\[\]()（）:：/／|｜~〜]/g, "");
+}
+
+/** 重複グループで残す代表の優先度（大きいほど良い）。
+ *  個別商品ページを持つURL（#アンカーでない）＞日付あり＞価格あり＞画像あり。
+ *  figisland は商品ごとの個別URL（送客・SEO・詳細性で有利）を持つのに対し、
+ *  koretore は一覧ページの #アンカー止まりなので、自然と figisland が残る。 */
+function repScore(it: DedupeItem): number {
+  let s = 0;
+  if (it.url && !it.url.includes("#")) s += 8;
+  if (it.eventDate) s += 4;
+  if (it.price) s += 2;
+  if (it.imageUrl) s += 1;
+  return s;
+}
+
+/**
+ * 同じ商品を複数ソースが別々に載せることによる一覧の重複表示を解消する。
+ * 同じ正規化タイトルのアイテムが**複数ソースにまたがる**グループでは、最も情報が
+ * 充実した1件（repScore＝個別商品ページURL＞日付＞価格＞画像、同点は若いid）だけを残す。
+ *
+ * ・同一ソース内だけの重複（例: Nikeの同名別カラー、Xミラーの再入荷通知の再掲）は
+ *   別商品や別イベントの可能性があるため touch しない（誤マージ回避＝安全側）。
+ * ・入力の並び順は保持する（残す代表は元の出現位置のまま）。
+ * ・純関数（prisma非依存）。サーバーの各取得関数から呼び、件数と一覧を同じ出力から出す。
+ */
+export function dedupeCrossSource<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    const k = dedupeKey(it.title);
+    if (k.length < 6) continue; // 短すぎるタイトルは別商品衝突の危険があるので触らない
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    if (new Set(g.map((x) => x.source)).size < 2) continue; // 同一ソースのみ→残す
+    let best = g[0];
+    for (const it of g) {
+      if (it === best) continue;
+      const d = repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) if (it.id !== best.id) drop.add(it.id);
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
 export type ClientFilter = {
   genre?: string;
   query?: string;

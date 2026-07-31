@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
+import { dedupeCrossSource } from "./itemFilter";
 
 // トレカを「タイトル別」（ポケカ / ワンピースカード / 遊戯王 …）に束ねるための定義。
 // DBにタイトル列は無く、データが源ごとに分散している（pokemoncard=ポケカ、
@@ -74,10 +75,12 @@ export function isTcgTitle(label: string): boolean {
  *  （トレカgenreは件数が少ないため全件フェッチで十分・分類はDB列に無いのでJS側）。 */
 async function upcomingTcgRows() {
   const today = todayJst();
-  return prisma.item.findMany({
+  const rows = await prisma.item.findMany({
     where: { genre: "トレカ", OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
   });
+  // タイトル別ページ／件数も重複を除いたものに揃える（pokemoncard↔torecamap 等）。
+  return dedupeCrossSource(rows);
 }
 
 /** ナビ/サイトマップ用：現在アイテムを持つタイトルと件数（TCG_TITLESの並び順を保持） */

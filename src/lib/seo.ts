@@ -1,5 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
+import { dedupeCrossSource } from "./itemFilter";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
@@ -70,11 +71,13 @@ export async function getRelatedItems(
  *  以前は 200 で頭打ちになり、フィギュアで約200件が欠落し見出しの件数も過少だった。 */
 export async function getItemsByGenre(genre: string, take = 1500) {
   const today = todayJst();
-  return prisma.item.findMany({
+  const rows = await prisma.item.findMany({
     where: { genre, OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
     take,
   });
+  // ジャンルページの一覧・見出し件数（items.length）から重複を除く。
+  return dedupeCrossSource(rows);
 }
 
 /** "2026-08" -> その月の [開始, 翌月開始) */

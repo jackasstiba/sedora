@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
-import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, type ItemStatus, type ItemWhen } from "./itemFilter";
+import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeCrossSource, type ItemStatus, type ItemWhen } from "./itemFilter";
 
 // 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
 // クライアント側フィルタと共有する。ここではそれらを再エクスポートして使う。
@@ -97,7 +97,7 @@ export async function getItems(filter: ItemFilter) {
       ? ([{ id: "desc" }] as const)
       : ([{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }] as const);
 
-  return prisma.item.findMany({
+  const rows = await prisma.item.findMany({
     where,
     orderBy: [...orderBy],
     // 表示スコープ（今後＋日付未定）の全件を返す。以前は 1000 で頭打ちになり、
@@ -105,6 +105,8 @@ export async function getItems(filter: ItemFilter) {
     // 食い違っていた（getStats は全件を数えるため）。余裕を持った上限にする。
     take: 5000,
   });
+  // 複数ソースが同じ商品を載せることによる重複表示（figisland↔koretore 等）を解消。
+  return dedupeCrossSource(rows);
 }
 
 export async function getStats() {
