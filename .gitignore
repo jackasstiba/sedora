@@ -49,6 +49,8 @@ scrape_log.txt
 # scrape health check (local run state)
 scrape_health.json
 scrape_health.log
+# X巡回の受け皿（機微な巡回メモを含む。exampleのみコミット）
+scripts/x_watch/x_watch_inbox.json
 
 # prisma-installed agent skill packs (dev tooling, not needed for deploy)
 /.agents/

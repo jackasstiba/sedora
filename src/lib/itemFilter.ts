@@ -30,6 +30,7 @@ const SOURCE_LABELS: Record<string, string> = {
   pokemoncard: "ポケモンカード公式",
   nike_snkrs: "Nike SNKRS",
   torecasoku: "トレカ速報",
+  x_watch: "X転売ウォッチ", // Claude for Chrome 巡回で拾った新規商品（src/lib/xWatch.ts）
 };
 
 export function sourceLabel(source: string): string {

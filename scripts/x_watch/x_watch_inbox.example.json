@@ -1,0 +1,27 @@
+{
+  "sweptAt": "2026-08-01",
+  "entries": [
+    {
+      "kind": "new",
+      "title": "ホロライブ×極楽湯 描き下ろしランダムマフラータオル",
+      "genre": "コラボ",
+      "eventType": "抽選",
+      "eventDateText": "8/10まで",
+      "price": "1,430円",
+      "url": "https://www.rakuspa.com/hololive_example/",
+      "lottery": true,
+      "resaleYen": 200000,
+      "resaleText": "メルカリ 毎回20万円台",
+      "resaleUrl": "https://x.com/kuji_dachs/status/example",
+      "note": "@kuji_dachs で話題。抽選限定タオルが本命"
+    },
+    {
+      "kind": "resale",
+      "match": "まどマギ 一番くじ ラストワン",
+      "resaleYen": 8000,
+      "resaleText": "メルカリ ¥8,000",
+      "resaleUrl": "https://x.com/mercariKING/status/example",
+      "note": "@mercariKING"
+    }
+  ]
+}
