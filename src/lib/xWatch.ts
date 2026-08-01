@@ -10,6 +10,7 @@
 //  - marketSource="x" で駿河屋中古相場（marketSource="surugaya"）と区別する。
 
 import { classifyGenre, extractDateAndEventFromText } from "../scrapers/util";
+import { matchFranchises, franchiseAliases } from "./franchise";
 import type { ScrapedItem } from "../scrapers/types";
 
 export const X_WATCH_SOURCE = "x_watch";
@@ -148,10 +149,107 @@ export function similarity(a: string, b: string): number {
   return total === 0 ? 0 : (2 * inter) / total;
 }
 
+// ── 型番・作品を使った強いマッチング ────────────────────────────────────────
+// 素の2-gram類似度だけだと、Xの略称（ポケカ↔ポケモンカード）や語順・告知文ノイズで
+// 同一商品を取りこぼす。TCG等の型番（GD05等）と作品名（franchise辞書）を結合キーに足す。
+
+// 型番として扱わない汎用の英字接頭辞（VOL2/PART1 等で別商品を誤結合しないため）。
+const GENERIC_CODE_PREFIX = new Set(["VOL", "PART", "NO", "CH", "EP", "VER", "TYPE", "ROUND", "SET"]);
+
+/**
+ * タイトルから商品コード/型番（英字＋数字）を抽出する。例: GD05, OP11, OP-11, SV8A, EB01。
+ * 同一商品を強く示す結合キー。単独数字や汎用語（VOL2 等）は scoreMatch 側で弾く。
+ */
+export function extractModelCodes(title: string): string[] {
+  const t = title.normalize("NFKC").toUpperCase();
+  const out = new Set<string>();
+  for (const m of t.matchAll(/([A-Z]{1,4})-?(\d{1,3})([A-Z]{0,2})/g)) {
+    const code = `${m[1]}${m[2]}${m[3]}`;
+    if (code.length >= 3 && /\d/.test(code)) out.add(code);
+  }
+  return [...out];
+}
+
+/** 別商品の誤結合を避けた「本物らしい型番」だけ（英字部2文字以上＋非汎用）。 */
+function realModelCodes(title: string): Set<string> {
+  const out = new Set<string>();
+  for (const c of extractModelCodes(title)) {
+    const alpha = c.match(/^[A-Z]+/)?.[0] ?? "";
+    if (alpha.length >= 2 && !GENERIC_CODE_PREFIX.has(alpha)) out.add(c);
+  }
+  return out;
+}
+
+function franchiseNames(title: string): Set<string> {
+  return new Set(matchFranchises(title).map((g) => g[0]));
+}
+
+function hasIntersection<T>(a: Set<T>, b: Set<T>): boolean {
+  for (const x of a) if (b.has(x)) return true;
+  return false;
+}
+
+/**
+ * 候補DBを絞り込むための「特徴トークン」。型番＋作品名＋最長の内容語。
+ * これらのいずれかを含むアイテムを候補に引くことで、先頭6文字だけの脆い前段フィルタで
+ * 候補ゼロになり誤って新規化（＝重複発生）するのを防ぐ。
+ */
+export function distinctiveTokens(title: string): string[] {
+  const set = new Set<string>();
+  for (const c of realModelCodes(title)) set.add(c);
+  for (const f of franchiseNames(title)) set.add(f);
+  const chunks = title
+    .normalize("NFKC")
+    .replace(/[!-/:-@[-`{-~、。・「」『』【】（）〈〉！？…]/g, " ")
+    .split(/[\s　]+/)
+    .filter((w) => w.length >= 3);
+  const longest = chunks.sort((a, b) => b.length - a.length)[0];
+  if (longest) set.add(longest);
+  return [...set];
+}
+
+// パッケージ・商品形態を表す汎用語。作品残差を取るとき除去する（同一作品の別商品を
+// 見分けるのは作品名でもパック種別でもなく「サブタイトル/賞/弾番号」なので、そこを残す）。
+const GENERIC_WORDS = [
+  "強化拡張パック", "拡張パック", "ブースターパック", "プロモーションパック", "スターターデッキ",
+  "コレクションボックス", "カードゲーム", "一番くじ", "ボックス", "デッキ", "パック", "セット", "tcg", "ゲーム",
+];
+
+/** タイトルから作品名・パッケージ語を除いた「識別部（サブタイトル/弾/賞）」を正規化して返す。 */
+export function residual(title: string): string {
+  let t = title.normalize("NFKC").toLowerCase();
+  for (const alias of franchiseAliases(title)) t = t.split(alias.toLowerCase()).join(" ");
+  for (const w of GENERIC_WORDS) t = t.split(w.toLowerCase()).join(" ");
+  return normalizeTitle(t);
+}
+
+/**
+ * 2つのタイトルが同一商品を指す確からしさ（0..1目安）。
+ * ① 型番が両方にあり食い違う → 別商品(GD05≠GD04)として低く抑える／一致すれば同一商品＝強い。
+ * ② それ以外で作品が一致 → 作品名を除いた識別部(残差)の類似度で判定（同一作品の別くじ/別弾を
+ *    共通接頭辞の見かけの高スコアで誤結合しないため）。
+ * ③ 作品も型番も手掛かりが無い → 素の2-gram類似度。
+ */
+export function scoreMatch(a: string, b: string): number {
+  const ca = realModelCodes(a);
+  const cb = realModelCodes(b);
+  if (ca.size && cb.size) {
+    return hasIntersection(ca, cb) ? Math.max(similarity(a, b), 0.85) : Math.min(similarity(a, b), 0.35);
+  }
+  const base = similarity(a, b);
+  if (hasIntersection(franchiseNames(a), franchiseNames(b))) {
+    const ra = residual(a);
+    const rb = residual(b);
+    if (ra.length >= 2 && rb.length >= 2) return similarity(ra, rb); // 識別部で判定
+    return base; // 残差が取れない（作品名だけ等）→ 素の類似度
+  }
+  return base;
+}
+
 export type MatchCandidate = { id: number; title: string };
 
 /**
- * match 文字列に最も近い候補を返す（類似度がしきい値以上のときだけ）。
+ * match 文字列に最も近い候補を返す（scoreMatch がしきい値以上のときだけ）。
  * 誤って無関係な既存アイテムに高額相場を貼るのを防ぐため、既定しきい値は高め(0.5)。
  */
 export function pickBestMatch(
@@ -161,7 +259,7 @@ export function pickBestMatch(
 ): { id: number; title: string; score: number } | null {
   let best: { id: number; title: string; score: number } | null = null;
   for (const c of candidates) {
-    const score = similarity(match, c.title);
+    const score = scoreMatch(match, c.title);
     if (!best || score > best.score) best = { id: c.id, title: c.title, score };
   }
   return best && best.score >= threshold ? best : null;

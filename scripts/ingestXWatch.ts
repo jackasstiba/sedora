@@ -4,9 +4,9 @@ import { prisma } from "../src/lib/prisma";
 import {
   X_WATCH_SOURCE,
   buildMarketFields,
+  distinctiveTokens,
   formatResaleText,
-  pickBestMatch,
-  similarity,
+  scoreMatch,
   toScrapedItem,
   type XWatchInbox,
 } from "../src/lib/xWatch";
@@ -26,20 +26,43 @@ const hasFlag = (name: string) => process.argv.includes(`--${name}`);
 const DEFAULT_FILE = "scripts/x_watch/x_watch_inbox.json";
 
 /**
- * text に曖昧一致する既存アイテムを1件返す（しきい値以上のときだけ）。
- * excludeSource を指定すると、そのソースを候補から外す（新規の重複防止では x_watch 自身を除外し、
- * スクレイパー由来の商品とだけ突合する）。
+ * 特徴トークン（型番＋作品名＋最長内容語）のいずれかを含む既存アイテムを候補として引く。
+ * 先頭数文字だけの脆い前段フィルタと違い、Xの略称・語順違い・告知文ノイズがあっても
+ * 同一商品を候補に載せられる（＝取りこぼしによる重複発生を防ぐ）。
  */
+async function gatherCandidates(
+  text: string,
+  opts: { excludeSource?: string } = {}
+): Promise<{ id: number; title: string }[]> {
+  const tokens = distinctiveTokens(text);
+  if (tokens.length === 0) tokens.push(text.replace(/[\s　].*/, "").slice(0, 6));
+  const where: Record<string, unknown> = { OR: tokens.map((t) => ({ title: { contains: t } })) };
+  if (opts.excludeSource) where.source = { not: opts.excludeSource };
+  return prisma.item.findMany({ where, select: { id: true, title: true }, take: 600 });
+}
+
+/** 候補の中で scoreMatch 最良の1件（しきい値未満でも返す。しきい値判定は呼び出し側）。 */
+function topScored(
+  text: string,
+  candidates: { id: number; title: string }[]
+): { id: number; title: string; score: number } | null {
+  let best: { id: number; title: string; score: number } | null = null;
+  for (const c of candidates) {
+    const score = scoreMatch(text, c.title);
+    if (!best || score > best.score) best = { id: c.id, title: c.title, score };
+  }
+  return best;
+}
+
+const MATCH_THRESHOLD = 0.5;
+
+/** text に一致する既存アイテムを1件返す（scoreMatch がしきい値以上のときだけ）。 */
 async function fuzzyFindItem(
   text: string,
   opts: { excludeSource?: string } = {}
 ): Promise<{ id: number; title: string; score: number } | null> {
-  const token = text.replace(/[\s　].*/, "").slice(0, 6);
-  const where: Record<string, unknown> = { title: { contains: token } };
-  if (opts.excludeSource) where.source = { not: opts.excludeSource };
-  const candidates = await prisma.item.findMany({ where, select: { id: true, title: true }, take: 400 });
-  const best = pickBestMatch(text, candidates);
-  return best;
+  const best = topScored(text, await gatherCandidates(text, opts));
+  return best && best.score >= MATCH_THRESHOLD ? best : null;
 }
 
 async function main() {
@@ -127,23 +150,11 @@ async function main() {
       }
       let near: { id: number; title: string; score: number } | null = null;
       if (!target && entry.match) {
-        // 曖昧マッチ: 候補を絞るため match の主要トークンで前段フィルタしてから Dice 係数で最良を選ぶ。
-        const token = entry.match.replace(/[\s　].*/, "").slice(0, 6);
-        const candidates = await prisma.item.findMany({
-          where: { title: { contains: token } },
-          select: { id: true, title: true },
-          take: 400,
-        });
-        const best = pickBestMatch(entry.match, candidates);
-        if (best) target = { id: best.id, title: best.title };
-        else if (candidates.length) {
-          // 閾値未満でも最有力の惜しい候補を出す（Xの略称は2-gramで低スコアになりがち。
-          // 巡回中にこれを見て itemId 直指定へ切り替えられるように）。
-          const scored = candidates
-            .map((c) => ({ id: c.id, title: c.title, score: similarity(entry.match!, c.title) }))
-            .sort((a, b) => b.score - a.score)[0];
-          near = scored ?? null;
-        }
+        // 特徴トークン（型番＋作品名＋内容語）で候補を引き、scoreMatch 最良を選ぶ。
+        const candidates = await gatherCandidates(entry.match);
+        const best = topScored(entry.match, candidates);
+        if (best && best.score >= MATCH_THRESHOLD) target = { id: best.id, title: best.title };
+        else near = best; // しきい値未満でも最有力の惜しい候補を出す（itemId直指定の手掛かり）
       }
 
       if (!target) {

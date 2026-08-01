@@ -12,6 +12,7 @@
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "scrape:images": "node --env-file-if-exists=.env --import tsx scripts/backfillImages.ts",
     "ingest:x": "node --env-file-if-exists=.env --import tsx scripts/ingestXWatch.ts",
+    "x:audit": "node --env-file-if-exists=.env --import tsx scripts/x_watch/audit.ts",
   "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "db:deploy": "prisma migrate deploy"
