@@ -113,17 +113,24 @@ export function monthLabel(month: string): string {
   return `${m[1]}年${Number(m[2])}月`;
 }
 
-/** サイトマップ／内部リンク用：アイテムを持つ月（yyyy-mm）の一覧を新しい順で */
+/** サイトマップ／内部リンク用：アイテムを持つ月（yyyy-mm）の一覧を新しい順で。
+ *  当月以降のみ返す。過去月の /release ページは期限切れ発売予定の“死にページ”で、
+ *  サイトマップに載せるとクロール割当を薄め、内部リンクとしても価値がないため除外する
+ *  （getSitemapItemRefs が過去アイテムを除外しているのと同じ方針で整合させる）。 */
 export async function getMonthsWithItems(): Promise<string[]> {
   const rows = await prisma.item.findMany({
     where: { eventDate: { not: null } },
     select: { eventDate: true },
   });
+  const now = todayJst();
+  const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
   const set = new Set<string>();
   for (const r of rows) {
     if (!r.eventDate) continue;
     const d = new Date(r.eventDate);
-    set.add(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`);
+    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+    if (month < currentMonth) continue; // 過去月は除外（当月は途中でも残す）
+    set.add(month);
   }
   return [...set].sort().reverse();
 }
