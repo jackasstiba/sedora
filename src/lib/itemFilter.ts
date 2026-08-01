@@ -74,7 +74,34 @@ type DedupeItem = {
   eventDate: Date | string | null;
   price: string | null;
   imageUrl: string | null;
+  // 重複を畳む際に「落とす側」が持っていて「残す側」が欠く場合に引き継ぐ付加情報。
+  // 主にX由来の実売相場(marketSource="x")が、後から載ったスクレイパー商品との
+  // 重複解消で消えないようにするため（全て任意＝これらを持たない呼び出しにも無害）。
+  marketPrice?: number | null;
+  marketPriceText?: string | null;
+  marketUrl?: string | null;
+  marketSource?: string | null;
+  hasLottery?: boolean | null;
+  highlights?: string | null;
 };
+
+/** 落とす重複 `from` が持つ相場/抽選/賞品情報を、残す代表 `keep` が欠くなら引き継ぐ。
+ *  例: X巡回で相場を付けた x_watch 商品が、後から公式スクレイパーが同じ商品を載せたことで
+ *  repScore に負けて落とされても、実売相場・抽選フラグが失われないようにする。 */
+function inheritEnrichment(keep: DedupeItem, from: DedupeItem): void {
+  if (keep.marketPrice == null && from.marketPrice != null) {
+    keep.marketPrice = from.marketPrice;
+    keep.marketPriceText = from.marketPriceText ?? keep.marketPriceText;
+    keep.marketUrl = from.marketUrl ?? keep.marketUrl;
+    keep.marketSource = from.marketSource ?? keep.marketSource;
+  } else if (!keep.marketPriceText && from.marketPriceText) {
+    keep.marketPriceText = from.marketPriceText;
+    keep.marketUrl = keep.marketUrl ?? from.marketUrl;
+    keep.marketSource = keep.marketSource ?? from.marketSource;
+  }
+  if (!keep.hasLottery && from.hasLottery) keep.hasLottery = from.hasLottery;
+  if (!keep.highlights && from.highlights) keep.highlights = from.highlights;
+}
 
 /** 重複判定用のタイトル正規化（記号・空白除去、全角半角/大小の吸収）。
  *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy" */
@@ -126,7 +153,13 @@ export function dedupeCrossSource<T extends DedupeItem>(items: T[]): T[] {
       const d = repScore(it) - repScore(best);
       if (d > 0 || (d === 0 && it.id < best.id)) best = it;
     }
-    for (const it of g) if (it.id !== best.id) drop.add(it.id);
+    // 代表を落とす前に、落とす側の相場/抽選情報を代表へ引き継ぐ（X由来の実売相場が
+    // 後から載ったスクレイパー商品との重複解消で消えるのを防ぐ）。
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
   }
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
 }

@@ -25,6 +25,23 @@ const hasFlag = (name: string) => process.argv.includes(`--${name}`);
 
 const DEFAULT_FILE = "scripts/x_watch/x_watch_inbox.json";
 
+/**
+ * text に曖昧一致する既存アイテムを1件返す（しきい値以上のときだけ）。
+ * excludeSource を指定すると、そのソースを候補から外す（新規の重複防止では x_watch 自身を除外し、
+ * スクレイパー由来の商品とだけ突合する）。
+ */
+async function fuzzyFindItem(
+  text: string,
+  opts: { excludeSource?: string } = {}
+): Promise<{ id: number; title: string; score: number } | null> {
+  const token = text.replace(/[\s　].*/, "").slice(0, 6);
+  const where: Record<string, unknown> = { title: { contains: token } };
+  if (opts.excludeSource) where.source = { not: opts.excludeSource };
+  const candidates = await prisma.item.findMany({ where, select: { id: true, title: true }, take: 400 });
+  const best = pickBestMatch(text, candidates);
+  return best;
+}
+
 async function main() {
   const dry = hasFlag("dry");
   const file = resolve(process.cwd(), arg("file") ?? DEFAULT_FILE);
@@ -40,6 +57,7 @@ async function main() {
 
   const now = new Date();
   let added = 0;
+  let merged = 0;
   let priced = 0;
   let missed = 0;
   const misses: string[] = [];
@@ -52,6 +70,21 @@ async function main() {
         misses.push(`new: title/url 不足 (${entry.title ?? entry.url ?? "?"})`);
         continue;
       }
+
+      // 【重複防止】スクレイピング既存ソースが同じ商品を既に載せているなら、x_watch で
+      // 新規カードを作らず、その既存商品に相場だけ付与する（＝ソース被りで一覧に同じ商品が
+      // 2枚出るのを発生源で防ぐ）。x_watch 自身は除外（再巡回は下の upsert が sourceId で冪等）。
+      const dup = await fuzzyFindItem(item.title, { excludeSource: X_WATCH_SOURCE });
+      if (dup) {
+        const market = buildMarketFields(entry, now);
+        console.log(`  = [統合] #${dup.id} ${dup.title.slice(0, 40)}  ← ${market.marketPriceText ?? "(相場なし)"}（既存に付与・新規化せず / 類似${dup.score.toFixed(2)}）`);
+        if (!dry && market.marketPriceText) {
+          await prisma.item.update({ where: { id: dup.id }, data: market });
+        }
+        merged++;
+        continue;
+      }
+
       const resale = formatResaleText(entry);
       console.log(`  + [新規] ${item.genre} / ${item.eventType} / ${item.title.slice(0, 44)}${resale ? `  相場:${resale}` : ""}`);
       if (!dry) {
@@ -133,7 +166,7 @@ async function main() {
     }
   }
 
-  console.log(`\n[x] 完了: 新規 ${added} / 相場付与 ${priced} / 取りこぼし ${missed}`);
+  console.log(`\n[x] 完了: 新規 ${added} / 既存へ統合 ${merged} / 相場付与 ${priced} / 取りこぼし ${missed}`);
   if (misses.length) {
     console.log(`   取りこぼし詳細:`);
     for (const m of misses) console.log(`     - ${m}`);
