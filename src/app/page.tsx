@@ -5,6 +5,7 @@ import { type FilterValues } from "@/components/FilterBar";
 import { getItems, getLastUpdated } from "@/lib/items";
 import { formatDateTimeJst } from "@/lib/date";
 import { getMonthsWithItems, monthLabel } from "@/lib/seo";
+import { getTcgTitleCounts } from "@/lib/tcg";
 
 // トップは静的プリレンダー＋ISR（15分）でCDNキャッシュから配信する。
 // force-dynamic だと毎リクエストで Turso 全件クエリ＋全件シリアライズが走り、TTFB が重く
@@ -15,16 +16,25 @@ import { getMonthsWithItems, monthLabel } from "@/lib/seo";
 // これは共有URLがSEO上の重複ページにならない点でも望ましい。
 export const revalidate = 900;
 
+const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
+
+// トップは自己参照 canonical を明示（?genre= 等の絞り込みURLは同一の静的HTMLを返すため、
+// 検索エンジンには正規URL＝トップに集約させて重複評価を防ぐ）。
+export const metadata = {
+  alternates: { canonical: "/" },
+};
+
 // 「もっと見る」の初期表示件数（ItemBrowser 側と一致させる）。
 const PAGE_SIZE = 120;
 
 export default async function Home() {
   // 「今後の予定＋日付未定（過去は除外）」の全件を一度だけ取得し、以降の絞り込み・
   // ページングはブラウザ内で即時に行う（サーバー往復ゼロ＝フィルタが速い）。
-  const [baseItems, lastUpdated, months] = await Promise.all([
+  const [baseItems, lastUpdated, months, tcgTitles] = await Promise.all([
     getItems({}),
     getLastUpdated(),
     getMonthsWithItems(),
+    getTcgTitleCounts(),
   ]);
 
   // クライアントへ渡せるようシリアライズ（eventDate は ISO 文字列）。表示に使う分だけ。
@@ -60,8 +70,23 @@ export default async function Home() {
   // マウント時にクライアント側で復元する（このページを静的キャッシュ可能に保つため）。
   const initial: FilterValues = { genre: "", query: "", status: "", when: "", datedOnly: false };
 
+  // 新規ドメインの検索認識を助ける WebSite 構造化データ（サイト名の確立＋内部検索の明示）。
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebSite",
+    name: "レアレーダー",
+    description:
+      "フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど、レア・限定アイテムの予約開始・発売・抽選の予定を日付順に掲載。",
+    url: SITE || undefined,
+    inLanguage: "ja",
+  };
+
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+      />
       <header className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
           レアレーダー
@@ -97,6 +122,26 @@ export default async function Home() {
             </Link>
           ))}
         </div>
+
+        {tcgTitles.length > 0 && (
+          <>
+            <p className="mb-2 text-sm font-semibold text-neutral-700 dark:text-neutral-300">
+              カードゲーム別に見る
+            </p>
+            <div className="mb-6 flex flex-wrap gap-2">
+              {tcgTitles.map((c) => (
+                <Link
+                  key={c.label}
+                  href={`/tcg/${encodeURIComponent(c.label)}`}
+                  className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
+                >
+                  {c.label}
+                  <span className="ml-1 text-xs text-neutral-400">{c.count}</span>
+                </Link>
+              ))}
+            </div>
+          </>
+        )}
 
         {months.length > 0 && (
           <>
