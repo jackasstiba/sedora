@@ -14,8 +14,11 @@ const TOKEN = process.env.VERCEL_TOKEN;
 const PROJECT_ID = process.env.VERCEL_PROJECT_ID;
 const TEAM_ID = process.env.VERCEL_TEAM_ID;
 
+// 日付境界は日本時間(JST=UTC+9)で切る。素の toISOString() は UTC のため、
+// 深夜〜朝に実行すると「今日」が1日ずれて当日分を取りこぼす/はみ出すバグになる。
 function ymd(d: Date): string {
-  return d.toISOString().slice(0, 10);
+  const jst = new Date(d.getTime() + 9 * 60 * 60 * 1000);
+  return jst.toISOString().slice(0, 10);
 }
 
 async function query(
@@ -109,23 +112,80 @@ async function main() {
   })) as { data?: Row[] } | null;
   printRows("デバイス", devices?.data, "deviceType");
 
-  // ジャンル選択のカスタムイベント（FilterBar の track("genre_select", {genre})）
-  const genres = (await query("events/aggregate", {
-    ...range,
-    by: "eventData/genre",
-    limit: "20",
-    filter: "eventName eq 'genre_select'",
-  })) as { data?: Row[]; planLimited?: boolean } | null;
-  console.log("\n■ 人気ジャンル（クリック数） TOP20");
-  if (genres?.planLimited) {
-    console.log("  （HobbyプランではカスタムイベントのAPI取得にPro以上が必要。ジャンル別集計は現状不可）");
-  } else if (!genres?.data?.length) {
-    console.log("  （まだデータなし。イベント計測は反映に時間がかかる）");
-  } else {
-    for (const r of genres.data) {
-      const label = String(r.eventData ?? "").trim() || "(不明)";
-      console.log(`  ${label.padEnd(20)} クリック ${r.count}\t訪問者 ${r.visitors}`);
+  // ── 解釈（実来訪か開発検証/クローラのノイズかを見分ける補助）─────────────
+  // レアレーダーは新規ドメインでSEO育成中。数字が小さいうちは「自分の検証アクセス」と
+  // 「実際の外部ユーザー」が混ざり、素の数字だけ見ると誤読しやすいので指標を出す。
+  const refRows = referrers?.data ?? [];
+  const totalRefPv = refRows.reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  const directPv = refRows
+    .filter((r) => !String(r.referrerHostname ?? "").trim())
+    .reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  const organicPv = totalRefPv - directPv;
+  const deskRows = devices?.data ?? [];
+  const deskPv = deskRows
+    .filter((r) => String(r.deviceType ?? "") === "desktop")
+    .reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  const deskTotal = deskRows.reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  console.log("\n■ 解釈（自動）");
+  if (totalRefPv > 0) {
+    const directPct = Math.round((directPv / totalRefPv) * 100);
+    console.log(
+      `  流入内訳: 直接/不明 ${directPv}PV (${directPct}%) / 外部サイト経由 ${organicPv}PV`
+    );
+    if (organicPv === 0) {
+      console.log(
+        "  ⚠ 検索・SNS・被リンクからの流入がゼロ。= 発見経路が機能していない（SEO未インデックス）。"
+      );
     }
+  }
+  if (deskTotal > 0) {
+    const deskPct = Math.round((deskPv / deskTotal) * 100);
+    if (deskPct >= 60) {
+      console.log(
+        `  デバイス: デスクトップ ${deskPct}%。コレクター向け消費サイトとしては不自然に高く、` +
+          "自分の検証アクセス/クローラの割合が大きい可能性。"
+      );
+    }
+  }
+
+  // ── カスタムイベント ──────────────────────────────────────────
+  //   genre_select  … どのジャンルが見られているか（FilterBar）
+  //   search        … 何が検索されたか＝需要シグナル（FilterBar）
+  //   outbound_click… 外部の購入/公式ページへ送客できたか＝アフィリ収益の唯一の成果指標
+  //                   （OutboundLink。自サイト内リンクと違いPVには出ないためイベントで拾う）
+  // ⚠ Hobbyプランではカスタムイベントの「API取得」がPro以上限定(HTTP402)。
+  //   取れない場合でも Vercelダッシュボード → Analytics → Events では閲覧可能。
+  const eventSpecs: { name: string; by: string; title: string; unit: string }[] = [
+    { name: "genre_select", by: "eventData/genre", title: "人気ジャンル（クリック数） TOP20", unit: "クリック" },
+    { name: "search", by: "eventData/query", title: "検索キーワード（需要シグナル） TOP20", unit: "検索" },
+    { name: "outbound_click", by: "eventData/kind", title: "外部送客（購入導線クリック＝収益成果）", unit: "クリック" },
+  ];
+  let planBlocked = false;
+  for (const spec of eventSpecs) {
+    const ev = (await query("events/aggregate", {
+      ...range,
+      by: spec.by,
+      limit: "20",
+      filter: `eventName eq '${spec.name}'`,
+    })) as { data?: Row[]; planLimited?: boolean } | null;
+    console.log(`\n■ ${spec.title}`);
+    if (ev?.planLimited) {
+      planBlocked = true;
+      console.log("  （Hobbyプランでは取得不可。ダッシュボードのEventsタブで確認）");
+    } else if (!ev?.data?.length) {
+      console.log("  （まだデータなし。イベント計測は反映に時間がかかる）");
+    } else {
+      for (const r of ev.data) {
+        const label = String(r.eventData ?? "").trim() || "(不明)";
+        console.log(`  ${label.padEnd(24)} ${spec.unit} ${r.count}\t訪問者 ${r.visitors}`);
+      }
+    }
+  }
+  if (planBlocked) {
+    console.log(
+      "\n  ※ カスタムイベントをClaudeが直接分析するには Pro へのアップグレード、" +
+        "\n    または Turso への自前イベント記録（無料枠可・Claudeが直接クエリ可）が必要。"
+    );
   }
 }
 

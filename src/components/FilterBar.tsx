@@ -54,7 +54,10 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          onChange({ query: queryInput.trim() });
+          const q = queryInput.trim();
+          // 何を検索されたか＝需要シグナル。空検索は送らない。
+          if (q) track("search", { query: q });
+          onChange({ query: q });
         }}
         className="flex gap-2"
       >

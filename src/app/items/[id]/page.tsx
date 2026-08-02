@@ -3,6 +3,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
+import { OutboundLink } from "@/components/OutboundLink";
 import { sourceLabel } from "@/lib/items";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
@@ -159,14 +160,15 @@ export default async function ItemPage({ params }: Props) {
                     {item.marketPriceText}
                   </span>
                   {item.marketUrl && (
-                    <a
+                    <OutboundLink
                       href={item.marketUrl}
-                      target="_blank"
-                      rel="nofollow noopener noreferrer"
+                      kind="market"
+                      source={item.source}
+                      itemId={item.id}
                       className="ml-2 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
                     >
                       駿河屋で見る
-                    </a>
+                    </OutboundLink>
                   )}
                 </dd>
               </>
@@ -219,37 +221,40 @@ export default async function ItemPage({ params }: Props) {
 
           {/* 情報元 / 購入導線。item.url の実態(公式 or まとめ・告知)に合わせてラベルを出し分ける。 */}
           <div className="mt-2 flex flex-col gap-2">
-            <a
+            <OutboundLink
               href={item.url}
-              target="_blank"
-              rel="nofollow noopener noreferrer"
+              kind={isOfficialUrl(item.source) ? "official" : "source"}
+              source={item.source}
+              itemId={item.id}
               className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
             >
               {isOfficialUrl(item.source)
                 ? "公式ページで見る →"
                 : `情報元（${sourceLabel(item.source)}）で見る →`}
-            </a>
+            </OutboundLink>
             {/* コラボ記事から辿った一次情報（公式キャンペーン/ストア）。何が売られるかの原典。 */}
             {item.officialUrl && (
-              <a
+              <OutboundLink
                 href={item.officialUrl}
-                target="_blank"
-                rel="nofollow noopener noreferrer"
+                kind="official_secondary"
+                source={item.source}
+                itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-950"
               >
                 公式（一次情報）で販売内容を見る →
-              </a>
+              </OutboundLink>
             )}
             {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。 */}
             {hasSearchableTitle(item.source) && (
-              <a
+              <OutboundLink
                 href={rakutenSearchUrl(item.title)}
-                target="_blank"
-                rel="nofollow noopener noreferrer"
+                kind="rakuten"
+                source={item.source}
+                itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-950"
               >
                 楽天で探す →
-              </a>
+              </OutboundLink>
             )}
           </div>
           <p className="text-xs text-neutral-400">
