@@ -8,6 +8,8 @@
 //
 // 実行: npm run analytics  （任意で日数: npm run analytics -- 7）
 
+import { prisma } from "@/lib/prisma";
+
 const BASE = "https://api.vercel.com/v1/query/web-analytics";
 
 const TOKEN = process.env.VERCEL_TOKEN;
@@ -183,13 +185,60 @@ async function main() {
   }
   if (planBlocked) {
     console.log(
-      "\n  ※ カスタムイベントをClaudeが直接分析するには Pro へのアップグレード、" +
-        "\n    または Turso への自前イベント記録（無料枠可・Claudeが直接クエリ可）が必要。"
+      "\n  ↑ Vercel側はHobbyで取得不可。以下の自前記録(Turso)が同じイベントを読める本命ソース。"
     );
+  }
+
+  // ── 自前記録（Turso Event）＝Hobbyでも読めるカスタムイベント ──────────
+  // ユーザー操作イベントを /api/track 経由で Turso に直接記録している。
+  // Vercel の 402 制約を受けず Claude が直接集計できる。PV/流入元は上の Vercel 側が担当。
+  await readSelfHosted(since);
+}
+
+async function readSelfHosted(since: Date) {
+  console.log("\n=== 自前記録イベント（Turso・直近同期間） ===");
+  let events: { name: string; value: string | null }[];
+  try {
+    events = await prisma.event.findMany({
+      where: { createdAt: { gte: since } },
+      select: { name: true, value: true },
+    });
+  } catch (err) {
+    console.log(
+      "  （Event テーブル未作成の可能性。本番は `npm run migrate:events` で作成）"
+    );
+    console.error("  ", (err as Error).message);
+    return;
+  }
+  const specs: { name: string; title: string; unit: string }[] = [
+    { name: "genre_select", title: "人気ジャンル（クリック数）", unit: "クリック" },
+    { name: "search", title: "検索キーワード（需要シグナル）", unit: "検索" },
+    { name: "outbound_click", title: "外部送客（購入導線クリック＝収益成果）", unit: "クリック" },
+  ];
+  for (const spec of specs) {
+    const counts = new Map<string, number>();
+    for (const e of events) {
+      if (e.name !== spec.name) continue;
+      const label = (e.value ?? "").trim() || "(不明)";
+      counts.set(label, (counts.get(label) ?? 0) + 1);
+    }
+    console.log(`\n■ ${spec.title}`);
+    if (counts.size === 0) {
+      console.log("  （まだデータなし）");
+      continue;
+    }
+    const rows = [...counts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+    for (const [label, n] of rows) {
+      console.log(`  ${label.padEnd(24)} ${spec.unit} ${n}`);
+    }
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+main()
+  .catch((err) => {
+    console.error(err);
+    process.exitCode = 1;
+  })
+  .finally(async () => {
+    await prisma.$disconnect();
+  });

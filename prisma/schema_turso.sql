@@ -31,3 +31,16 @@ CREATE INDEX "Item_eventDate_idx" ON "Item"("eventDate");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "Item_source_sourceId_key" ON "Item"("source", "sourceId");
+
+-- CreateTable（自前アクセス解析イベント。追加のみ＝既存に無影響）
+CREATE TABLE IF NOT EXISTS "Event" (
+    "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+    "name" TEXT NOT NULL,
+    "value" TEXT,
+    "data" TEXT,
+    "path" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+-- CreateIndex
+CREATE INDEX IF NOT EXISTS "Event_name_createdAt_idx" ON "Event"("name", "createdAt");

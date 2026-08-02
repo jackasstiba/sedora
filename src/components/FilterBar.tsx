@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { track } from "@vercel/analytics";
+import { logEvent } from "@/lib/logEvent";
 
 // 制御コンポーネント化: 絞り込みはサーバー往復ではなく親(ItemBrowser)のローカル状態で
 // 即時に行う。ここは値を表示し、変更を onChange で親に伝えるだけ。
@@ -56,7 +57,10 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
           e.preventDefault();
           const q = queryInput.trim();
           // 何を検索されたか＝需要シグナル。空検索は送らない。
-          if (q) track("search", { query: q });
+          if (q) {
+            track("search", { query: q });
+            logEvent("search", q);
+          }
           onChange({ query: q });
         }}
         className="flex gap-2"
@@ -86,6 +90,7 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
             onClick={() => {
               // どのジャンルが見られているかを解析できるようにイベント記録
               track("genre_select", { genre: g });
+              logEvent("genre_select", g);
               onChange({ genre: g });
             }}
             className={chipClass(genre === g)}

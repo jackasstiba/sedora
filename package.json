@@ -15,6 +15,7 @@
     "x:audit": "node --env-file-if-exists=.env --import tsx scripts/x_watch/audit.ts",
   "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
+    "migrate:events": "node --env-file-if-exists=.env --import tsx scripts/migrateEvents.ts",
     "db:deploy": "prisma migrate deploy"
   },
   "dependencies": {

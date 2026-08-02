@@ -1,6 +1,7 @@
 "use client";
 
 import { track } from "@vercel/analytics";
+import { logEvent } from "@/lib/logEvent";
 
 // 外部リンク（購入導線・情報元・相場）のクリックを計測するための薄いラッパー。
 // レアレーダーの収益はアフィリエイト＝「外部の購入/公式ページへ送客できたか」が唯一の成果指標。
@@ -37,6 +38,8 @@ export function OutboundLink({ href, kind, source, itemId, className, children }
       onClick={() => {
         // itemId は数値だと by=eventData 集計で扱いにくいので文字列で送る。
         track("outbound_click", { kind, source, itemId: String(itemId) });
+        // 遷移でキャンセルされないよう logEvent は sendBeacon を優先する。
+        logEvent("outbound_click", kind, { source, itemId });
       }}
     >
       {children}

@@ -45,3 +45,18 @@ model Item {
   @@index([genre])
   @@index([eventDate])
 }
+
+// 自前アクセス解析イベント。Vercel Web Analytics のカスタムイベントは Hobby プランでは
+// API 取得が Pro 限定(HTTP402)で Claude が読めないため、ユーザー操作イベントだけを
+// Turso に直接記録し `npm run analytics` から読めるようにする（PV/流入元/デバイスは
+// 引き続き Vercel から取得＝二重記録しない）。書き込みはユーザー操作時のみ＝低ボリューム。
+model Event {
+  id        Int      @id @default(autoincrement())
+  name      String   // "genre_select" | "search" | "outbound_click"
+  value     String?  // 主要ディメンション（genre名 / 検索語 / 導線kind）
+  data      String?  // 補助情報のJSON（source/itemId 等）
+  path      String?  // 発生ページのパス
+  createdAt DateTime @default(now())
+
+  @@index([name, createdAt])
+}
