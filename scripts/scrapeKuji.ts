@@ -7,7 +7,7 @@ import { cleanTitle } from "../src/scrapers/util";
 // 素早く本番へ反映するため（scrape:prices 等と同じ targeted 運用）。upsert なので非破壊。
 // 実行: npm run scrape:kuji
 async function main() {
-  const items = await scrapeIchibanKuji({ skipDetailIds: new Set() });
+  const items = await scrapeIchibanKuji();
   let enriched = 0;
   for (const raw of items) {
     const item = { ...raw, title: cleanTitle(raw.title) };
