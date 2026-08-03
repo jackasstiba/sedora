@@ -10,6 +10,7 @@ import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbo
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
 import { stripSourceLabel } from "@/lib/title";
+import { isHotPrize, parseKujiLineup } from "@/lib/prizes";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -62,6 +63,8 @@ export default async function ItemPage({ params }: Props) {
   const margin = computeMargin(item.price, item.marketPrice);
   // 情報元由来の定型ラベル（snkrdunkの「｜抽選/販売/定価情報」等）は表示・構造化データから除去。
   const displayTitle = stripSourceLabel(item.title);
+  // 一番くじは highlights に各賞ラインナップを畳んでいる。詳細ページではリスト展開する。
+  const lineup = parseKujiLineup(item.highlights);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -200,23 +203,51 @@ export default async function ItemPage({ params }: Props) {
             <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
 
-          {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */}
-          {item.highlights && (
-            <div
-              className={`rounded-lg px-3 py-2 text-sm ${
-                item.hasLottery
-                  ? "bg-purple-50 text-purple-900 dark:bg-purple-950/40 dark:text-purple-200"
-                  : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
-              }`}
-            >
-              <span className="font-semibold">{item.hasLottery ? "🎯 注目賞品" : "🛍 注目グッズ"}</span>
-              <span className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
-              {item.hasLottery && (
-                <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
-                  抽選・ランダムで当たる賞品を含みます。転売相場が付きやすいので要チェック。
-                </p>
-              )}
+          {/* 一番くじ＝各賞ラインナップをリスト表示（A賞・ラストワン賞は相場の核なので強調）。 */}
+          {lineup ? (
+            <div className="rounded-lg bg-purple-50 px-3 py-2.5 text-sm dark:bg-purple-950/40">
+              <p className="font-semibold text-purple-900 dark:text-purple-200">
+                🎯 各賞ラインナップ（全{lineup.length}種・くじ）
+              </p>
+              <ul className="mt-1.5 flex flex-col gap-1">
+                {lineup.map((p) => (
+                  <li key={p.label} className="flex items-start gap-2 leading-snug">
+                    <span
+                      className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-bold ${
+                        isHotPrize(p.label)
+                          ? "bg-rose-600 text-white"
+                          : "bg-purple-200 text-purple-900 dark:bg-purple-900/60 dark:text-purple-100"
+                      }`}
+                    >
+                      {p.label}
+                    </span>
+                    <span className="text-neutral-800 dark:text-neutral-100">{p.name}</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-xs text-purple-700/80 dark:text-purple-300/80">
+                くじ（抽選）で当たる賞品です。A賞・ラストワン賞は二次相場が付きやすいので要チェック。
+              </p>
             </div>
+          ) : (
+            /* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */
+            item.highlights && (
+              <div
+                className={`rounded-lg px-3 py-2 text-sm ${
+                  item.hasLottery
+                    ? "bg-purple-50 text-purple-900 dark:bg-purple-950/40 dark:text-purple-200"
+                    : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
+                }`}
+              >
+                <span className="font-semibold">{item.hasLottery ? "🎯 注目賞品" : "🛍 注目グッズ"}</span>
+                <span className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
+                {item.hasLottery && (
+                  <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
+                    抽選・ランダムで当たる賞品を含みます。転売相場が付きやすいので要チェック。
+                  </p>
+                )}
+              </div>
+            )
           )}
 
           {/* 情報元 / 購入導線。item.url の実態(公式 or まとめ・告知)に合わせてラベルを出し分ける。 */}

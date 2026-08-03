@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { extractKujiPrizes, formatKujiHighlights } from "./ichibanKujiEnrich";
 import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 
 // 一番くじ倶楽部（BANDAI SPIRITS公式）のラインナップ。フィギュア景品・ラストワン賞は
@@ -56,5 +57,25 @@ export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
     await sleep(400);
   }
 
-  return [...byId.values()];
+  const items = [...byId.values()];
+
+  // 一覧では商品名止まりで“何が当たるか”に届かない。各商品の詳細ページを開いて
+  // 各等賞一覧（A賞〜ラストワン賞＝二次相場の核）を抽出し highlights に載せる。
+  // 一番くじは必ず抽選(くじ)で当たる形式なので hasLottery=true を立て、抽選タブでも拾う。
+  // レート制限つき・失敗時はその商品だけ深掘りを諦めて一覧情報は活かす（壊さない）。
+  for (const item of items) {
+    try {
+      const html = await fetchHtml(item.url);
+      const prizes = extractKujiPrizes(html);
+      if (prizes.length) {
+        item.highlights = formatKujiHighlights(prizes);
+        item.hasLottery = true;
+      }
+    } catch {
+      // 詳細取得に失敗しても一覧情報（商品名・発売日・画像）は活かす
+    }
+    await sleep(400);
+  }
+
+  return items;
 }
