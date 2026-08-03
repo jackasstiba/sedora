@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeItems } from "./itemFilter";
+import { dedupeItems, dedupeKey } from "./itemFilter";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
@@ -39,28 +39,42 @@ export async function getRelatedItems(
   ];
 
   // 1) 同じ作品（ジャンル横断）。ワンピのフィギュアとカードを互いに関連づける等。
+  //    figisland↔koretore が同じプライズを両方載せるため、一覧と同じ dedupeItems で
+  //    クロスソース重複を畳む（畳まないと関連欄に同一フィギュアが2枚並ぶ）。
   const aliases = franchiseAliases(item.title);
-  const series = aliases.length
+  const rawSeries = aliases.length
     ? await prisma.item.findMany({
         where: {
           id: { not: item.id },
           AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming],
         },
         orderBy,
-        take,
+        take: take + 8, // dedupe で減る分を見込んで多めに取る
       })
     : [];
+  const series = dedupeItems(rawSeries).slice(0, take);
 
-  // 2) 同ジャンルで補完（series と自分自身は除外）。
+  // 2) 同ジャンルで補完（series と自分自身は除外）。series と同じ商品（別ソース含む）が
+  //    genre 側に再登場して2セクションで重複しないよう、series のタイトルキーでも除外する。
+  const seriesKeys = new Set(
+    series.map((s) => dedupeKey(s.title)).filter((k) => k.length >= 6)
+  );
   const excludeIds = [item.id, ...series.map((s) => s.id)];
   const need = take - series.length;
   const genre =
     need > 0
-      ? await prisma.item.findMany({
-          where: { genre: item.genre, id: { notIn: excludeIds }, ...upcoming },
-          orderBy,
-          take: need,
-        })
+      ? dedupeItems(
+          await prisma.item.findMany({
+            where: { genre: item.genre, id: { notIn: excludeIds }, ...upcoming },
+            orderBy,
+            take: need + 8,
+          })
+        )
+          .filter((g) => {
+            const k = dedupeKey(g.title);
+            return k.length < 6 || !seriesKeys.has(k);
+          })
+          .slice(0, need)
       : [];
 
   return { seriesLabel: franchiseLabel(item.title), series, genre };

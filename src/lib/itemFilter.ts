@@ -105,7 +105,7 @@ function inheritEnrichment(keep: DedupeItem, from: DedupeItem): void {
 
 /** 重複判定用のタイトル正規化（記号・空白除去、全角半角/大小の吸収）。
  *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy" */
-function dedupeKey(title: string): string {
+export function dedupeKey(title: string): string {
   return title
     .normalize("NFKC")
     .toLowerCase()
