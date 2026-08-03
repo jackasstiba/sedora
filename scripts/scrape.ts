@@ -39,6 +39,7 @@ async function main() {
           highlights: item.highlights ?? null,
           hasLottery: item.hasLottery ?? null,
           officialUrl: item.officialUrl ?? null,
+          prizes: item.prizes ?? null,
           scrapedAt: new Date(),
         },
       });

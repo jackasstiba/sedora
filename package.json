@@ -12,6 +12,8 @@
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "scrape:images": "node --env-file-if-exists=.env --import tsx scripts/backfillImages.ts",
     "scrape:kuji": "node --env-file-if-exists=.env --import tsx scripts/scrapeKuji.ts",
+    "scrape:kuji:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapeKujiPrices.ts",
+    "migrate:prizes": "node --env-file-if-exists=.env --import tsx scripts/migratePrizes.ts",
     "ingest:x": "node --env-file-if-exists=.env --import tsx scripts/ingestXWatch.ts",
     "x:audit": "node --env-file-if-exists=.env --import tsx scripts/x_watch/audit.ts",
   "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",

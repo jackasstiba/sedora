@@ -41,6 +41,12 @@ model Item {
   hasLottery  Boolean? // 抽選・ランダム性のある賞品を含む（抽選タブで拾う）
   officialUrl String?  // 記事から辿った一次情報（公式キャンペーン/ストア）ページ
 
+  // 一番くじの各等賞ラインナップ（構造化）。JSON配列文字列で保持する:
+  //   [{label:"A賞", name:"…", image:"https://…", resalePrice?:15500,
+  //     resaleText?:"中古 ¥15,500", resaleUrl?:"https://…", resaleSource?:"surugaya"}]
+  // 賞画像ギャラリー＋賞ごとの二次相場（駿河屋バラ売り）を商品詳細で表示するため。
+  prizes String?
+
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])

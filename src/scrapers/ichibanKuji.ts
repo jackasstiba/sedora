@@ -70,6 +70,9 @@ export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
       if (prizes.length) {
         item.highlights = formatKujiHighlights(prizes);
         item.hasLottery = true;
+        // 各等賞を構造化（賞ラベル/賞品名/画像）してJSONで保持。相場(resale*)は
+        // 発売済み品にだけ後付けするので、ここでは名前・画像まで（scrape:kuji:prices で相場付与）。
+        item.prizes = JSON.stringify(prizes);
       }
     } catch {
       // 詳細取得に失敗しても一覧情報（商品名・発売日・画像）は活かす

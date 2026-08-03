@@ -10,7 +10,7 @@ import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbo
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
 import { stripSourceLabel } from "@/lib/title";
-import { isHotPrize, parseKujiLineup } from "@/lib/prizes";
+import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -63,8 +63,10 @@ export default async function ItemPage({ params }: Props) {
   const margin = computeMargin(item.price, item.marketPrice);
   // 情報元由来の定型ラベル（snkrdunkの「｜抽選/販売/定価情報」等）は表示・構造化データから除去。
   const displayTitle = stripSourceLabel(item.title);
-  // 一番くじは highlights に各賞ラインナップを畳んでいる。詳細ページではリスト展開する。
-  const lineup = parseKujiLineup(item.highlights);
+  // 一番くじの各等賞。構造化JSON（画像＋賞ごと相場）があればギャラリー表示、
+  // 無ければ highlights の畳み込み文字列からリスト展開（旧データ後方互換）。
+  const prizeGallery = parsePrizesJson(item.prizes);
+  const lineup = prizeGallery ? null : parseKujiLineup(item.highlights);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -203,8 +205,9 @@ export default async function ItemPage({ params }: Props) {
             <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
 
-          {/* 一番くじ＝各賞ラインナップをリスト表示（A賞・ラストワン賞は相場の核なので強調）。 */}
-          {lineup ? (
+          {/* 構造化された各賞ギャラリー（画像＋相場）はグリッド下の専用セクションで表示する。
+              ここは gallery が無い場合のみ＝旧データのリスト or コラボ由来の1行要約。 */}
+          {prizeGallery ? null : lineup ? (
             <div className="rounded-lg bg-purple-50 px-3 py-2.5 text-sm dark:bg-purple-950/40">
               <p className="font-semibold text-purple-900 dark:text-purple-200">
                 🎯 各賞ラインナップ（全{lineup.length}種・くじ）
@@ -293,6 +296,76 @@ export default async function ItemPage({ params }: Props) {
           </p>
         </div>
       </div>
+
+      {/* 各等賞ギャラリー（賞画像＋賞ごとの二次相場）。一番くじの“何が当たるか”を最も濃く見せる面。 */}
+      {prizeGallery && (
+        <section className="mt-10">
+          <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            🎯 各賞ラインナップ（全{prizeGallery.length}種・くじ）
+          </h2>
+          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+            くじ（抽選）で当たる賞品です。A賞・ラストワン賞は二次相場が付きやすい本命。相場は駿河屋（中古バラ売り）の参考値で、発売済みの賞にのみ表示されます（メルカリはこれより高い傾向）。
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+            {prizeGallery.map((p) => (
+              <div
+                key={p.label}
+                className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-neutral-900 ${
+                  isHotPrize(p.label)
+                    ? "border-rose-300 dark:border-rose-800"
+                    : "border-neutral-200 dark:border-neutral-800"
+                }`}
+              >
+                <div className="relative aspect-square w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800">
+                  {p.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={p.image}
+                      alt={`${p.label} ${p.name}`}
+                      loading="lazy"
+                      className="h-full w-full object-cover"
+                    />
+                  ) : (
+                    <div className="grid h-full w-full place-items-center text-3xl text-neutral-300 dark:text-neutral-600">
+                      🎁
+                    </div>
+                  )}
+                  <span
+                    className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs font-bold ${
+                      isHotPrize(p.label)
+                        ? "bg-rose-600 text-white"
+                        : "bg-purple-200 text-purple-900 dark:bg-purple-900/70 dark:text-purple-100"
+                    }`}
+                  >
+                    {p.label}
+                  </span>
+                </div>
+                <div className="flex flex-1 flex-col gap-1 p-2.5">
+                  <p className="line-clamp-3 flex-1 text-sm leading-snug text-neutral-800 dark:text-neutral-100">
+                    {p.name}
+                  </p>
+                  {p.resaleText &&
+                    (p.resaleUrl ? (
+                      <OutboundLink
+                        href={p.resaleUrl}
+                        kind="market"
+                        source={item.source}
+                        itemId={item.id}
+                        className="inline-flex w-fit items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300"
+                      >
+                        相場 {p.resaleText} →
+                      </OutboundLink>
+                    ) : (
+                      <span className="inline-flex w-fit items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
+                        相場 {p.resaleText}
+                      </span>
+                    ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {related.series.length > 0 && (
         <section className="mt-10">

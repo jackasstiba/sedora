@@ -19,4 +19,5 @@ export type ScrapedItem = {
   highlights?: string | null;
   hasLottery?: boolean | null;
   officialUrl?: string | null; // 記事から辿った一次情報（公式キャンペーン/ストア）
+  prizes?: string | null; // 一番くじの各等賞ラインナップ（JSON配列文字列。ichibanKuji のみ）
 };

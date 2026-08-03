@@ -10,6 +10,7 @@ export type MarketPrice = {
   priceText: string; // 表示用（例: "中古 ¥3,980"）
   url: string; // 駿河屋商品ページ
   source: "surugaya";
+  matchedName?: string; // 実際にヒットした駿河屋の商品名（呼び出し側の追加検証用）
 };
 
 const BASE = "https://www.suruga-ya.jp";
@@ -25,8 +26,8 @@ function toQuery(title: string): string {
     .join(" ");
 }
 
-/** マッチ判定用に文字列を正規化（全角→半角・記号除去・小文字化） */
-function norm(s: string): string {
+/** マッチ判定用に文字列を正規化（全角→半角・記号除去・小文字化）。呼び出し側の追加検証でも使う。 */
+export function norm(s: string): string {
   return s
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
     .toLowerCase()
@@ -66,7 +67,7 @@ export async function fetchSurugayaPrice(title: string): Promise<MarketPrice | n
 
   const $ = cheerio.load(html);
   const items = $("div.item");
-  type Cand = { score: number; price: number; priceText: string; href: string };
+  type Cand = { score: number; price: number; priceText: string; href: string; name: string };
   const cands: Cand[] = [];
 
   items.each((_, el) => {
@@ -90,7 +91,7 @@ export async function fetchSurugayaPrice(title: string): Promise<MarketPrice | n
     });
     if (!price) return; // 品切れ等（価格なし）はスキップ
 
-    cands.push({ score: similarity(name, title), price, priceText, href });
+    cands.push({ score: similarity(name, title), price, priceText, href, name });
   });
 
   // 最も近い候補を採用。誤マッチ防止に重なりが低すぎるものは捨てる。
@@ -103,5 +104,6 @@ export async function fetchSurugayaPrice(title: string): Promise<MarketPrice | n
     priceText: b.priceText,
     url: productUrl.split("?")[0],
     source: "surugaya",
+    matchedName: b.name,
   };
 }
