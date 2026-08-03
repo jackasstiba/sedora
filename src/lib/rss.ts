@@ -49,7 +49,7 @@ export async function buildRss(genre?: string): Promise<string> {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>レアレーダー${titleSuffix}｜レア・限定品の予約・発売・抽選スケジュール</title>
+    <title>ハツコレ${titleSuffix}｜レア・限定品の予約・発売・抽選スケジュール</title>
     <link>${linkUrl}</link>
     <atom:link href="${feedUrl}" rel="self" type="application/rss+xml" />
     <description>フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど、レア・限定アイテムの新着予約・発売情報をお届け。</description>

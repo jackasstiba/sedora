@@ -74,7 +74,7 @@ export default async function Home() {
   const jsonLd = {
     "@context": "https://schema.org",
     "@type": "WebSite",
-    name: "レアレーダー",
+    name: "ハツコレ",
     description:
       "フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど、レア・限定アイテムの予約開始・発売・抽選の予定を日付順に掲載。",
     url: SITE || undefined,
@@ -89,7 +89,7 @@ export default async function Home() {
       />
       <header className="mb-6">
         <h1 className="text-2xl font-bold tracking-tight text-neutral-900 dark:text-neutral-50 sm:text-3xl">
-          レアレーダー
+          ハツコレ
         </h1>
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
           フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの、予約開始・発売・抽選の予定。

@@ -19,7 +19,7 @@ type Props = { params: Promise<{ title: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { title: raw } = await params;
   const title = decodeURIComponent(raw);
-  const pageTitle = `${title}の予約・抽選・発売スケジュール一覧 | レアレーダー`;
+  const pageTitle = `${title}の予約・抽選・発売スケジュール一覧 | ハツコレ`;
   const description = `${title}の予約開始・抽選販売・発売の最新スケジュールを、発売日が近い順にまとめて掲載。`;
   return {
     title: pageTitle,
@@ -41,7 +41,7 @@ export default async function TcgTitlePage({ params }: Props) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "レアレーダー", item: SITE || undefined },
+      { "@type": "ListItem", position: 1, name: "ハツコレ", item: SITE || undefined },
       {
         "@type": "ListItem",
         position: 2,
@@ -61,7 +61,7 @@ export default async function TcgTitlePage({ params }: Props) {
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
-          レアレーダー
+          ハツコレ
         </Link>
         {" ／ "}
         <Link href={`/genre/${encodeURIComponent("トレカ")}`} className="hover:underline">

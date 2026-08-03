@@ -1,4 +1,4 @@
-# レアレーダー
+# ハツコレ
 
 **🌐 公開サイト: https://sedora-three.vercel.app/**
 

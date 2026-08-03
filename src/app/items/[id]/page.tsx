@@ -24,11 +24,11 @@ type Props = { params: Promise<{ id: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id } = await params;
   const item = await getItemById(Number(id));
-  if (!item) return { title: "見つかりませんでした | レアレーダー" };
+  if (!item) return { title: "見つかりませんでした | ハツコレ" };
 
   const dateStr = formatDate(item.eventDate) ?? item.eventDateText ?? "";
   const cleanTitle = stripSourceLabel(item.title);
-  const title = `${cleanTitle} | レアレーダー`;
+  const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const description = [
     dateStr ? `${item.eventType}日: ${dateStr}` : null,
@@ -77,7 +77,7 @@ export default async function ItemPage({ params }: Props) {
       {
         "@type": "BreadcrumbList",
         itemListElement: [
-          { "@type": "ListItem", position: 1, name: "レアレーダー", item: SITE || undefined },
+          { "@type": "ListItem", position: 1, name: "ハツコレ", item: SITE || undefined },
           {
             "@type": "ListItem",
             position: 2,
@@ -99,7 +99,7 @@ export default async function ItemPage({ params }: Props) {
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
-          レアレーダー
+          ハツコレ
         </Link>
         {" ／ "}
         <Link href={`/genre/${encodeURIComponent(item.genre)}`} className="hover:underline">

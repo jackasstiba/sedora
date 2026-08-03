@@ -19,7 +19,7 @@ type Props = { params: Promise<{ genre: string }> };
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { genre: raw } = await params;
   const genre = decodeURIComponent(raw);
-  const title = `${genre}の予約・発売スケジュール一覧 | レアレーダー`;
+  const title = `${genre}の予約・発売スケジュール一覧 | ハツコレ`;
   const description = `${genre}の予約開始・発売・抽選の予定を、発売日が近い順に掲載。`;
   return {
     title,
@@ -43,7 +43,7 @@ export default async function GenrePage({ params }: Props) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "レアレーダー", item: SITE || undefined },
+      { "@type": "ListItem", position: 1, name: "ハツコレ", item: SITE || undefined },
       { "@type": "ListItem", position: 2, name: genre },
     ],
   };
@@ -57,7 +57,7 @@ export default async function GenrePage({ params }: Props) {
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
-          レアレーダー
+          ハツコレ
         </Link>
         {" ／ "}
         {genre}

@@ -7,13 +7,21 @@ export async function SiteHeader() {
   const genres = await getGenreList();
 
   return (
-    <header className="sticky top-0 z-20 border-b border-neutral-200 bg-white/85 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/85">
+    <header className="sticky top-0 z-20 border-b border-rose-100/70 bg-[var(--background)]/85 backdrop-blur dark:border-neutral-800">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-2.5">
-        <Link href="/" className="flex shrink-0 items-center gap-1.5 font-bold tracking-tight">
-          <span aria-hidden className="text-lg leading-none">
-            📡
+        <Link href="/" className="flex shrink-0 items-center gap-2" aria-label="ハツコレ トップへ">
+          {/* ブランドマーク：柿色グラデの角丸バッジ＋“新しい発見”を表す4点スパークル。 */}
+          <span
+            aria-hidden
+            className="grid h-7 w-7 place-items-center rounded-[9px] bg-gradient-to-br from-rose-400 to-rose-600 shadow-sm shadow-rose-600/20"
+          >
+            <svg viewBox="0 0 32 32" className="h-4 w-4" fill="#fff" aria-hidden>
+              <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" />
+            </svg>
           </span>
-          <span className="text-base text-neutral-900 dark:text-neutral-50">レアレーダー</span>
+          <span className="text-[17px] font-extrabold tracking-tight text-neutral-900 dark:text-neutral-50">
+            ハツコレ
+          </span>
         </Link>
 
         {/* ジャンルの横スクロールナビ（モバイルでも指でスワイプ可） */}
@@ -25,7 +33,7 @@ export async function SiteHeader() {
             <Link
               key={g}
               href={`/genre/${encodeURIComponent(g)}`}
-              className="rounded-full px-2.5 py-1 text-sm text-neutral-600 transition hover:bg-neutral-100 hover:text-rose-600 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
+              className="rounded-full px-2.5 py-1 text-sm text-neutral-600 transition hover:bg-rose-50 hover:text-rose-600 dark:text-neutral-300 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
             >
               {g}
             </Link>
@@ -35,7 +43,7 @@ export async function SiteHeader() {
         <a
           href="/feed.xml"
           title="RSSで新着を購読"
-          className="shrink-0 rounded-md p-1.5 text-neutral-500 transition hover:bg-neutral-100 hover:text-rose-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
+          className="shrink-0 rounded-md p-1.5 text-neutral-500 transition hover:bg-rose-50 hover:text-rose-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
         >
           <span className="sr-only">RSSで新着を購読</span>
           <svg

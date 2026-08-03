@@ -20,9 +20,9 @@ type Props = { params: Promise<{ month: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { month } = await params;
-  if (!isValidMonth(month)) return { title: "見つかりませんでした | レアレーダー" };
+  if (!isValidMonth(month)) return { title: "見つかりませんでした | ハツコレ" };
   const label = monthLabel(month);
-  const title = `${label}発売・予約のレア・限定アイテム一覧 | レアレーダー`;
+  const title = `${label}発売・予約のレア・限定アイテム一覧 | ハツコレ`;
   const description =
     `${label}に発売・予約開始・抽選されるフィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど` +
     `レア・限定アイテムの予定を日付順にまとめています。`;
@@ -59,7 +59,7 @@ export default async function MonthPage({ params }: Props) {
     "@context": "https://schema.org",
     "@type": "BreadcrumbList",
     itemListElement: [
-      { "@type": "ListItem", position: 1, name: "レアレーダー", item: SITE || undefined },
+      { "@type": "ListItem", position: 1, name: "ハツコレ", item: SITE || undefined },
       { "@type": "ListItem", position: 2, name: label },
     ],
   };
@@ -73,7 +73,7 @@ export default async function MonthPage({ params }: Props) {
 
       <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
-          レアレーダー
+          ハツコレ
         </Link>
         {" ／ "}
         {label}

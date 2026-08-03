@@ -1,26 +1,46 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* 温かみのある紙色ベース（真っ白＝Next/Vercel初期テンプレ感を避ける）。 */
+  --background: #fbf8f3;
+  --foreground: #1c1917;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  /* 日本語を最優先したフォントスタック。Geist / Arial（＝初期テンプレ丸出しの
+     “AIが作った感”）を排し、各OSの上質な日本語フォントで自然な見た目にする。 */
+  --font-sans: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+}
+
+/* ブランドカラー＝「ハツコレ」の温かい柿(persimmon)/コーラル系。
+   Tailwind標準の rose スケールを上書きし、全ページに散在する既存の rose-* クラスを
+   そのままブランド色に一括統一する（クラス名は rose のままだが実体はブランド色）。 */
+@theme {
+  --color-rose-50: #fff4ee;
+  --color-rose-100: #ffe6d8;
+  --color-rose-200: #ffccb3;
+  --color-rose-300: #ffab84;
+  --color-rose-400: #ff8a5c;
+  --color-rose-500: #fb6a3c;
+  --color-rose-600: #ef5322;
+  --color-rose-700: #c73f16;
+  --color-rose-800: #9e3314;
+  --color-rose-900: #7d2c14;
+  --color-rose-950: #431307;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+    --background: #0f0c0a;
+    --foreground: #f2ede6;
   }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: "Hiragino Kaku Gothic ProN", "Hiragino Sans", "Yu Gothic UI", "Yu Gothic", Meiryo, "Noto Sans JP", ui-sans-serif, system-ui, sans-serif;
 }

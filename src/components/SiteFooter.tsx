@@ -7,7 +7,7 @@ export function SiteFooter() {
       <div className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-neutral-400">
         <p className="mb-2">
           <Link href="/" className="text-rose-600 hover:underline dark:text-rose-400">
-            レアレーダー
+            ハツコレ
           </Link>
           {" ・ "}
           <a href="/feed.xml" className="text-rose-600 hover:underline dark:text-rose-400">

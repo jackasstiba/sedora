@@ -71,7 +71,7 @@ async function main() {
   since.setDate(since.getDate() - days);
   const range = { since: ymd(since), until: ymd(until) };
 
-  console.log(`=== レアレーダー アクセス解析（直近${days}日: ${range.since}〜${range.until}）===`);
+  console.log(`=== ハツコレ アクセス解析（直近${days}日: ${range.since}〜${range.until}）===`);
 
   const total = (await query("visits/count", {})) as { data?: Row } | null;
   if (total?.data) {
@@ -115,7 +115,7 @@ async function main() {
   printRows("デバイス", devices?.data, "deviceType");
 
   // ── 解釈（実来訪か開発検証/クローラのノイズかを見分ける補助）─────────────
-  // レアレーダーは新規ドメインでSEO育成中。数字が小さいうちは「自分の検証アクセス」と
+  // ハツコレは新規ドメインでSEO育成中。数字が小さいうちは「自分の検証アクセス」と
   // 「実際の外部ユーザー」が混ざり、素の数字だけ見ると誤読しやすいので指標を出す。
   const refRows = referrers?.data ?? [];
   const totalRefPv = refRows.reduce((s, r) => s + Number(r.pageviews || 0), 0);
