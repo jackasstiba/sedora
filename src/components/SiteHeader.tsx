@@ -24,6 +24,14 @@ export async function SiteHeader() {
           </span>
         </Link>
 
+        {/* 相場・プレ値ビューへの固定導線（発売済みの高プレ値＝せどりの本命）。 */}
+        <Link
+          href="/premium"
+          className="shrink-0 rounded-full bg-rose-600 px-2.5 py-1 text-sm font-semibold text-white transition hover:bg-rose-700"
+        >
+          相場
+        </Link>
+
         {/* ジャンルの横スクロールナビ（モバイルでも指でスワイプ可） */}
         <nav
           aria-label="ジャンル"

@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
 import { dedupeItems, dedupeKey } from "./itemFilter";
+import { computeMargin } from "./margin";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
@@ -92,6 +93,50 @@ export async function getItemsByGenre(genre: string, take = 1500) {
   });
   // ジャンルページの一覧・見出し件数（items.length）から重複を除く。
   return dedupeItems(rows);
+}
+
+/** プレ値/相場ビュー用：相場（marketPriceText）が付いたアイテムを、**発売済み（過去）も
+ *  含めて**取得し、定価比（プレ値率）の高い順に返す。
+ *
+ *  背景: 通常の一覧は「今後の予定＋日付未定」しか出さないため、発売済みで高騰した品や
+ *  X巡回で付けた実売相場（メルカリ○万）が一覧から消え、詳細ページでしか見えなかった。
+ *  この構造ミスマッチを解消し、「発売済みでも高プレ値なら見せる」専用ビューを提供する。
+ *
+ *  並び: **相場額（marketPrice）の高い順**を主キーにする。X由来の高額実売
+ *  （メルカリ SP ¥150,000 等＝せどりの本命）は定価不明で定価比が出ないため、率順を
+ *  主キーにすると価値の低いマイナス%の中古より下に沈む。額順なら本命が上に来る。
+ *  同額なら定価比（プレ値率）の高い順。一覧・関連と同じ dedupeItems で重複を畳む。 */
+export async function getPremiumItems(take = 200) {
+  const rows = await prisma.item.findMany({
+    where: { marketPriceText: { not: null } },
+    orderBy: { id: "desc" },
+    take: 1000,
+  });
+  // タイトル一致の重複解消(dedupeItems)に加え、駿河屋の**同一商品URL**に複数のDB商品
+  // (torecamap/torecasoku 等が表記違いで別レコード)が紐づくケースを畳む。marketUrl は
+  // 商品固有なので同URL＝同一商品＝同じ相場。X由来は marketUrl がアカウント共有なので除外。
+  // 代表は「定価あり(=定価比が出せる)」を優先。
+  const deduped = dedupeItems(rows);
+  const surugayaRep = new Map<string, (typeof deduped)[number]>();
+  const others: (typeof deduped)[number][] = [];
+  for (const it of deduped) {
+    if (it.marketSource === "x" || !it.marketUrl) {
+      others.push(it);
+      continue;
+    }
+    const prev = surugayaRep.get(it.marketUrl);
+    if (!prev || (!prev.price && it.price)) surugayaRep.set(it.marketUrl, it);
+  }
+  return [...others, ...surugayaRep.values()]
+    .map((it) => ({ it, m: computeMargin(it.price, it.marketPrice) }))
+    .sort((a, b) => {
+      const pa = a.it.marketPrice ?? 0;
+      const pb = b.it.marketPrice ?? 0;
+      if (pb !== pa) return pb - pa; // 相場額の高い順
+      return (b.m?.pct ?? -Infinity) - (a.m?.pct ?? -Infinity); // 同額は定価比順
+    })
+    .slice(0, take)
+    .map((x) => x.it);
 }
 
 /** "2026-08" -> その月の [開始, 翌月開始) */

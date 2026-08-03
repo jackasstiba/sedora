@@ -105,6 +105,18 @@ export default async function Home() {
         </p>
       </header>
 
+      <Link
+        href="/premium"
+        className="mb-5 flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm transition hover:border-rose-300 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/30 dark:hover:bg-rose-950/50"
+      >
+        <span className="font-semibold text-rose-700 dark:text-rose-300">
+          💹 相場・プレ値ランキング
+        </span>
+        <span className="text-neutral-600 dark:text-neutral-300">
+          定価より高く売れている発売済みレア品を見る →
+        </span>
+      </Link>
+
       <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} />
 
       <nav className="mt-12 border-t border-neutral-200 pt-6 dark:border-neutral-800">
