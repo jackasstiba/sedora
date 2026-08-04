@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
-import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
+import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { countdown, formatLong } from "@/lib/date";
@@ -75,17 +75,33 @@ export default async function ItemPage({ params }: Props) {
   // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
   const storeList = parseStoresJson(item.stores);
 
-  const jsonLd = {
-    "@context": "https://schema.org",
-    "@graph": [
-      {
+  // Product構造化データの必須要件はoffers/review/aggregateRatingのいずれかをGoogleが要求する。
+  // レビュー・評価は実データが無いので付けない（推測値は約束しない方針）。定価(price)は裏取り済みの
+  // 事実なので、読めた場合のみOfferを付ける。availabilityは抽選/予約/発売予定で確定できないため省略。
+  const teika = parseYen(item.price);
+  const productNode = teika
+    ? {
         "@type": "Product",
         name: displayTitle,
         image: item.imageUrl ?? undefined,
         category: item.genre,
         description: `${displayTitle}の${item.eventType}情報（${item.genre}）`,
         ...(SITE ? { url: `${SITE}/items/${item.id}` } : {}),
-      },
+        offers: {
+          "@type": "Offer",
+          price: teika,
+          priceCurrency: "JPY",
+          ...(SITE ? { url: `${SITE}/items/${item.id}` } : {}),
+        },
+      }
+    : null;
+
+  const jsonLd = {
+    "@context": "https://schema.org",
+    "@graph": [
+      // 定価が読めない（イベント告知のみ等）商品はProductノードを出さない。
+      // offers無しのProductは重大エラーになりリッチリザルトにもならないため、出さない方が健全。
+      ...(productNode ? [productNode] : []),
       {
         "@type": "BreadcrumbList",
         itemListElement: [
