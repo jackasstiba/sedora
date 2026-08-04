@@ -51,9 +51,16 @@ const LEADING_DATE =
 // 「まで/締切/完売」や日付を含む告知節（商品名ではない）。先頭の店舗＋締切告知の判定に使う。
 const NOTICE_SEG = /(まで|締切|完売|\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}\/\d{1,2})/;
 
-// 先頭の店舗名プレフィックス（「プレバンで」「あみあみで」等）。この直後から商品名が始まる。
+// 販売・予約・入荷などの状態告知語（商品名ではない）。全角スペース区切りの先頭節を剥がす判定に使う。
+// 例:「販売再開中です」「予約開始中」「8月発売予定です」等の店舗ステータス文。
+const NOTICE_VERB =
+  /(?:予約(?:受付)?(?:開始|中)|受付(?:開始|中)|販売(?:中|開始|再開)|再入荷|入荷予定|出荷予定|発売予定|発売日|抽選受付)/;
+
+// 先頭の店舗名プレフィックス（「プレバンで」「あみあみで」「ビックカメラにて」「エディオン楽天で」等）。
+// この直後から商品名が始まる。家電量販店系も追加（Xミラーは「◯◯にて/で 販売開始」型が多い）。
+// 店舗名の直後に「楽天/モール/オンライン/ブックス」等の系列サフィックスが付く複合形（エディオン楽天で等）も許容。
 const LEADING_STORE =
-  /^(?:プレバン|プレミアムバンダイ|あみあみ|駿河屋|楽天|ヨドバシ|Amazon|アマゾン|ミニストップ(?:オンライン)?|セブン(?:ネット)?|ローソン|イオン|タカラトミーモール)(?:で|にて|は|より|なら)/;
+  /^(?:プレバン|プレミアムバンダイ|あみあみ|駿河屋|楽天ブックス|楽天|ヨドバシ(?:カメラ)?|Amazon|アマゾン|ビックカメラ|ビック|アキバソフマップ|ソフマップ|エディオン|ジョーシン|ケーズデンキ|ノジマ|dショッピング|ミニストップ(?:オンライン)?|セブン(?:ネット)?|ローソン|イオン|タカラトミーモール)(?:楽天|モール|オンライン|ネット|ドットコム)?(?:で|にて|は|より|なら)/;
 
 // 末尾の「〜が抽選受付開始！」等のアクション告知（商品名ではない）。連結助詞＋動作句＋記号。
 const TRAILING_ACTION =
@@ -70,8 +77,15 @@ function firstBracketed(title: string): string | null {
   return m ? m[1].trim() : null;
 }
 
+// 「8月発売予定です」「7月末入荷予定」等、日付＋発売/入荷告知だけで構成された節。
+// 数字を含むため looksProduct が商品名と誤判定してしまうが、この厳密パターンに合致すれば
+// 商品名ではない告知節と断定できるので、digitガードを飛び越えて剥がしてよい。
+const DATE_NOTICE_SEG =
+  /^\d{1,2}\s*月(?:末|上旬|中旬|下旬|\d{1,2}\s*日)?\s*(?:頃|ごろ)?\s*(?:発売予定|発売日|出荷予定|入荷予定|販売予定|予約開始)(?:です|予定)?[。！!]?$/;
+
 /** 先頭の全角スペース区切りの告知節（「他店即完売の人気　」「◯◯は7月31日まで　」等）を剥がす。
- *  コメント語 or 締切・日付を含み、商品らしさ（英数・長いカタカナ・商品タグ）が無い節だけ。 */
+ *  コメント語 or 締切・日付を含み、商品らしさ（英数・長いカタカナ・商品タグ）が無い節だけ。
+ *  例外: 「8月発売予定です」等の日付＋発売告知(DATE_NOTICE_SEG)は数字を含んでも告知節と断定して剥がす。 */
 function stripLeadingSpaceSegs(title: string): string {
   let s = title;
   for (let i = 0; i < 4; i++) {
@@ -79,8 +93,10 @@ function stripLeadingSpaceSegs(title: string): string {
     if (idx <= 0) break;
     const head = s.slice(0, idx);
     const rest = s.slice(idx + 1).trim();
-    if (rest.length < 6 || looksProduct(head)) break;
-    if (COMMENTARY.test(head) || NOTICE_SEG.test(head)) s = rest;
+    if (rest.length < 6) break;
+    const isDateNotice = DATE_NOTICE_SEG.test(head.trim());
+    if (!isDateNotice && looksProduct(head)) break;
+    if (isDateNotice || COMMENTARY.test(head) || NOTICE_SEG.test(head) || NOTICE_VERB.test(head)) s = rest;
     else break;
   }
   return s;
@@ -154,7 +170,7 @@ export function cleanListTitle(source: string, title: string): string {
   // 2) 【特典】等の商品タグがあり、その手前が実況コメントなら、タグから商品名が始まるとみなす。
   const tagIdx = raw.search(PRODUCT_TAG);
   if (tagIdx > 0 && COMMENTARY.test(raw.slice(0, tagIdx))) {
-    const fromTag = stripTrailingCommentary(raw.slice(tagIdx).trim());
+    const fromTag = stripTrailingActions(stripTrailingCommentary(raw.slice(tagIdx).trim()));
     if (fromTag.length >= 6) return fromTag;
   }
 

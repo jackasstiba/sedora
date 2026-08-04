@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { formatShort } from "@/lib/date";
+import { countdown, formatShort } from "@/lib/date";
 import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
@@ -28,6 +28,13 @@ const BLUE = "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
 const PURPLE = "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300";
 const AMBER = "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
 
+// 近日バッジの配色（緊急度）。urgent=本日/明日は目立つ柿色、soon/weekは徐々に落ち着かせる。
+const COUNTDOWN_TONE: Record<"urgent" | "soon" | "week", string> = {
+  urgent: "bg-rose-600 text-white",
+  soon: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+  week: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
+};
+
 const EVENT_COLORS: Record<string, string> = {
   // 予約系＝緑
   予約開始: GREEN,
@@ -54,6 +61,7 @@ function formatDate(date: Date | string | null): string | null {
 
 export function ItemCard({ item }: { item: Item }) {
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  const cd = countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
   const displayTitle = cleanListTitle(item.source, item.title);
@@ -80,6 +88,14 @@ export function ItemCard({ item }: { item: Item }) {
         >
           {item.eventType}
         </span>
+        {cd && (
+          <span
+            className={`absolute right-2 top-2 rounded-full px-2 py-0.5 text-xs font-bold shadow-sm ${COUNTDOWN_TONE[cd.tone]}`}
+          >
+            {cd.tone === "urgent" ? "🔥 " : ""}
+            {cd.text}
+          </span>
+        )}
       </div>
 
       <div className="flex flex-1 flex-col gap-2 p-3">

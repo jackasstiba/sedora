@@ -34,7 +34,7 @@ export function norm(s: string): string {
     .replace(/[\s　・,，.。!！?？:：/／()（）【】\[\]「」'"`~-]/g, "");
 }
 
-/** 誤マッチ防止：商品名とレアレーダー側タイトルの2-gram重なり率 */
+/** 誤マッチ防止：商品名とハツコレ側タイトルの2-gram重なり率 */
 function similarity(a: string, b: string): number {
   const na = norm(a);
   const nb = norm(b);

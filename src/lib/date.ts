@@ -35,6 +35,33 @@ export function formatLong(d: Date | string): string {
   return `${x.getUTCFullYear()}年${x.getUTCMonth() + 1}月${x.getUTCDate()}日(${DAYS[x.getUTCDay()]})`;
 }
 
+/** 対象の暦日が「今日（日本時間）」から何日後か。負=過去、0=本日、正=未来。UTC暦日で比較。 */
+export function daysUntil(d: Date | string): number {
+  const x = new Date(d);
+  const target = Date.UTC(x.getUTCFullYear(), x.getUTCMonth(), x.getUTCDate());
+  return Math.round((target - todayJst().getTime()) / 86_400_000);
+}
+
+export type Countdown = {
+  days: number;
+  /** 表示ラベル。"本日" / "明日" / "あと3日"。eventDate から計算できる事実のみ（「締切」等の未確定語は使わない）。 */
+  text: string;
+  /** 緊急度。urgent=本日/明日, soon=2〜3日, week=4〜7日。8日以上・過去は null（＝バッジを出さない）。 */
+  tone: "urgent" | "soon" | "week";
+};
+
+/** 発売・予約開始・抽選・開催などの eventDate から「あと何日か」を返す。
+ *  近日（7日以内）だけを緊急シグナルとして返し、それより先・過去・日付なしは null。
+ *  eventType 非依存の事実（残日数）のみを扱い、締切/開始の断定はしない（呼び出し側で eventType バッジと併記）。 */
+export function countdown(eventDate: Date | string | null): Countdown | null {
+  if (!eventDate) return null;
+  const days = daysUntil(eventDate);
+  if (days < 0 || days > 7) return null;
+  const text = days === 0 ? "本日" : days === 1 ? "明日" : `あと${days}日`;
+  const tone: Countdown["tone"] = days <= 1 ? "urgent" : days <= 3 ? "soon" : "week";
+  return { days, text, tone };
+}
+
 /** 暦日の年・月・日・曜日（UTC基準） */
 export function parts(d: Date | string): { y: number; m: number; day: number; dow: number } {
   const x = new Date(d);

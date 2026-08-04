@@ -7,7 +7,7 @@ import { dedupeCrossSource } from "./itemFilter";
 // torecamapはsubGenreにゲーム名、channelttonoはフリーテキスト）ため、
 // source / subGenre / title の複合で判定する。
 // 競合(tcgprice/toreca-souba)はタイトル別ページでSEO流入を取っているため、
-// レアレーダーも同じ土俵に乗せるのが狙い。
+// ハツコレも同じ土俵に乗せるのが狙い。
 
 type TcgRow = { title: string; subGenre: string | null; source: string };
 

@@ -2,7 +2,7 @@ import { prisma } from "../src/lib/prisma";
 import { fetchSurugayaPrice } from "../src/scrapers/surugayaPrice";
 import { sleep } from "../src/scrapers/util";
 
-// レアレーダーの各アイテムに「相場（駿河屋の中古/新品価格）」をベストエフォートで付与する。
+// ハツコレの各アイテムに「相場（駿河屋の中古/新品価格）」をベストエフォートで付与する。
 // 未発売品は駿河屋に市場が無く null のまま（＝サイトでは相場を出さない）。
 // 使い方: npm run scrape:prices -- [--limit N] [--genre トレカ] [--all]
 //   デフォルトは相場が意味を持ちやすいジャンル(トレカ/フィギュア/一番くじ/プラモ)を対象。

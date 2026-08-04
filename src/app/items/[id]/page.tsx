@@ -7,7 +7,7 @@ import { OutboundLink } from "@/components/OutboundLink";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
-import { formatLong } from "@/lib/date";
+import { countdown, formatLong } from "@/lib/date";
 import { displaySubGenre, stripSourceLabel } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { parseStoresJson } from "@/lib/stores";
@@ -59,6 +59,7 @@ export default async function ItemPage({ params }: Props) {
 
   const related = await getRelatedItems(item);
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  const cd = countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 情報元由来の定型ラベル（snkrdunkの「｜抽選/販売/定価情報」等）は表示・構造化データから除去。
   const displayTitle = stripSourceLabel(item.title);
@@ -154,7 +155,23 @@ export default async function ItemPage({ params }: Props) {
             {dateLabel && (
               <>
                 <dt className="text-neutral-500 dark:text-neutral-400">{item.eventType}日</dt>
-                <dd className="font-semibold text-rose-600 dark:text-rose-400">{dateLabel}</dd>
+                <dd className="font-semibold text-rose-600 dark:text-rose-400">
+                  {dateLabel}
+                  {cd && (
+                    <span
+                      className={`ml-2 rounded-full px-2 py-0.5 text-xs font-bold align-middle ${
+                        cd.tone === "urgent"
+                          ? "bg-rose-600 text-white"
+                          : cd.tone === "soon"
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200"
+                            : "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+                      }`}
+                    >
+                      {cd.tone === "urgent" ? "🔥 " : ""}
+                      {cd.text}
+                    </span>
+                  )}
+                </dd>
               </>
             )}
             {item.price && (

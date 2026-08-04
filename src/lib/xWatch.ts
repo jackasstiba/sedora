@@ -1,4 +1,4 @@
-// X（旧Twitter）巡回で拾った「転売に良さそうな商品／実売相場」をレアレーダーに取り込む純関数群。
+// X（旧Twitter）巡回で拾った「転売に良さそうな商品／実売相場」をハツコレに取り込む純関数群。
 // prisma を import しないこと（ロジックを単体で検証可能に保つ）。
 //
 // 背景と方針:
@@ -20,7 +20,7 @@ export const X_MARKET_SOURCE = "x"; // 相場の出所（メルカリ等の実�
 export type XWatchEntry = {
   kind: "new" | "resale";
 
-  // --- kind:"new"（新規商品としてレアレーダーに追加） ---
+  // --- kind:"new"（新規商品としてハツコレに追加） ---
   title?: string;
   genre?: string | null; // 明示指定（省略時は classifyGenre）
   eventType?: string | null; // 予約/抽選/発売/開催/再販 等（省略時は本文から推定→"情報"）

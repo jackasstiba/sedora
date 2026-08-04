@@ -11,7 +11,7 @@ import {
   type XWatchInbox,
 } from "../src/lib/xWatch";
 
-// X巡回（Claude for Chrome）で構造化した受け皿JSONをレアレーダーDBに取り込む。
+// X巡回（Claude for Chrome）で構造化した受け皿JSONをハツコレDBに取り込む。
 // 使い方: npm run ingest:x [-- --file scripts/x_watch/x_watch_inbox.json] [--dry]
 //   kind:"new"    → source=x_watch の新規商品として upsert（相場は market* に載る）
 //   kind:"resale" → 既存アイテムに実売相場を付与（itemId 明示 or match で曖昧一致）
