@@ -38,7 +38,10 @@ async function main() {
           eventDateText: item.eventDateText,
           price: item.price,
           url: item.url,
-          imageUrl: item.imageUrl,
+          // 一覧完結型スクレイパー(channeltono/rarecheck等)は imageUrl=null を返すため、
+          // そのまま書くと scrape:images でバックフィルした画像を毎回の巡回で null に潰す。
+          // null のときは undefined＝更新しない（既存画像を温存）、値があるときだけ更新する。
+          imageUrl: item.imageUrl ?? undefined,
           highlights: item.highlights ?? null,
           hasLottery: item.hasLottery ?? null,
           officialUrl: item.officialUrl ?? null,

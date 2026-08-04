@@ -13,11 +13,18 @@ const SOURCES = ["channeltono", "rarecheck"];
 const SHARED_IMAGE_MAX = 3; // この回数を超えて共有される画像はデフォルトバナー扱いで不採用
 const RATE_MS = 250;
 
+// og:image が無い記事でCMSが挿す汎用アイコン/デフォルト画像。商品画像ではないので不採用。
+// 例: rarecheck が featured image 未設定の記事に返す /uploads/2018/11/Binoculars-256.png。
+const DEFAULT_ICON_RE =
+  /binoculars|no[-_]?image|noimage|default|placeholder|logo|icon|avatar|gravatar|blank|dummy|\/uploads\/201[0-8]\//i;
+
 function extractOgImage(html: string): string | null {
   const m =
     html.match(/<meta[^>]+property=["']og:image["'][^>]+content=["']([^"']+)["']/i) ||
     html.match(/<meta[^>]+content=["']([^"']+)["'][^>]+property=["']og:image["']/i);
-  return m ? m[1] : null;
+  const img = m ? m[1] : null;
+  if (img && DEFAULT_ICON_RE.test(img)) return null; // デフォルトアイコンは商品画像でない
+  return img;
 }
 
 async function main() {
