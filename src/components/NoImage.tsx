@@ -1,6 +1,10 @@
-// 画像なしカードの代替表示。Xミラー系など元記事に商品画像が無い
-// （og:imageはブログの汎用バナーで使えない）ため、素の灰色「画像なし」だと
-// 壊れて見える。ジャンル絵文字＋ジャンル名で「意図した」プレースホルダにする。
+// 画像なしカードの代替表示。Xミラー/アグリ系は元記事に使える商品画像が無く
+// （og:imageはブログ汎用バナー、本文画像は収集元CDN＝ソース露見/ホットリンクNG）、
+// 素の灰色「画像なし」だと壊れて見える＝画像なしが結構ある問題への対処。
+//
+// title を渡すと「文字タイル」＝商品名を主役に見せる情報カバーにする（＝空きスペースに
+// 実際の中身＝商品名を出して"意図した見た目"にする）。title 無し（詳細ページ等、別に
+// 大見出しがある場面）は従来のジャンル絵文字＋ジャンル名の装飾プレースホルダにする。
 // （収集元サイト名は非公開方針のため表示しない）
 const GENRE_EMOJI: Record<string, string> = {
   フィギュア: "🧸",
@@ -35,9 +39,34 @@ const GENRE_TINT: Record<string, string> = {
   その他: "from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900",
 };
 
-export function NoImage({ genre }: { genre: string }) {
+export function NoImage({ genre, title }: { genre: string; title?: string }) {
   const emoji = GENRE_EMOJI[genre] ?? "📦";
   const tint = GENRE_TINT[genre] ?? GENRE_TINT["その他"];
+
+  // title あり＝文字タイル（商品名を主役に）。空きスペースに実情報を出して"意図した"見た目に。
+  if (title) {
+    return (
+      <div
+        className={`relative flex h-full w-full flex-col justify-between overflow-hidden bg-gradient-to-br ${tint} p-3`}
+      >
+        <span
+          className="pointer-events-none absolute -bottom-4 -right-3 select-none text-8xl opacity-10"
+          aria-hidden
+        >
+          {emoji}
+        </span>
+        <span className="z-10 inline-flex w-fit items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-neutral-600 shadow-sm dark:bg-black/30 dark:text-neutral-300">
+          <span aria-hidden>{emoji}</span>
+          {genre}
+        </span>
+        <p className="z-10 line-clamp-4 text-sm font-bold leading-snug text-neutral-800 dark:text-neutral-100">
+          {title}
+        </p>
+      </div>
+    );
+  }
+
+  // title なし＝従来の装飾プレースホルダ（詳細ページ等、別に大見出しがある場面）。
   return (
     <div
       className={`flex h-full w-full flex-col items-center justify-center gap-1 bg-gradient-to-br ${tint} px-2 text-center`}

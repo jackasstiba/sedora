@@ -73,7 +73,7 @@ export function ItemCard({ item }: { item: Item }) {
             className="h-full w-full object-cover transition group-hover:scale-105"
           />
         ) : (
-          <NoImage genre={item.genre} />
+          <NoImage genre={item.genre} title={displayTitle} />
         )}
         <span
           className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(item.eventType)}`}
@@ -92,9 +92,14 @@ export function ItemCard({ item }: { item: Item }) {
           )}
         </div>
 
-        <h3 className="line-clamp-3 flex-1 text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
-          {displayTitle}
-        </h3>
+        {/* 画像ありは商品名を本文に。画像なしは NoImage タイル側で商品名を主役に出すため重複を避ける。 */}
+        {item.imageUrl ? (
+          <h3 className="line-clamp-3 flex-1 text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
+            {displayTitle}
+          </h3>
+        ) : (
+          <div className="flex-1" aria-hidden />
+        )}
 
         {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */}
         {item.highlights && (
