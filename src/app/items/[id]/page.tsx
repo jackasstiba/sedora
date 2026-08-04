@@ -66,6 +66,11 @@ export default async function ItemPage({ params }: Props) {
   // 無ければ highlights の畳み込み文字列からリスト展開（旧データ後方互換）。
   const prizeGallery = parsePrizesJson(item.prizes);
   const lineup = prizeGallery ? null : parseKujiLineup(item.highlights);
+  // 賞ギャラリーの見せ方を賞データから決める（ソース非依存）。
+  // 一番くじ＝等級賞(A賞/ラストワン賞)＝labelが「賞」で終わる。raffle-kuji＝等級なしで
+  // labelは当選確率(例「0.5%」)＝先頭ほど低確率＝高額の本命。二次相場(resale)は付く賞のみ。
+  const prizesGraded = prizeGallery?.some((p) => /賞$/.test(p.label)) ?? false;
+  const prizesHaveResale = prizeGallery?.some((p) => !!p.resaleText) ?? false;
   // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
   const storeList = parseStoresJson(item.stores);
 
@@ -355,17 +360,25 @@ export default async function ItemPage({ params }: Props) {
       {prizeGallery && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-            🎯 各賞ラインナップ（全{prizeGallery.length}種・くじ）
+            🎯 {prizesGraded ? "各賞ラインナップ" : "賞品ラインナップ"}（全{prizeGallery.length}種・くじ）
           </h2>
           <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-            くじ（抽選）で当たる賞品です。A賞・ラストワン賞は二次相場が付きやすい本命。相場は駿河屋（中古バラ売り）の参考値で、発売済みの賞にのみ表示されます（メルカリはこれより高い傾向）。
+            くじ（抽選）で当たる賞品です。
+            {prizesGraded
+              ? "A賞・ラストワン賞は二次相場が付きやすい本命。"
+              : "当選確率が低い賞（左上のバッジ）ほど本数が少なく高額の本命。"}
+            {prizesHaveResale &&
+              "相場は駿河屋（中古バラ売り）の参考値で、発売済みの賞にのみ表示されます（メルカリはこれより高い傾向）。"}
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-            {prizeGallery.map((p) => (
+            {prizeGallery.map((p, i) => {
+              // 注目枠（rose）＝等級ありは A賞/ラストワン賞、raffleは先頭＝最低確率の本命。
+              const hot = prizesGraded ? isHotPrize(p.label) : i === 0;
+              return (
               <div
-                key={p.label}
+                key={`${p.label}-${i}`}
                 className={`flex flex-col overflow-hidden rounded-xl border bg-white shadow-sm dark:bg-neutral-900 ${
-                  isHotPrize(p.label)
+                  hot
                     ? "border-rose-300 dark:border-rose-800"
                     : "border-neutral-200 dark:border-neutral-800"
                 }`}
@@ -386,7 +399,7 @@ export default async function ItemPage({ params }: Props) {
                   )}
                   <span
                     className={`absolute left-2 top-2 rounded px-1.5 py-0.5 text-xs font-bold ${
-                      isHotPrize(p.label)
+                      hot
                         ? "bg-rose-600 text-white"
                         : "bg-purple-200 text-purple-900 dark:bg-purple-900/70 dark:text-purple-100"
                     }`}
@@ -416,7 +429,8 @@ export default async function ItemPage({ params }: Props) {
                     ))}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </section>
       )}

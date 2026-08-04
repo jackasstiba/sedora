@@ -2,7 +2,7 @@ import { ScrapedItem } from "./types";
 import { classifyGenre, fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import {
   extractDrawFee,
-  extractRafflePrizeNames,
+  extractRafflePrizes,
   formatRafflePrizeHighlights,
 } from "./raffleKujiEnrich";
 
@@ -78,15 +78,20 @@ export async function scrapeRaffleKuji(): Promise<ScrapedItem[]> {
   const items = [...byId.values()];
 
   // 一覧では“いくらで引けるか／何が当たるか”に届かない。各くじの詳細ページを開いて
-  // 抽選1回の金額（price）と賞品ラインナップ（highlights＝「🎯 注目賞品」枠）を補う。
+  // 抽選1回の金額（price）／賞品ラインナップ要約（highlights＝カードの「🎯 注目賞品」枠）／
+  // 賞画像ギャラリー（prizes JSON＝詳細ページで当選確率バッジ＋賞品画像を表示）を補う。
   // レート制限つき・失敗時はその1件の深掘りだけ諦めて一覧情報は活かす（壊さない）。
   for (const item of items) {
     try {
       const detail = await fetchHtml(item.url);
       const fee = extractDrawFee(detail);
       if (fee) item.price = fee;
-      const highlights = formatRafflePrizeHighlights(extractRafflePrizeNames(detail));
-      if (highlights) item.highlights = highlights;
+      const prizes = extractRafflePrizes(detail);
+      if (prizes.length) {
+        const highlights = formatRafflePrizeHighlights(prizes);
+        if (highlights) item.highlights = highlights;
+        item.prizes = JSON.stringify(prizes);
+      }
     } catch {
       // 詳細取得に失敗しても一覧情報（タイトル・締切・画像・応募URL）は活かす
     }

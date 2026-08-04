@@ -7,9 +7,10 @@
 //   LotteryPrizeList_itemName__*        … 賞品名（先頭ほど当選確率が低い＝高額側）
 // が構造化されているので、これを price と highlights に落とす。
 //
-// 一番くじ(ichibanKujiEnrich)と役割は同じだが、raffle-kuji は賞に等級(A賞/B賞)が無く
-// 賞品名の並びだけなので、賞ギャラリー(prizes JSON)は使わず賞品名の羅列に留める
-// （＝一番くじ専用の「各賞ラインナップ」ギャラリーの等級前提コピーと食い違わせない）。
+// 一番くじ(ichibanKujiEnrich)と役割は同じだが、raffle-kuji は賞に等級(A賞/B賞)が無い。
+// 代わりに各賞に当選確率(例「0.5%」＝先頭ほど低確率＝本命)と賞品画像があるので、
+// 賞ギャラリー(prizes JSON)には label=当選確率・name=賞品名・image=賞品画像 を入れる。
+// 詳細ページ側のギャラリーは label が「賞」で終わるか(=一番くじ)否か(=raffle)で見せ方を出し分ける。
 
 function decodeEntities(s: string): string {
   return s
@@ -38,22 +39,37 @@ export function extractDrawFee(html: string): string | null {
   return /\d/.test(t) ? t : null;
 }
 
-/** 賞品名の一覧（先頭＝当選確率が低い高額側）。重複除去。取れなければ空配列。 */
-export function extractRafflePrizeNames(html: string): string[] {
-  const names: string[] = [];
+export type RafflePrize = { label: string; name: string; image: string | null };
+
+/**
+ * 各賞（賞品カード）を {label:当選確率, name:賞品名, image:賞品画像} で構造化する。
+ * 先頭ほど当選確率が低い＝高額の本命。取れなければ空配列（＝深掘り失敗、呼び出し側は活かす）。
+ */
+export function extractRafflePrizes(html: string): RafflePrize[] {
+  // 賞品カードは `LotteryPrizeList_itemCard__*` 単位（Benefit等の別リストは別クラスなので混ざらない）。
+  const cards = html.split(/LotteryPrizeList_itemCard__[A-Za-z0-9_]+/).slice(1);
+  const out: RafflePrize[] = [];
   const seen = new Set<string>();
-  for (const m of html.matchAll(/LotteryPrizeList_itemName__[^"]*">([\s\S]*?)<\//g)) {
-    const n = strip(m[1]);
-    if (n && !seen.has(n)) {
-      seen.add(n);
-      names.push(n);
-    }
+  for (const c of cards) {
+    const rawName = c.match(/LotteryPrizeList_itemName__[^"]*">([\s\S]*?)<\//)?.[1];
+    const name = rawName ? strip(rawName) : "";
+    if (!name || seen.has(name)) continue;
+    seen.add(name);
+    // 当選確率（「当選確率: 0.5%」）。React の `<!-- -->` で数字が分断されるので、
+    // status ブロックを strip（タグ/コメント/nbsp除去）してからマッチする。半角/全角％対応。
+    const statusRaw = c.match(/LotteryPrizeList_statusWrapper__[^"]*">([\s\S]*?)<\/div>/)?.[1];
+    const prob = statusRaw
+      ? strip(statusRaw).match(/([\d.]+\s*[%％])/)?.[1]?.replace(/\s+/g, "")
+      : undefined;
+    const image =
+      c.match(/<img src="(https:\/\/s\.butterfly\.fan\/lottery-prize-goods\/[^"]+)"/)?.[1] ?? null;
+    out.push({ label: prob || "賞品", name, image });
   }
-  return names;
+  return out;
 }
 
 /** 賞品名を highlights 用の1行要約にする（カード＆詳細の「🎯 注目賞品」枠で共有）。 */
-export function formatRafflePrizeHighlights(names: string[]): string | null {
-  if (!names.length) return null;
-  return `賞品ラインナップ：${names.join(" ／ ")}（全${names.length}種）`;
+export function formatRafflePrizeHighlights(prizes: RafflePrize[]): string | null {
+  if (!prizes.length) return null;
+  return `賞品ラインナップ：${prizes.map((p) => p.name).join(" ／ ")}（全${prizes.length}種）`;
 }
