@@ -1,5 +1,10 @@
 import { ScrapedItem } from "./types";
-import { classifyGenre, fetchHtml, parseJapaneseFullDate } from "./util";
+import { classifyGenre, fetchHtml, parseJapaneseFullDate, sleep } from "./util";
+import {
+  extractDrawFee,
+  extractRafflePrizeNames,
+  formatRafflePrizeHighlights,
+} from "./raffleKujiEnrich";
 
 // オンラインくじプラットフォーム（raffle-kuji.jp）の「開催中」抽選を収集する。
 // 一番くじ倶楽部（1kuji.com）に次ぐ2つ目の一次くじプラットフォーム源。
@@ -70,5 +75,23 @@ export async function scrapeRaffleKuji(): Promise<ScrapedItem[]> {
     });
   }
 
-  return [...byId.values()];
+  const items = [...byId.values()];
+
+  // 一覧では“いくらで引けるか／何が当たるか”に届かない。各くじの詳細ページを開いて
+  // 抽選1回の金額（price）と賞品ラインナップ（highlights＝「🎯 注目賞品」枠）を補う。
+  // レート制限つき・失敗時はその1件の深掘りだけ諦めて一覧情報は活かす（壊さない）。
+  for (const item of items) {
+    try {
+      const detail = await fetchHtml(item.url);
+      const fee = extractDrawFee(detail);
+      if (fee) item.price = fee;
+      const highlights = formatRafflePrizeHighlights(extractRafflePrizeNames(detail));
+      if (highlights) item.highlights = highlights;
+    } catch {
+      // 詳細取得に失敗しても一覧情報（タイトル・締切・画像・応募URL）は活かす
+    }
+    await sleep(400);
+  }
+
+  return items;
 }
