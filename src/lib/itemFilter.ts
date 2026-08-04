@@ -36,6 +36,8 @@ const SOURCE_LABELS: Record<string, string> = {
   // （現状このラベルはUIに表示していないが、将来露出しても収集元が漏れないように）。
   nyuka_now: "抽選情報",
   tenbaiquest: "抽選情報",
+  // raffle_kuji は一次くじプラットフォーム（応募ページに直リンク）。ブランド名は出さず中立ラベル。
+  raffle_kuji: "オンラインくじ",
 };
 
 export function sourceLabel(source: string): string {

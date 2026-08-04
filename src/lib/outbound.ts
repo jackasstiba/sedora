@@ -13,6 +13,7 @@ const OFFICIAL_URL_SOURCES = new Set([
   "torecamap", // 各商品の公式販売ページに直リンク
   "nike_snkrs", // Nike SNKRS 公式の商品(launch/t)ページに直リンク
   "nyuka_now", // item.url は各小売の公式・抽選ページ（一次ソース）に直リンク
+  "raffle_kuji", // オンラインくじの一次プラットフォーム。item.url は応募ページ(/lotteries/id)に直リンク
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
