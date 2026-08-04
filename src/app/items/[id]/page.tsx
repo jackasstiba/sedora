@@ -4,13 +4,13 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
-import { sourceLabel } from "@/lib/items";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
-import { stripSourceLabel } from "@/lib/title";
+import { displaySubGenre, stripSourceLabel } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
+import { parseStoresJson } from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -35,7 +35,6 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     dateStr ? `${item.eventType}日: ${dateStr}` : null,
     item.price ? `価格: ${item.price}` : null,
     `ジャンル: ${item.genre}`,
-    `情報元: ${sourceLabel(item.source)}`,
   ]
     .filter(Boolean)
     .join(" ／ ");
@@ -67,6 +66,8 @@ export default async function ItemPage({ params }: Props) {
   // 無ければ highlights の畳み込み文字列からリスト展開（旧データ後方互換）。
   const prizeGallery = parsePrizesJson(item.prizes);
   const lineup = prizeGallery ? null : parseKujiLineup(item.highlights);
+  // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
+  const storeList = parseStoresJson(item.stores);
 
   const jsonLd = {
     "@context": "https://schema.org",
@@ -118,7 +119,7 @@ export default async function ItemPage({ params }: Props) {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
           ) : (
-            <NoImage genre={item.genre} source={item.source} />
+            <NoImage genre={item.genre} />
           )}
         </div>
 
@@ -133,9 +134,9 @@ export default async function ItemPage({ params }: Props) {
             >
               {item.genre}
             </Link>
-            {item.subGenre && item.subGenre !== item.genre && (
+            {displaySubGenre(item.subGenre) && displaySubGenre(item.subGenre) !== item.genre && (
               <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200">
-                {item.subGenre}
+                {displaySubGenre(item.subGenre)}
               </span>
             )}
           </div>
@@ -201,8 +202,6 @@ export default async function ItemPage({ params }: Props) {
                 </dd>
               </>
             )}
-            <dt className="text-neutral-500 dark:text-neutral-400">配信元</dt>
-            <dd className="text-neutral-800 dark:text-neutral-100">{sourceLabel(item.source)}</dd>
           </dl>
 
           {/* 構造化された各賞ギャラリー（画像＋相場）はグリッド下の専用セクションで表示する。
@@ -232,6 +231,9 @@ export default async function ItemPage({ params }: Props) {
                 くじ（抽選）で当たる賞品です。A賞・ラストワン賞は二次相場が付きやすいので要チェック。
               </p>
             </div>
+          ) : storeList ? (
+            /* 家電・ゲーム機は下部の「受付中ストア」節で公式リンクごと詳しく出すので、ここは畳む。 */
+            null
           ) : (
             /* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */
             item.highlights && (
@@ -253,35 +255,39 @@ export default async function ItemPage({ params }: Props) {
             )
           )}
 
-          {/* 情報元 / 購入導線。item.url の実態(公式 or まとめ・告知)に合わせてラベルを出し分ける。 */}
+          {/* 公式・一次情報・購入導線のみを出す。
+              ※ 収集元（まとめ/Xミラー/カレンダー等）のURLは非公開方針のため item.url を直リンクしない。
+                 公式ページを指すソースだけ「公式ページで見る」を出し、それ以外は officialUrl（記事から辿った
+                 一次情報）と商品名検索の購入導線に寄せる。 */}
           <div className="mt-2 flex flex-col gap-2">
-            <OutboundLink
-              href={item.url}
-              kind={isOfficialUrl(item.source) ? "official" : "source"}
-              source={item.source}
-              itemId={item.id}
-              className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
-            >
-              {isOfficialUrl(item.source)
-                ? "公式ページで見る →"
-                : `情報元（${sourceLabel(item.source)}）で見る →`}
-            </OutboundLink>
-            {/* コラボ記事から辿った一次情報（公式キャンペーン/ストア）。何が売られるかの原典。 */}
+            {isOfficialUrl(item.source) && (
+              <OutboundLink
+                href={item.url}
+                kind="official"
+                source={item.source}
+                itemId={item.id}
+                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+              >
+                公式ページで見る →
+              </OutboundLink>
+            )}
+            {/* 記事から辿った一次情報（公式キャンペーン/ストア）。何が売られるかの原典。 */}
             {item.officialUrl && (
               <OutboundLink
                 href={item.officialUrl}
                 kind="official_secondary"
                 source={item.source}
                 itemId={item.id}
-                className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:hover:bg-rose-950"
+                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
-                公式（一次情報）で販売内容を見る →
+                公式で販売内容を見る →
               </OutboundLink>
             )}
-            {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。 */}
-            {hasSearchableTitle(item.source) && (
+            {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。
+                収集元URLを出さない代わりに、公式リンクを持たない商品でも行き止まりにしない導線。 */}
+            {(hasSearchableTitle(item.source) || (!isOfficialUrl(item.source) && !item.officialUrl)) && (
               <OutboundLink
-                href={rakutenSearchUrl(item.title)}
+                href={rakutenSearchUrl(hasSearchableTitle(item.source) ? item.title : displayTitle)}
                 kind="rakuten"
                 source={item.source}
                 itemId={item.id}
@@ -292,10 +298,58 @@ export default async function ItemPage({ params }: Props) {
             )}
           </div>
           <p className="text-xs text-neutral-400">
-            ※ 情報元は各所のまとめ・告知ページを含みます。予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
+            ※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
           </p>
         </div>
       </div>
+
+      {/* 家電・ゲーム機の「今まさに受付中の各小売（公式）」一覧。抽選/予約応募の一次ソースへ直リンク。 */}
+      {storeList && (
+        <section className="mt-10">
+          <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            🎯 抽選・予約 受付中ストア（公式 {storeList.length}店）
+          </h2>
+          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+            現在応募・予約を受付中のストアです。応募条件（購入履歴・会員登録など）・在庫・締切は各公式ページでご確認ください。
+          </p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {storeList.map((s) => (
+              <li
+                key={s.name + s.url}
+                className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</div>
+                  {(s.form || s.when) && (
+                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                      {s.form && (
+                        <span className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
+                          {s.form}
+                        </span>
+                      )}
+                      {s.when && <span className="font-semibold text-rose-600 dark:text-rose-400">{s.when}</span>}
+                    </div>
+                  )}
+                  {s.note && (
+                    <p className="mt-1 text-xs leading-snug text-neutral-500 dark:text-neutral-400">
+                      条件: {s.note}
+                    </p>
+                  )}
+                </div>
+                <OutboundLink
+                  href={s.url}
+                  kind="official"
+                  source={item.source}
+                  itemId={item.id}
+                  className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
+                >
+                  応募ページ →
+                </OutboundLink>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 各等賞ギャラリー（賞画像＋賞ごとの二次相場）。一番くじの“何が当たるか”を最も濃く見せる面。 */}
       {prizeGallery && (

@@ -20,4 +20,5 @@ export type ScrapedItem = {
   hasLottery?: boolean | null;
   officialUrl?: string | null; // 記事から辿った一次情報（公式キャンペーン/ストア）
   prizes?: string | null; // 一番くじの各等賞ラインナップ（JSON配列文字列。ichibanKuji のみ）
+  stores?: string | null; // 受付中の公式ストア一覧（JSON配列文字列。nyuka_now のみ＝家電・ゲーム機抽選）
 };

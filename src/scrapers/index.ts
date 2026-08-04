@@ -12,6 +12,8 @@ import { scrapePokemonGoods } from "./pokemonGoods";
 import { scrapePokemonCard } from "./pokemonCard";
 import { scrapeNikeSnkrs } from "./nikeSnkrs";
 import { scrapeTorecasoku } from "./torecasoku";
+import { scrapeNyukaNow } from "./nyukaNow";
+import { scrapeTenbaiQuest } from "./tenbaiquest";
 
 export type ScraperResult = {
   source: string;
@@ -35,6 +37,8 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   { source: "pokemoncard", run: scrapePokemonCard },
   { source: "nike_snkrs", run: scrapeNikeSnkrs },
   { source: "torecasoku", run: scrapeTorecasoku },
+  { source: "nyuka_now", run: scrapeNyukaNow },
+  { source: "tenbaiquest", run: scrapeTenbaiQuest },
 ];
 
 export async function runAllScrapers(ctx: ScrapeContext): Promise<ScraperResult[]> {

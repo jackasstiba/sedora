@@ -1,8 +1,7 @@
 import Link from "next/link";
-import { sourceLabel } from "@/lib/itemFilter";
 import { formatShort } from "@/lib/date";
 import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
-import { cleanListTitle } from "@/lib/title";
+import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
 
 // eventDate は Date（サーバー）／ISO文字列（クライアントへ渡した後）どちらも受ける。
@@ -74,7 +73,7 @@ export function ItemCard({ item }: { item: Item }) {
             className="h-full w-full object-cover transition group-hover:scale-105"
           />
         ) : (
-          <NoImage genre={item.genre} source={item.source} />
+          <NoImage genre={item.genre} />
         )}
         <span
           className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(item.eventType)}`}
@@ -86,7 +85,7 @@ export function ItemCard({ item }: { item: Item }) {
       <div className="flex flex-1 flex-col gap-2 p-3">
         <div className="flex items-center gap-2 text-xs">
           <span className="rounded bg-neutral-100 px-1.5 py-0.5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
-            {item.subGenre ?? item.genre}
+            {displaySubGenre(item.subGenre) ?? item.genre}
           </span>
           {dateLabel && (
             <span className="font-semibold text-rose-600 dark:text-rose-400">{dateLabel}</span>
@@ -111,10 +110,11 @@ export function ItemCard({ item }: { item: Item }) {
           </p>
         )}
 
-        <div className="flex items-center justify-between text-xs text-neutral-500 dark:text-neutral-400">
-          <span className="truncate">{sourceLabel(item.source)}</span>
-          {item.price && <span className="font-medium text-neutral-700 dark:text-neutral-200">{formatPriceDisplay(item.price.split(" / ")[0])}</span>}
-        </div>
+        {item.price && (
+          <div className="flex items-center justify-end text-xs text-neutral-500 dark:text-neutral-400">
+            <span className="font-medium text-neutral-700 dark:text-neutral-200">{formatPriceDisplay(item.price.split(" / ")[0])}</span>
+          </div>
+        )}
 
         {item.marketPriceText && (
           <div className="-mt-1 flex flex-wrap items-center gap-1 text-xs">

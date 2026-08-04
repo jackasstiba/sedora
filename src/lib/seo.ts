@@ -14,6 +14,9 @@ const GENRE_ORDER = [
   "一番くじ",
   "コラボ",
   "ポケモン",
+  "ソフビ・アートトイ",
+  "家電・ゲーム機",
+  "酒・ウイスキー",
 ];
 
 export type SeoItem = Awaited<ReturnType<typeof getItemById>>;
@@ -137,6 +140,33 @@ export async function getPremiumItems(take = 200) {
     })
     .slice(0, take)
     .map((x) => x.it);
+}
+
+/** 全ソース横断の「抽選」専用ビュー。せどりで最重要の“抽選で当てる”品を1画面に集約する。
+ *  対象は getItems(status="lottery") と同じ意味論:
+ *   ・eventType="抽選"（Nike SNKRS・家電/ゲーム機 nyuka_now）
+ *   ・hasLottery=true（一番くじ・コラボ記事の抽選/ランダム賞品）
+ *   ・タイトルに「抽選」を含む（snkrdunk の定型ラベル誤混入は除外）
+ *  今後開催＋日付未定（受付中）だけを、締切/抽選日の近い順に出す。 */
+export async function getLotteryItems(take = 300) {
+  const today = todayJst();
+  const rows = await prisma.item.findMany({
+    where: {
+      AND: [
+        {
+          OR: [
+            { eventType: "抽選" },
+            { hasLottery: true },
+            { AND: [{ title: { contains: "抽選" } }, { source: { not: "snkrdunk" } }] },
+          ],
+        },
+        { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+      ],
+    },
+    orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
+    take: 1000,
+  });
+  return dedupeItems(rows).slice(0, take);
 }
 
 /** "2026-08" -> その月の [開始, 翌月開始) */

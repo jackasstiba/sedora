@@ -1,8 +1,7 @@
-import { sourceLabel } from "@/lib/itemFilter";
-
-// 画像なしカードの代替表示。ちゃんねらー速報/レアチェック等のXミラー系は元記事に
-// 商品画像が無い（og:imageはブログの汎用バナーで使えない）ため、素の灰色「画像なし」だと
-// 壊れて見える。ジャンル絵文字＋ジャンル名＋配信元で「意図した」プレースホルダにする。
+// 画像なしカードの代替表示。Xミラー系など元記事に商品画像が無い
+// （og:imageはブログの汎用バナーで使えない）ため、素の灰色「画像なし」だと
+// 壊れて見える。ジャンル絵文字＋ジャンル名で「意図した」プレースホルダにする。
+// （収集元サイト名は非公開方針のため表示しない）
 const GENRE_EMOJI: Record<string, string> = {
   フィギュア: "🧸",
   トレカ: "🃏",
@@ -13,6 +12,9 @@ const GENRE_EMOJI: Record<string, string> = {
   ポケモン: "⚡",
   ゲーム: "🎮",
   "映像・音楽": "💿",
+  "家電・ゲーム機": "🕹️",
+  "酒・ウイスキー": "🥃",
+  "ソフビ・アートトイ": "🎨",
   その他: "📦",
 };
 
@@ -27,10 +29,13 @@ const GENRE_TINT: Record<string, string> = {
   ポケモン: "from-yellow-50 to-yellow-100 dark:from-yellow-950/30 dark:to-neutral-900",
   ゲーム: "from-violet-50 to-violet-100 dark:from-violet-950/30 dark:to-neutral-900",
   "映像・音楽": "from-cyan-50 to-cyan-100 dark:from-cyan-950/30 dark:to-neutral-900",
+  "家電・ゲーム機": "from-sky-50 to-sky-100 dark:from-sky-950/30 dark:to-neutral-900",
+  "酒・ウイスキー": "from-amber-50 to-orange-100 dark:from-amber-950/30 dark:to-neutral-900",
+  "ソフビ・アートトイ": "from-pink-50 to-pink-100 dark:from-pink-950/30 dark:to-neutral-900",
   その他: "from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900",
 };
 
-export function NoImage({ genre, source }: { genre: string; source: string }) {
+export function NoImage({ genre }: { genre: string }) {
   const emoji = GENRE_EMOJI[genre] ?? "📦";
   const tint = GENRE_TINT[genre] ?? GENRE_TINT["その他"];
   return (
@@ -41,9 +46,6 @@ export function NoImage({ genre, source }: { genre: string; source: string }) {
         {emoji}
       </span>
       <span className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">{genre}</span>
-      <span className="text-[10px] text-neutral-400 dark:text-neutral-500">
-        {sourceLabel(source)}
-      </span>
     </div>
   );
 }

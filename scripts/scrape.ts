@@ -3,6 +3,9 @@ import { runAllScrapers } from "../src/scrapers";
 import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 
+// 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
+const RECONCILE_SOURCES = new Set(["nyuka_now"]);
+
 async function main() {
   // figisland_pb は詳細ページ取得型。既に価格まで取れているものは再取得しない。
   const pricedPb = await prisma.item.findMany({
@@ -40,10 +43,22 @@ async function main() {
           hasLottery: item.hasLottery ?? null,
           officialUrl: item.officialUrl ?? null,
           prizes: item.prizes ?? null,
+          stores: item.stores ?? null,
           scrapedAt: new Date(),
         },
       });
       total++;
+    }
+
+    // 「受付中」が入れ替わるソース（nyuka_now＝家電・ゲーム機抽選）は、今回の巡回で
+    // 見つからなくなった＝受付終了した行を消す（過去の抽選が居座らないように）。
+    // 巡回失敗(error)時はここに来ないので、取りこぼしで全消しする事故は起きない。
+    if (RECONCILE_SOURCES.has(source)) {
+      const liveIds = items.map((i) => i.sourceId);
+      const del = await prisma.item.deleteMany({
+        where: { source, sourceId: { notIn: liveIds } },
+      });
+      if (del.count > 0) console.log(`[${source}] 受付終了 ${del.count}件を削除`);
     }
 
     console.log(`[${source}] ${items.length}件処理`);

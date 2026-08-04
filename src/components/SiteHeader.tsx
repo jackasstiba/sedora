@@ -32,6 +32,14 @@ export async function SiteHeader() {
           相場
         </Link>
 
+        {/* 抽選まとめビューへの固定導線（当選＝定価入手＝せどりの本命。抽選色＝紫）。 */}
+        <Link
+          href="/lottery"
+          className="shrink-0 rounded-full bg-purple-600 px-2.5 py-1 text-sm font-semibold text-white transition hover:bg-purple-700"
+        >
+          抽選
+        </Link>
+
         {/* ジャンルの横スクロールナビ（モバイルでも指でスワイプ可） */}
         <nav
           aria-label="ジャンル"

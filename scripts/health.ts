@@ -11,7 +11,9 @@ const SNAPSHOT_PATH = path.join(process.cwd(), "scrape_health.json");
 const LOG_PATH = path.join(process.cwd(), "scrape_health.log");
 
 // 差分取得型など「0が正常」なソースは件数チェックの対象外にする（エラーのみ警告）。
-const VOLATILE_SOURCES = new Set(["figisland_pb"]);
+// nyuka_now は「今まさに受付中の抽選」だけを載せるため、受付終了で件数が 0〜数件に
+// 揺れるのが正常（抽選が同時に走っていない期間もある）。件数チェックの対象外にする。
+const VOLATILE_SOURCES = new Set(["figisland_pb", "nyuka_now", "tenbaiquest"]);
 
 // 前回比でこの割合を下回ったら急減とみなす
 const DROP_RATIO = 0.5;

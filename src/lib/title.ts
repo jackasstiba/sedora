@@ -19,6 +19,17 @@ export function stripSourceLabel(title: string): string {
   return t.length >= 4 ? t : title.trim();
 }
 
+/**
+ * subGenre（種別）バッジの表示値。収集元の痕跡（X巡回ハンドル @xxx）は非公開方針のため出さない。
+ * 書き込み側(xWatch)は修正済みだが、既存DBに残る @handle の subGenre を表示層でも握りつぶす。
+ */
+export function displaySubGenre(subGenre: string | null | undefined): string | null {
+  if (!subGenre) return null;
+  const t = subGenre.trim();
+  if (!t || t.startsWith("@")) return null;
+  return t;
+}
+
 // 実況コメント特有の語。これを含む先頭/末尾セグメントだけを剥がす。
 // ※「特典/限定販売/数量限定」は商品タグ(【特典】等)の一部なのでコメント語に含めない。
 const COMMENTARY =

@@ -97,7 +97,7 @@ export function toScrapedItem(entry: XWatchEntry, now: Date = new Date()): Scrap
     sourceId: xWatchSourceId(entry),
     title,
     genre,
-    subGenre: entry.note?.match(/@[\w]+/)?.[0] ?? null, // 由来ハンドルを控えめに保持
+    subGenre: null, // 収集元は非公開方針。由来ハンドル(@xxx)はDB・表示に載せない（note は運用ログのみ）
     eventType: entry.eventType?.trim() || inferred.eventType || "情報",
     eventDate,
     eventDateText: entry.eventDateText ?? inferred.dateText ?? null,

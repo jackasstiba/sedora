@@ -1,4 +1,4 @@
-import { getItems, sourceLabel } from "./items";
+import { getItems } from "./items";
 import { cleanListTitle } from "./title";
 import { formatPriceDisplay } from "./margin";
 
@@ -34,7 +34,7 @@ export async function buildRss(genre?: string): Promise<string> {
       const link = `${SITE}/items/${it.id}`;
       const desc = `${it.eventType}: ${fmtDate(it.eventDate)}／${it.genre}${
         it.price ? `／${formatPriceDisplay(it.price)}` : ""
-      }／${sourceLabel(it.source)}`;
+      }`;
       return `    <item>
       <title>${esc(cleanListTitle(it.source, it.title))}</title>
       <link>${link}</link>

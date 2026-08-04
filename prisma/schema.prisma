@@ -47,6 +47,12 @@ model Item {
   // 賞画像ギャラリー＋賞ごとの二次相場（駿河屋バラ売り）を商品詳細で表示するため。
   prizes String?
 
+  // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募を実施する」商品の、
+  // 現在“受付中”の公式ストア一覧（構造化）。JSON配列文字列で保持する:
+  //   [{name:"Amazon", url:"https://…(公式)", form:"招待制販売", when:"9/5 17:00〜"}]
+  // 一次ソース(各小売の抽選ページ)へ直リンクし、アグリゲーターは表に出さない設計。
+  stores String?
+
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])

@@ -31,6 +31,11 @@ const SOURCE_LABELS: Record<string, string> = {
   nike_snkrs: "Nike SNKRS",
   torecasoku: "トレカ速報",
   x_watch: "X転売ウォッチ", // Claude for Chrome 巡回で拾った新規商品（src/lib/xWatch.ts）
+  // nyuka_now / tenbaiquest は競合アグリを収集元にするが、フロントには収集元名を一切出さない
+  // 方針（2026-08-04）。掲載は公式ストア（stores 列）や楽天検索に寄せる。中立ラベルにしておく
+  // （現状このラベルはUIに表示していないが、将来露出しても収集元が漏れないように）。
+  nyuka_now: "抽選情報",
+  tenbaiquest: "抽選情報",
 };
 
 export function sourceLabel(source: string): string {
