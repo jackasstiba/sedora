@@ -5,7 +5,7 @@ import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay } from "@/lib/margin";
-import { hasSearchableTitle, isOfficialUrl, rakutenSearchUrl } from "@/lib/outbound";
+import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { formatLong } from "@/lib/date";
 import { displaySubGenre, stripSourceLabel } from "@/lib/title";
@@ -276,7 +276,9 @@ export default async function ItemPage({ params }: Props) {
                 公式ページで見る →
               </OutboundLink>
             )}
-            {/* 記事から辿った一次情報（公式キャンペーン/ストア）。何が売られるかの原典。 */}
+            {/* 記事から辿った公式/一次リンク。実際に商品名・価格帯まで取得できた時だけ
+                「販売内容を見る」と約束し、そうでなければ「公式ページを見る」に留める
+                （販売内容の無いアニメ公式トップ等へ「販売内容を見る」と送客しないため）。 */}
             {item.officialUrl && (
               <OutboundLink
                 href={item.officialUrl}
@@ -285,7 +287,7 @@ export default async function ItemPage({ params }: Props) {
                 itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
-                公式で販売内容を見る →
+                {officialUrlLabel(item.highlights)}
               </OutboundLink>
             )}
             {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。

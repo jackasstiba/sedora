@@ -21,6 +21,27 @@ export function isOfficialUrl(source: string): boolean {
   return OFFICIAL_URL_SOURCES.has(source);
 }
 
+/**
+ * collabo_cafe の officialUrl（記事から辿った公式/一次リンク）で、実際に「販売内容」まで
+ * 見られると約束してよいかを判定する。
+ *
+ * 背景: officialUrl は記事本文中の最良の外部リンクを1つ選んだだけで、コラボの販売ページとは
+ * 限らない（アニメ公式トップ・スポンサー等を拾うことがある＝「販売内容を見る」と書いて
+ * 販売内容の無いページへ飛ばす食い違いが起きていた）。実際に公式ページから商品名/価格帯を
+ * 取得できた時だけ、その痕跡（「公式販売」または「価格帯」）が highlights に入る。これが
+ * ある時だけ「販売内容が見られる」と約束し、無い時は「公式ページを見る」に留める。
+ */
+export function hasVerifiedSaleContent(highlights: string | null | undefined): boolean {
+  return !!highlights && /公式販売|価格帯/.test(highlights);
+}
+
+/** officialUrl ボタンの表示ラベル（実売内容を確認できた時だけ「販売内容」を約束する） */
+export function officialUrlLabel(highlights: string | null | undefined): string {
+  return hasVerifiedSaleContent(highlights)
+    ? "公式で販売内容を見る →"
+    : "公式ページを見る →";
+}
+
 // タイトルが商品名として市場検索に使えるソース。
 // Xミラー(channeltono/rarecheck)やイベント(collabo_cafe)は「7月28日10時より…販売開始」等の
 // 文章タイトルで、そのまま検索すると無関係な結果になるため購入導線を出さない。

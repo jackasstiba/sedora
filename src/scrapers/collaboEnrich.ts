@@ -22,9 +22,11 @@ export function extractArticleBody(html: string): string {
   return decodeEntities(body.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
 }
 
-// SNS等はコラボの一次情報（何が売られるか）ではないので公式候補から除外する。
+// SNS・URL短縮・アフィリエイト転送は「何が売られるか」の一次情報ではないので公式候補から除外する。
+// t.co 等の短縮リンクや valuecommerce 等の転送は、飛んだ先が販売ページでも中間URLが露出し、
+// また転送切れ・無関係先の危険があるため候補にしない（＝販売内容ページとして提示しない）。
 const SOCIAL_RE =
-  /youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|line\.me|tiktok\.com|pinterest\./i;
+  /youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|line\.me|tiktok\.com|pinterest\.|t\.co\/|bit\.ly|tinyurl|ow\.ly|goo\.gl|lnky|linksynergy|valuecommerce|a8\.net|\.a8\.|accesstrade|felmat|dpbolvw|anrdoezrs|jdoqocy|tkqlhce|hb\.afl\.rakuten|a\.r10\.to|moshimo|af\.moshimo/i;
 
 /**
  * 記事本文から一次情報（公式キャンペーン/公式ストア）候補URLを1つ選ぶ。
