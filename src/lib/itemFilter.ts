@@ -111,13 +111,15 @@ function inheritEnrichment(keep: DedupeItem, from: DedupeItem): void {
 }
 
 /** 重複判定用のタイトル正規化（記号・空白除去、全角半角/大小の吸収）。
- *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy" */
+ *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy"
+ *  引用符（"" '' “” ‘’ 〝〟）も除去する。同一商品を figisland が“レゼ”、koretore が
+ *  ‐レゼ‐ のように別の括り記号で載せると別キーになり重複が残っていたため。 */
 export function dedupeKey(title: string): string {
   return title
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[\s　]+/g, "")
-    .replace(/[-‐-―ー－_,.、。!！?？「」『』【】\[\]()（）:：/／|｜~〜]/g, "");
+    .replace(/[-‐-―ー－_,.、。!！?？「」『』【】\[\]()（）:：/／|｜~〜"'“”‘’〝〟＂＇]/g, "");
 }
 
 /** 重複グループで残す代表の優先度（大きいほど良い）。
@@ -171,6 +173,50 @@ export function dedupeCrossSource<T extends DedupeItem>(items: T[]): T[] {
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
 }
 
+/** 語順違いの重複を拾う anagram キー（dedupeKey をさらに文字ソートして順序を無視）。
+ *  例:「超かぐや姫! 一番くじ ちょこっと」と「一番くじちょこっと 超かぐや姫！」は
+ *  dedupeKey では語順が違い別キーだが、文字ソートすると一致する。 */
+function anagramKey(title: string): string {
+  return [...dedupeKey(title)].sort().join("");
+}
+
+/**
+ * 語順の入れ替えによるクロスソース重複を解消する（dedupeCrossSource の補助）。
+ * 例: 一番くじ倶楽部が「一番くじ ◯◯」、コラボカフェが「◯◯ 一番くじ」と語順違いで
+ * 同じくじを載せると dedupeKey が別キーになり残る。文字多重集合が完全一致（anagram）
+ * かつクロスソースのグループだけを畳む。
+ * ・anagram は誤マージの危険があるため、正規化後 10 文字以上のときだけ対象にする
+ *   （短いタイトルの偶発一致を避ける。本番全件で誤マージ0を検証）。
+ * ・同一ソース内のみの一致は touch しない（別カラー等の温存＝安全側）。
+ */
+function dedupeWordOrderCrossSource<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    if (dedupeKey(it.title).length < 10) continue;
+    const k = anagramKey(it.title);
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    if (new Set(g.map((x) => x.source)).size < 2) continue; // 同一ソースのみ→残す
+    // dedupeKey が既に一致するものは dedupeCrossSource が処理済み。キー違い（＝真の語順違い）だけ扱う。
+    if (new Set(g.map((x) => dedupeKey(x.title))).size < 2) continue;
+    let best = g[0];
+    for (const it of g) {
+      if (it === best) continue;
+      const d = repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
 /** 暦日を UTC yyyy-mm-dd に正規化（時刻ゆらぎを無視した突合キー用） */
 function dayISO(d: Date | string): string {
   return new Date(d).toISOString().slice(0, 10);
@@ -201,9 +247,9 @@ export function dedupeSneakerCrossSource<T extends DedupeItem>(items: T[]): T[] 
   });
 }
 
-/** 一覧に出す前の重複解消をまとめて適用（タイトル一致＋スニーカーの日英別名）。 */
+/** 一覧に出す前の重複解消をまとめて適用（タイトル一致＋語順違い＋スニーカーの日英別名）。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
-  return dedupeSneakerCrossSource(dedupeCrossSource(items));
+  return dedupeSneakerCrossSource(dedupeWordOrderCrossSource(dedupeCrossSource(items)));
 }
 
 // ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────

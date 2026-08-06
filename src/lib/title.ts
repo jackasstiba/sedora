@@ -19,19 +19,28 @@ export function stripSourceLabel(title: string): string {
   return t.length >= 4 ? t : title.trim();
 }
 
-// 末尾の「〜M月D日より〜開催/登場/発売/配信!」型の日付告知（主にコラボ記事タイトル）。
+// 末尾の「〜M月D日より〜開催/登場/発売/コラボ!」型の日付告知（主にコラボ記事タイトル）。
 // 例:「ちいかわ × パレード 7月24日よりプレゼントキャンペーン実施!」→「ちいかわ × パレード」。
-// 日付（YYYY年M月D日 / M月上旬 等）を起点に、告知動詞＋！で終わる末尾節を丸ごと剥がす。
+// 「8月より登場!」(日なし)・「2026.10.3より開催!」(ドット日付)・「7月第4週より登場!」
+// 「12月頃より発売!」も対象。日付＋「より/から/〜」＋告知語＋！で終わる末尾節を丸ごと剥がす。
 // 発売日・イベント種別は eventDate バッジ・eventType バッジで別途表示されるので、
-// タイトル末尾の重複した告知文は純粋なノイズ。本番collabo_cafe 356件で75件を整形、
-// channeltono/torecasoku/figisland/pokemon_goods/ichiban_kuji では0件（＝告知型でない
-// タイトルには誤爆しない）ことを検証済み。安全側＝剥がして6字未満になるなら原文を返す。
-const DATE_NOTICE_TAIL =
-  /(?:\s|　|を|は|も|が|、|・)*(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*(?:\d{1,2}\s*日|上旬|中旬|下旬|末)(?:\s*\([日月火水木金土]\))?\s*(?:週)?\s*(?:より|から|〜|~|以降)?[^!！。]*?(?:開催|登場|発売|配信|スタート|販売|受付|開始|実施|オープン|解禁|予約|決定)[^!！。]*[!！]\s*$/;
+// タイトル末尾の重複した告知文は純粋なノイズ。「より/から」を必須にして誤爆を抑える
+// （単に「◯月発売」で終わる商品名は剥がさない）。剥がして6字未満になるなら原文を返す。
+const ANNOUNCE_VERB =
+  "(?:開催|開店|登場|発売|配信|上映|放送|スタート|販売|受付|開始|実施|オープン|解禁|予約|決定|コラボ|順次|リリース)";
+// 日付トークン:「2026年8月」「8月12日」「8月」「10.16」「2026.10.3」「7月第4週」「7月5週」「12月頃」等。
+// 「N週」は第あり・なし両方。曜日カッコ (土) も日付側で許容。
+const DATE_TOKEN =
+  "(?:\\d{4}\\s*[年.．]\\s*)?\\d{1,2}\\s*[月.．]\\s*(?:第?\\s*\\d{1,2}\\s*週|\\d{1,2}\\s*日?|上旬|中旬|下旬|末|頃|ごろ)?";
+const DATE_NOTICE_TAIL = new RegExp(
+  `(?:\\s|　|を|は|も|が|、|・)*${DATE_TOKEN}\\s*(?:\\([日月火水木金土]\\))?\\s*(?:頃|ごろ)?\\s*(?:より|から|〜|~|以降)\\s*[^!！。]*?${ANNOUNCE_VERB}[^!！。]*[!！]\\s*$`
+);
 
-/** 末尾の日付告知（「〜8月6日よりコラボ開催!」等）を表示用に除去する。全ソース対象・非破壊。 */
+/** 末尾の日付告知（「〜8月6日よりコラボ開催!」等）を表示用に除去する。全ソース対象・非破壊。
+ *  ※「!」入りの商品名（ラブライブ!／ぱたぱたっ！ 等）を巻き込まないよう、複数文にまたがる
+ *   末尾告知の一括除去はしない（誤爆が大きいため）。日付＋より＋告知語＋!の1節だけを剥がす。 */
 export function stripDateNoticeTail(title: string): string {
-  const t = title.replace(DATE_NOTICE_TAIL, "").trim();
+  const t = title.trim().replace(DATE_NOTICE_TAIL, "").trim();
   return t.length >= 6 ? t : title.trim();
 }
 
@@ -99,9 +108,20 @@ function firstBracketed(title: string): string | null {
 const DATE_NOTICE_SEG =
   /^\d{1,2}\s*月(?:末|上旬|中旬|下旬|\d{1,2}\s*日)?\s*(?:頃|ごろ)?\s*(?:発売予定|発売日|出荷予定|入荷予定|販売予定|予約開始)(?:です|予定)?[。！!]?$/;
 
+// 明確に実況コメントと断定できる先頭節の兆候。これに該当する節は、カタカナを含んで
+// looksProduct が真になっても（例:「ヤフオクめちゃ高騰の復刻です」の"ヤフオク"）実況と見なして剥がす。
+// ・コメント文の終止（です/ます/でした/かと/そうです/ください/お早めに/ご注意を/注意を）
+// ・転売相場・在庫状況の語（高騰/ヤフオク/メルカリ/転売/完売/再開/再販/値引/％オフ/品薄/即完/まだあり/人気…）
+// ※商品タグ『「【 を含む節は商品名なので strongComment 扱いにしない（呼び出し側でガード）。
+const STRONG_COMMENT_END =
+  /(?:です|ます|ました|でした|かと|そうです?|ください|お(?:早|はや)めに?|ご注意を?|注意を?)[！!。]?$/;
+const STRONG_COMMENT_WORD =
+  /(?:高騰|ヤフオク|メルカリ|転売|完売|再開|再販|値引き?|[％%]オフ|品薄|即完|まだあり|まだいけ|人気(?:です|かと|順|高|沸騰|爆発))/;
+
 /** 先頭の全角スペース区切りの告知節（「他店即完売の人気　」「◯◯は7月31日まで　」等）を剥がす。
  *  コメント語 or 締切・日付を含み、商品らしさ（英数・長いカタカナ・商品タグ）が無い節だけ。
- *  例外: 「8月発売予定です」等の日付＋発売告知(DATE_NOTICE_SEG)は数字を含んでも告知節と断定して剥がす。 */
+ *  例外: 「8月発売予定です」等の日付＋発売告知(DATE_NOTICE_SEG)や、実況と断定できる節
+ *  (STRONG_COMMENT_*) は数字・カタカナを含んでも告知節と見なして剥がす。 */
 function stripLeadingSpaceSegs(title: string): string {
   let s = title;
   for (let i = 0; i < 4; i++) {
@@ -110,9 +130,14 @@ function stripLeadingSpaceSegs(title: string): string {
     const head = s.slice(0, idx);
     const rest = s.slice(idx + 1).trim();
     if (rest.length < 6) break;
-    const isDateNotice = DATE_NOTICE_SEG.test(head.trim());
-    if (!isDateNotice && looksProduct(head)) break;
-    if (isDateNotice || COMMENTARY.test(head) || NOTICE_SEG.test(head) || NOTICE_VERB.test(head)) s = rest;
+    const headTrim = head.trim();
+    const isDateNotice = DATE_NOTICE_SEG.test(headTrim);
+    // 商品タグ『「【 を含む節は商品名の一部なので、強制コメント判定の対象から外す。
+    const hasBracket = /[【『「]/.test(head);
+    const strongComment = !hasBracket && (STRONG_COMMENT_END.test(headTrim) || STRONG_COMMENT_WORD.test(head));
+    if (!isDateNotice && !strongComment && looksProduct(head)) break;
+    if (isDateNotice || strongComment || COMMENTARY.test(head) || NOTICE_SEG.test(head) || NOTICE_VERB.test(head))
+      s = rest;
     else break;
   }
   return s;
