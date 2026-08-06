@@ -113,7 +113,7 @@ export default async function Home() {
           💹 相場・プレ値ランキング
         </span>
         <span className="text-neutral-600 dark:text-neutral-300">
-          定価より高く売れている発売済みレア品を見る →
+          実際の取引価格が確認できたレア品を相場順に見る →
         </span>
       </Link>
 

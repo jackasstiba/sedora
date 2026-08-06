@@ -1,5 +1,5 @@
 import { prisma } from "../src/lib/prisma";
-import { fetchSurugayaPrice } from "../src/scrapers/surugayaPrice";
+import { fetchSurugayaPrice, LINE_LEVEL_SOURCES } from "../src/scrapers/surugayaPrice";
 import { sleep } from "../src/scrapers/util";
 
 // ハツコレの各アイテムに「相場（駿河屋の中古/新品価格）」をベストエフォートで付与する。
@@ -20,11 +20,13 @@ async function main() {
   const limit = Number(arg("limit") ?? "60");
   const genre = arg("genre");
 
+  // 商品ラインの総称しか持たないソース（抽選アグリ）は、SKU単位の相場が原理的に付けられない。
+  const notLineLevel = { source: { notIn: [...LINE_LEVEL_SOURCES] } };
   const where = genre
-    ? { genre }
+    ? { genre, ...notLineLevel }
     : hasFlag("all")
-      ? {}
-      : { genre: { in: DEFAULT_GENRES } };
+      ? notLineLevel
+      : { genre: { in: DEFAULT_GENRES }, ...notLineLevel };
 
   // 相場が古い/未取得のものを優先（marketCheckedAt が null → 古い順）
   const items = await prisma.item.findMany({

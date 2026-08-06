@@ -68,6 +68,26 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
   const remaining = filtered.length - visible.length;
   const groups = useMemo(() => groupItemsByDate(visible), [visible]);
 
+  // ジャンルチップの件数は「他の絞り込み（種別/時期/検索/日付未定）を効かせた上で、
+  // そのジャンルを選んだら何件出るか」を表す。全体件数を出しっぱなしにすると
+  // 「226」と書いてあるチップを押して3件しか出ない、という数字の嘘になる。
+  // 並び順はサーバーが渡した順（全体件数の降順）で固定＝押すたびにチップが動かない。
+  const genresWithCount = useMemo(() => {
+    const base = filterItems(items, {
+      query: values.query || undefined,
+      status: (values.status || undefined) as ItemStatus | undefined,
+      when: (values.when || undefined) as ItemWhen | undefined,
+      datedOnly: values.datedOnly,
+    });
+    const counts = new Map<string, number>();
+    for (const it of base) counts.set(it.genre, (counts.get(it.genre) ?? 0) + 1);
+    return genres.map(({ genre }) => ({ genre, count: counts.get(genre) ?? 0 }));
+  }, [items, genres, values.query, values.status, values.when, values.datedOnly]);
+
+  const anyFilter = Boolean(
+    values.genre || values.query || values.status || values.when || values.datedOnly
+  );
+
   function syncUrl(next: FilterValues, nextShow: number) {
     if (typeof window === "undefined") return;
     const p = new URLSearchParams();
@@ -105,8 +125,15 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
   return (
     <>
       <div className="mb-6">
-        <FilterBar genres={genres} values={values} onChange={onChange} onClear={onClear} />
+        <FilterBar genres={genresWithCount} values={values} onChange={onChange} onClear={onClear} />
       </div>
+
+      {anyFilter && (
+        <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
+          該当 <span className="font-semibold text-neutral-900 dark:text-neutral-50">{filtered.length}</span> 件
+          <span className="text-neutral-400">（全 {items.length} 件中）</span>
+        </p>
+      )}
 
       {filtered.length === 0 ? (
         <div className="py-16 text-center">

@@ -105,15 +105,18 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
           すべて
         </button>
         {genres.map(({ genre: g, count }) => (
+          // 件数は他の絞り込みを効かせた実数。0件のジャンルは押しても空振りなので押せなくする
+          // （「押したら0件だった」という空約束を出さない）。
           <button
             key={g}
+            disabled={count === 0 && genre !== g}
             onClick={() => {
               // どのジャンルが見られているかを解析できるようにイベント記録
               track("genre_select", { genre: g });
               logEvent("genre_select", g);
               onChange({ genre: g });
             }}
-            className={chipClass(genre === g)}
+            className={chipClass(genre === g, count === 0 && genre !== g)}
           >
             {g}
             <span className="ml-1 opacity-60">{count}</span>
@@ -165,12 +168,12 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
   );
 }
 
-function chipClass(active: boolean): string {
-  return `rounded-full border px-3 py-1.5 text-sm transition ${
-    active
-      ? "border-rose-600 bg-rose-600 text-white"
-      : "border-neutral-300 bg-white text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
-  }`;
+function chipClass(active: boolean, empty = false): string {
+  const base = "rounded-full border px-3 py-1.5 text-sm transition";
+  if (active) return `${base} border-rose-600 bg-rose-600 text-white`;
+  if (empty)
+    return `${base} cursor-not-allowed border-neutral-200 bg-neutral-50 text-neutral-400 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-600`;
+  return `${base} border-neutral-300 bg-white text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200`;
 }
 
 function pillClass(active: boolean, isLottery: boolean): string {

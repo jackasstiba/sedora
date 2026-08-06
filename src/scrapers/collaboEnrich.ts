@@ -32,6 +32,75 @@ export function extractArticleBody(html: string): string {
   return text;
 }
 
+// ── 開催期間の裏取り（記事本文の仕様表 → 一覧の期間の誤りを正す） ──────────────
+// 背景: 一覧カードの `event-date`（期間 : …）は収集元側で誤っていることがある。
+// 実例 #20308「玉之けだま カフェ in Cafe ASAN」= 一覧「8月6日〜8月16日」／記事本文の
+// 開催期間・告知・タイトルはいずれも「8月8日〜8月16日」。発売日/開催日が本サイトの中核価値
+// なので、記事側に**ラベル付きの完全な日付**があるときはそれを正とする（[[裏取り済みのみ約束]]）。
+// 記事末尾の関連記事ブロックは他イベントの期間を含むため、必ず切り落とした本文だけを見る。
+const PERIOD_LABEL = /(?:開催期間|開催日程|開催日|販売期間|実施期間|開催スケジュール)/;
+const FULL_DATE = /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+
+/**
+ * 記事本文の「開催期間: 2026年8月8日〜8月16日」からイベント開始日と表示テキストを取り出す。
+ * ラベル直後（40字以内）に西暦つきの完全な日付がある場合のみ返す＝推測しない。
+ */
+export function extractEventPeriod(
+  bodyText: string
+): { date: Date; text: string } | null {
+  const m = bodyText.match(PERIOD_LABEL);
+  if (!m || m.index === undefined) return null;
+  const after = bodyText.slice(m.index + m[0].length, m.index + m[0].length + 40);
+  const d = after.match(FULL_DATE);
+  if (!d || d.index === undefined) return null;
+  const [y, mo, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
+  if (mo < 1 || mo > 12 || day < 1 || day > 31) return null;
+  // 終了日「〜8月16日」「～2026年8月16日」が続くなら表示テキストに含める。
+  const tail = after
+    .slice(d.index + d[0].length)
+    .match(/^\s*[〜~～\-–—]\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+  const text = tail
+    ? `${y}年${mo}月${day}日〜${tail[2]}月${tail[3]}日`
+    : `${y}年${mo}月${day}日`;
+  return { date: new Date(Date.UTC(y, mo - 1, day)), text };
+}
+
+// タイトル中の日付トークン（「8月8日」「2026.8.11」「8.11」）を月日で拾う。
+const TITLE_DATE_RE = /(?:\d{4}\s*[年.．]\s*)?(\d{1,2})\s*[月.．]\s*(\d{1,2})\s*日?/g;
+
+function titleMonthDays(title: string): { mm: number; dd: number }[] {
+  return [...title.matchAll(TITLE_DATE_RE)]
+    .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
+    .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
+}
+
+/**
+ * 記事本文から取れた開催期間を「採用してよいか」判定して返す。採用しないなら null。
+ *
+ * 本文の「開催期間」ラベルは、前売券の販売期間や併催イベントの日付を拾ってしまうことがある
+ * （実測: 4件の相違のうち2件がこの型の誤り）。そこで**独立した2箇所が一致したときだけ**採る:
+ *   (a) タイトルにも同じ月日が書かれている（例: #20308 タイトル「8月8日より」＝本文の開催期間）
+ *   (b) 現在の日付と月日は一致し年だけ違う（例: #4771 一覧が2027年＝収集元の年の打ち間違い）
+ * どちらでもなければ現状維持＝推測で日付を動かさない（[[UIラベルは裏取り済みのみ約束]]）。
+ */
+export function pickVerifiedEventDate(
+  bodyText: string,
+  title: string,
+  current: Date | null
+): { date: Date; text: string } | null {
+  const p = extractEventPeriod(bodyText);
+  if (!p) return null;
+  const mm = p.date.getUTCMonth() + 1;
+  const dd = p.date.getUTCDate();
+  const byTitle = titleMonthDays(title).some((t) => t.mm === mm && t.dd === dd);
+  const byYearTypo =
+    current !== null &&
+    current.getUTCMonth() + 1 === mm &&
+    current.getUTCDate() === dd &&
+    current.getUTCFullYear() !== p.date.getUTCFullYear();
+  return byTitle || byYearTypo ? p : null;
+}
+
 // SNS・URL短縮・アフィリエイト転送は「何が売られるか」の一次情報ではないので公式候補から除外する。
 // t.co 等の短縮リンクや valuecommerce 等の転送は、飛んだ先が販売ページでも中間URLが露出し、
 // また転送切れ・無関係先の危険があるため候補にしない（＝販売内容ページとして提示しない）。

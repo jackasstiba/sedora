@@ -17,6 +17,7 @@ import {
   extractOfficialUrl,
   formatOfficialItems,
   formatSale,
+  pickVerifiedEventDate,
 } from "../src/scrapers/collaboEnrich";
 
 async function fetchOfficial(url: string): Promise<string | null> {
@@ -35,15 +36,41 @@ async function main() {
   const today = todayJst();
   const items = await prisma.item.findMany({
     where: { source: "collabo_cafe", OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
-    select: { id: true, url: true, subGenre: true, hasLottery: true, highlights: true },
+    select: {
+      id: true,
+      url: true,
+      title: true,
+      subGenre: true,
+      hasLottery: true,
+      highlights: true,
+      eventDate: true,
+      eventDateText: true,
+    },
   });
   console.log(`表示スコープの collabo_cafe ${items.length}件を再エンリッチ`);
 
   let changed = 0;
+  let dateFixed = 0;
   for (const it of items) {
     try {
       const html = await fetchHtml(it.url);
-      const enr = analyzeCollab(extractArticleBody(html), it.subGenre);
+      const body = extractArticleBody(html);
+      const enr = analyzeCollab(body, it.subGenre);
+
+      // 開催日の裏取り: 一覧の「期間 :」は収集元側で誤っていることがあるため、記事本文の
+      // 「開催期間」とタイトルの日付が一致した場合だけ日付を正す（推測では動かさない）。
+      const verified = pickVerifiedEventDate(body, it.title, it.eventDate);
+      if (verified && verified.date.getTime() !== (it.eventDate?.getTime() ?? -1)) {
+        await prisma.item.update({
+          where: { id: it.id },
+          data: { eventDate: verified.date, eventDateText: verified.text },
+        });
+        dateFixed++;
+        console.log(
+          `  #${it.id}: 開催日 ${it.eventDate?.toISOString().slice(0, 10) ?? "未定"}→` +
+            `${verified.date.toISOString().slice(0, 10)} «${verified.text}» ${it.title}`
+        );
+      }
 
       const official = extractOfficialUrl(html);
       let saleText: string | null = null;
@@ -74,7 +101,7 @@ async function main() {
     }
     await sleep(350);
   }
-  console.log(`\n更新 ${changed}件`);
+  console.log(`\n更新 ${changed}件（うち開催日の訂正 ${dateFixed}件）`);
   await prisma.$disconnect();
 }
 

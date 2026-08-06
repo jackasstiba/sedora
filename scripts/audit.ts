@@ -124,6 +124,34 @@ async function main() {
     report("価格の疑い（単パックがBOX価格 / 異常値）", "warn", bad);
   }
 
+  // (5b) 相場（marketPrice）の健全性
+  // 「相場・プレ値ランキング」は marketPrice 降順なので、誤マッチはページの**上位**に出る
+  // ＝最も目立つ場所が壊れる。実測で ①1パックにカートン価格(定価440円→¥86,592) ②別シリーズへの
+  // 誤マッチ ③駿河屋の「予約」価格を「中古」と表示、の3種が見つかった。定価との比と
+  // ラベルの実在で機械的に見張る。
+  {
+    const ratioBad: string[] = [];
+    const labelBad: string[] = [];
+    for (const r of deduped) {
+      if (r.marketPrice == null) continue;
+      const label = r.marketPriceText ?? "";
+      // 相場ラベルは実際に取得できた種別のみ（中古/新品 と X 由来の実売）。
+      if (!/中古|新品|メルカリ|実売|落札/.test(label)) {
+        labelBad.push(`[${r.source} #${r.id}] 種別不明の相場表記「${label}」 ${cleanListTitle(r.source, r.title)}`);
+      }
+      const face = r.price ? parseYen(r.price.split(" / ")[0]) : null;
+      // 定価の20倍以上は単品↔BOX/カートンの取り違え等を疑う（真のプレ値でも通常この比は稀）。
+      if (face && face > 0 && r.marketPrice >= face * 20) {
+        ratioBad.push(
+          `[${r.source} #${r.id}] 定価${face.toLocaleString()}円 → 相場${r.marketPrice.toLocaleString()}円 ` +
+            `(${Math.round(r.marketPrice / face)}倍) ${cleanListTitle(r.source, r.title)}`
+        );
+      }
+    }
+    report("相場が定価の20倍以上（単品↔BOX/カートンの取り違え疑い）", "error", ratioBad);
+    report("相場ラベルが実体不明（中古/新品以外を相場として表示）", "error", labelBad);
+  }
+
   // (6) 同名商品が別ジャンルに分類（表記ゆれではなく分類ブレ）
   {
     const g = new Map<string, Set<string>>();
@@ -152,7 +180,51 @@ async function main() {
     report("日付の健全性（過去/遠未来の混入）", "error", bad);
   }
 
-  // (8) タイトル末尾の宙ぶらりん助詞（文が途中で切れた痕跡）
+  // (8) タイトル中の日付とバッジの日付(eventDate)の食い違い
+  // 本サイトの中核価値＝発売日が正しいこと。過去に全件1日ズレ（JST/UTC）を出しており
+  // （[[System/mistakes]] ミス7）、あれは「タイトルには8/8と書いてあるのにバッジが8/7」という
+  // 人間なら一瞬で気付く形で表に出ていた。それを機械で見る。
+  // 個別の食い違いは正当な場合がある（コラボ終了日・応募締切など本文由来の別の日付）ので WARN。
+  // ただし「ズレの向きと量が揃っている」＝系統的バグなので、±1日ズレが多数を占めたら ERROR。
+  {
+    const bad: string[] = [];
+    let compared = 0;
+    const offsets = new Map<number, number>(); // ズレ日数 → 件数
+    for (const r of deduped) {
+      if (!r.eventDate) continue;
+      // 「8月8日」型のみ拾う。年跨ぎ誤判定を避けるため月日のみで比較する。
+      // ※「8/8」型のスラッシュ表記は採らない。プラモの縮尺（1/144・MG 1/100・1/7 フィギュア）を
+      //   日付と誤読して全件誤検知になるため（実データで確認）。日本語タイトルでは
+      //   発売日はほぼ「M月D日」で書かれるので、漢字表記に限っても取りこぼしは小さい。
+      const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)]
+        .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
+        .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
+      if (hits.length !== 1) continue; // 複数日付(期間)は「どれが発売日か」を決められないので対象外
+      const { mm, dd } = hits[0];
+      const d = new Date(r.eventDate);
+      compared++;
+      if (d.getUTCMonth() + 1 === mm && d.getUTCDate() === dd) continue;
+      // ズレ日数（同年と仮定して算出。月跨ぎも拾える）
+      const asTitle = Date.UTC(d.getUTCFullYear(), mm - 1, dd);
+      const off = Math.round((d.getTime() - asTitle) / 86_400_000);
+      offsets.set(off, (offsets.get(off) ?? 0) + 1);
+      bad.push(
+        `[${r.source} #${r.id}] バッジ ${d.toISOString().slice(0, 10)} ↔ タイトル ${mm}/${dd}` +
+          `${Math.abs(off) === 1 ? "（1日ズレ）" : ""} ${cleanListTitle(r.source, r.title)}`
+      );
+    }
+    const offBy1 = (offsets.get(1) ?? 0) + (offsets.get(-1) ?? 0);
+    // 系統的な1日ズレ（比較できた件数の1割以上かつ10件以上）はタイムゾーン起因のバグを疑う。
+    const systematic = compared >= 30 && offBy1 >= 10 && offBy1 >= compared * 0.1;
+    report(
+      `日付の食い違い（タイトル↔バッジ）${systematic ? `／±1日ズレ ${offBy1}件が集中＝TZバグ疑い` : ""}`,
+      systematic ? "error" : "warn",
+      bad
+    );
+    console.log(`(参考) タイトルに日付が1つだけある ${compared}件を突合 / 食い違い ${bad.length}件`);
+  }
+
+  // (9) タイトル末尾の宙ぶらりん助詞（文が途中で切れた痕跡）
   {
     const bad: string[] = [];
     for (const r of deduped) {

@@ -161,6 +161,18 @@ function stripTrailingActions(title: string): string {
   return s;
 }
 
+// 末尾のアクション句（「予約開始！」等）を剥がすと、その手前の販売チャネル節だけが
+// 助詞で宙ぶらりんに残る:「…完成品フィギュア【が】あみあみやDMMなど【で】」。
+// 文が途中で切れて見えるのは、人間なら一瞬で気付く粗（実測21件が表示スコープに露出）。
+// 「が」＋20字以内＋「で/へ」で終わる末尾＝販売店の告知節なので、まとめて落として商品名で終える。
+// 商品名側は落とさない（切るのは必ず「が」以降で、残りが6字未満なら諦めて原文のまま）。
+const DANGLING_CHANNEL_TAIL = /\s*が[^\s　]{0,20}[でへ]$/;
+
+function stripDanglingChannelTail(title: string): string {
+  const t = title.replace(DANGLING_CHANNEL_TAIL, "").trim();
+  return t.length >= 6 ? t : title;
+}
+
 /** 先頭側の告知を繰り返し剥がす。1周ごとに
  *  (a) 日付・締切・時刻告知（LEADING_DATE。商品名ではないので安全）と
  *  (b) 実況コメント節（！。区切りでコメント語を含む節）を順に試す。
@@ -213,7 +225,9 @@ export function cleanListTitle(source: string, title: string): string {
   // 2) 【特典】等の商品タグがあり、その手前が実況コメントなら、タグから商品名が始まるとみなす。
   const tagIdx = raw.search(PRODUCT_TAG);
   if (tagIdx > 0 && COMMENTARY.test(raw.slice(0, tagIdx))) {
-    const fromTag = stripTrailingActions(stripTrailingCommentary(raw.slice(tagIdx).trim()));
+    const fromTag = stripDanglingChannelTail(
+      stripTrailingActions(stripTrailingCommentary(raw.slice(tagIdx).trim()))
+    );
     if (fromTag.length >= 6) return fromTag;
   }
 
@@ -232,6 +246,7 @@ export function cleanListTitle(source: string, title: string): string {
   // 4) 末尾の実況コメント（全角スペース以降）と、アクション告知（「〜が抽選受付開始！」）を剥がす。
   t = stripTrailingCommentary(t);
   t = stripTrailingActions(t);
+  t = stripDanglingChannelTail(t);
   t = t.trim();
 
   // 5) 削りすぎ・空は原文に戻す（安全側）。
