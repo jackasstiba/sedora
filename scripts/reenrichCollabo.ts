@@ -35,7 +35,12 @@ async function fetchOfficial(url: string): Promise<string | null> {
 async function main() {
   const today = todayJst();
   const items = await prisma.item.findMany({
-    where: { source: "collabo_cafe", OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+    // 表示スコープ（今後＋日付未定）に加え、相場つきの発売済み品も対象。後者は /premium に
+    // 載り続けるのに再エンリッチの外だったため、旧ラベル（未確認の「抽選賞品：」）が固着していた。
+    where: {
+      source: "collabo_cafe",
+      OR: [{ eventDate: { gte: today } }, { eventDate: null }, { marketPrice: { not: null } }],
+    },
     select: {
       id: true,
       url: true,

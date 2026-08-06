@@ -18,7 +18,12 @@ type Row = Awaited<ReturnType<typeof fetchRows>>[number];
 async function fetchRows() {
   const today = todayJst();
   return prisma.item.findMany({
-    where: { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+    // 一覧の表示スコープ（今後＋日付未定）に加え、**相場が付いている発売済み品**も含める。
+    // /premium は発売済みも載せるので、そこだけ検査の外にあると
+    // 「抽選賞品：〇〇」等の未確認ラベルが素通りする（実際に素通りしていた）。
+    where: {
+      OR: [{ eventDate: { gte: today } }, { eventDate: null }, { marketPrice: { not: null } }],
+    },
     take: 6000,
   });
 }
@@ -172,6 +177,9 @@ async function main() {
     const bad: string[] = [];
     for (const r of deduped) {
       if (!r.eventDate) continue;
+      // 相場つきの発売済み品は /premium に意図して載せているので「過去日」は正常。
+      // 一覧の表示スコープに出るものだけを対象にする。
+      if (r.marketPrice != null) continue;
       const d = new Date(r.eventDate);
       const y = d.getUTCFullYear();
       if (d < today) bad.push(`[${r.source} #${r.id}] 過去日 ${d.toISOString().slice(0, 10)} ${cleanListTitle(r.source, r.title)}`);
