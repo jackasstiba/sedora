@@ -209,20 +209,27 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
       .join("、");
     const more = stores.length > 3 ? ` 他${stores.length - 3}店` : "";
 
+    // 販売形式から抽選/先着を判定する。入荷Nowの「抽選情報」カテゴリでも、受付中の実店舗は
+    // 「先着販売」「予約」のことがある。全ストアが先着/予約なら“抽選ではない”ので抽選扱いしない。
+    // （招待制/エントリー/応募＝当落があるので抽選扱い。）本人指摘「先着なのに抽選と出る」の修正。
+    const isLotteryForm = (f: string | null) => !!f && /抽選|抽籤|招待|エントリー|応募/.test(f);
+    const hasLottery = stores.some((s) => isLotteryForm(s.form));
+
     items.push({
       source: "nyuka_now",
       sourceId: a.id,
       title: product,
       genre: classifyAggregatorGenre(product),
       subGenre: null,
-      eventType: "抽選",
+      // 抽選ストアがあれば「抽選」、無ければ「予約受付中」（先着/予約＝抽選ではない）。
+      eventType: hasLottery ? "抽選" : "予約受付中",
       eventDate,
-      eventDateText: eventDate ? null : "抽選・予約 受付中",
+      eventDateText: eventDate ? null : hasLottery ? "抽選・予約 受付中" : "予約・先着 受付中",
       price: null,
       url: stores[0].url, // 一次ソース（公式・小売の抽選ページ）。アグリゲーターは出さない。
       imageUrl: null,
       highlights: `受付中ストア：${summary}${more}`,
-      hasLottery: true,
+      hasLottery,
       stores: JSON.stringify(
         stores.map((s) => ({ name: s.name, url: s.url, form: s.form, when: s.when, note: s.note }))
       ),

@@ -2,6 +2,7 @@
 // prisma を import しないこと（クライアントバンドルに載せるため）。
 import { todayJst } from "./date";
 import { parseYen } from "./margin";
+import { cleanListTitle } from "./title";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
@@ -247,9 +248,45 @@ export function dedupeSneakerCrossSource<T extends DedupeItem>(items: T[]): T[] 
   });
 }
 
-/** 一覧に出す前の重複解消をまとめて適用（タイトル一致＋語順違い＋スニーカーの日英別名）。 */
+/**
+ * 同一ソースが同じ商品を別投稿で二重掲載するケースを解消する。
+ * 例: ちゃんねらー速報が同じ商品を別コメントで再投稿し、実況コメントを剥がした整形後
+ * タイトルが一致（生タイトルは違うので dedupeCrossSource では拾えない）。
+ * **整形後タイトル＋発売日が完全一致**の同一ソースグループだけを畳む。別カラー・別弾は
+ * 整形後タイトルが異なるので温存される（誤マージ回避＝安全側）。
+ */
+function dedupeSameSourceExact<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    const key = dedupeKey(cleanListTitle(it.source, it.title));
+    if (key.length < 8) continue; // 短い整形結果は別商品衝突の危険があるので触らない
+    const day = it.eventDate ? dayISO(it.eventDate) : "none";
+    const k = `${it.source}|${key}|${day}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    let best = g[0];
+    for (const it of g) {
+      if (it === best) continue;
+      const d = repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/** 一覧に出す前の重複解消をまとめて適用（クロスソース一致＋語順違い＋同一ソース再投稿＋スニーカー日英別名）。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
-  return dedupeSneakerCrossSource(dedupeWordOrderCrossSource(dedupeCrossSource(items)));
+  return dedupeSneakerCrossSource(
+    dedupeSameSourceExact(dedupeWordOrderCrossSource(dedupeCrossSource(items)))
+  );
 }
 
 // ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────

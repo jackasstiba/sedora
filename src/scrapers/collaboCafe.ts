@@ -124,7 +124,7 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
   for (const item of items) {
     try {
       const html = await fetchHtml(item.url);
-      const enr = analyzeCollab(extractArticleBody(html));
+      const enr = analyzeCollab(extractArticleBody(html), item.subGenre);
       item.hasLottery = enr.hasLottery;
 
       // 一次情報（公式）へ飛んで販売商品を取る（best-effort・12秒でアボート）。
