@@ -101,7 +101,7 @@ async function main() {
       const h = r.highlights ?? "";
       if (/賞品[:：]/.test(h) && !h.includes("各賞ラインナップ")) badPrize.push(`[${r.source} #${r.id}] ${h}`);
       if (HL_MECH.has(r.source)) {
-        if (r.hasLottery && h && !/抽選|くじ/.test(h)) badFlag.push(`[${r.source} #${r.id}] hasLottery=true だが highlights に抽選表記なし: ${h}`);
+        if (r.hasLottery && h && !/抽選|くじ|各賞ラインナップ/.test(h)) badFlag.push(`[${r.source} #${r.id}] hasLottery=true だが highlights に抽選表記なし: ${h}`);
         if (!r.hasLottery && /抽選・くじあり|抽選賞品/.test(h)) badFlag.push(`[${r.source} #${r.id}] hasLottery=false だが抽選表記: ${h}`);
       }
     }

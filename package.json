@@ -10,6 +10,7 @@
     "lint": "eslint",
     "scrape": "node --env-file-if-exists=.env --import tsx scripts/scrape.ts",
     "audit": "node --env-file-if-exists=.env --import tsx scripts/audit.ts",
+    "reenrich:collabo": "node --env-file-if-exists=.env --import tsx scripts/reenrichCollabo.ts",
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "scrape:images": "node --env-file-if-exists=.env --import tsx scripts/backfillImages.ts",
     "scrape:kuji": "node --env-file-if-exists=.env --import tsx scripts/scrapeKuji.ts",
