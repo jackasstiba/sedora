@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { track } from "@vercel/analytics";
 import { logEvent } from "@/lib/logEvent";
 
@@ -37,7 +37,8 @@ const WHEN_TABS: { value: string; label: string }[] = [
 
 export function FilterBar({ genres, values, onChange, onClear }: Props) {
   const { genre, status, when, datedOnly } = values;
-  // 検索欄だけは入力中の未確定文字を持つためローカル state。確定(送信)で親へ反映。
+  // 検索欄だけは入力中の未確定文字を持つためローカル state。全件がクライアント側にあるので
+  // 入力するそばから即時フィルタする（サーバー往復ゼロ＝体感が速い）。
   const [queryInput, setQueryInput] = useState(values.query);
 
   // 「条件をクリア」等で外部から query が変わったら入力欄も追従（レンダー中に調整）。
@@ -47,6 +48,30 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
     setQueryInput(values.query);
   }
 
+  // 入力ごとに即時フィルタ（220msデバウンス＝1文字ごとの再絞り込み連打を軽く間引く）。
+  const trackedRef = useRef(values.query);
+  useEffect(() => {
+    const q = queryInput.trim();
+    if (q === values.query) return; // 既に反映済み（外部クリア追従・送信直後など）
+    const h = setTimeout(() => onChange({ query: q }), 220);
+    return () => clearTimeout(h);
+    // onChange/values.query を依存に入れると毎レンダーで張り直すので queryInput のみを見る。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryInput]);
+
+  // 需要シグナル（何を検索されたか）の記録は、入力が落ち着いてから1回だけ（900ms）。
+  // 1文字ごとに送るとイベントが荒れるので、確定した検索語だけを重複なく送る。
+  useEffect(() => {
+    const q = queryInput.trim();
+    if (q.length < 2 || q === trackedRef.current) return;
+    const h = setTimeout(() => {
+      trackedRef.current = q;
+      track("search", { query: q });
+      logEvent("search", q);
+    }, 900);
+    return () => clearTimeout(h);
+  }, [queryInput]);
+
   const anyActive =
     Boolean(genre) || Boolean(values.query) || Boolean(status) || Boolean(when) || datedOnly;
 
@@ -55,13 +80,8 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          const q = queryInput.trim();
-          // 何を検索されたか＝需要シグナル。空検索は送らない。
-          if (q) {
-            track("search", { query: q });
-            logEvent("search", q);
-          }
-          onChange({ query: q });
+          // Enter/ボタンでも確定（即時フィルタ済みだが、モバイルでキーボードを閉じる導線）。
+          onChange({ query: queryInput.trim() });
         }}
         className="flex gap-2"
       >

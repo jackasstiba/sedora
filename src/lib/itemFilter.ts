@@ -206,6 +206,33 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
   return dedupeSneakerCrossSource(dedupeCrossSource(items));
 }
 
+// ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────
+// ユーザーは略称で検索するが（プレースホルダの例も「ポケカ」）、タイトルは正式表記で
+// 入っているため素の部分一致だと 0件になる（本番実測: ポケカ 0件↔ポケモンカード 27件、
+// デュエマ 1↔19、ヒロアカ 6↔25、まどマギ 1↔22 等）。略称を含む検索は正式表記にも当てる。
+// 展開は「一致を増やすだけ」なので取りこぼしを減らしても誤って絞ることはない（安全・加算的）。
+const SEARCH_SYNONYMS: { alias: string; canon: string[] }[] = [
+  { alias: "ポケカ", canon: ["ポケモンカード"] },
+  { alias: "ワンピカード", canon: ["ワンピースカード", "one pieceカード"] },
+  { alias: "ワンピ", canon: ["ワンピース"] },
+  { alias: "まどマギ", canon: ["まどか☆マギカ", "魔法少女まどか"] },
+  { alias: "デュエマ", canon: ["デュエル・マスターズ", "デュエルマスターズ"] },
+  { alias: "ヒロアカ", canon: ["僕のヒーローアカデミア"] },
+  { alias: "ぼざろ", canon: ["ぼっち・ざ・ろっく", "ぼっちざろっく"] },
+  { alias: "遊戯王", canon: ["遊☆戯☆王"] },
+  { alias: "プリキュア", canon: ["プリキュア"] },
+];
+
+/** タイトルが検索語に一致するか。素の部分一致に加え、略称(ポケカ等)は正式表記にも当てる。 */
+export function matchesQuery(title: string, q: string): boolean {
+  const t = title.toLowerCase();
+  if (t.includes(q)) return true;
+  for (const { alias, canon } of SEARCH_SYNONYMS) {
+    if (q.includes(alias) && canon.some((c) => t.includes(c.toLowerCase()))) return true;
+  }
+  return false;
+}
+
 export type ClientFilter = {
   genre?: string;
   query?: string;
@@ -244,7 +271,7 @@ export function filterItems<T extends FilterableItem>(items: T[], f: ClientFilte
 
   return items.filter((it) => {
     if (f.genre && it.genre !== f.genre) return false;
-    if (q && !it.title.toLowerCase().includes(q)) return false;
+    if (q && !matchesQuery(it.title, q)) return false;
 
     if (f.status === "now") {
       // 「いま買える」速報＝日付なし かつ 予定品(登場予定/開催)でないもの。期間条件は課さない。

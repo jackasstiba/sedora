@@ -19,6 +19,22 @@ export function stripSourceLabel(title: string): string {
   return t.length >= 4 ? t : title.trim();
 }
 
+// 末尾の「〜M月D日より〜開催/登場/発売/配信!」型の日付告知（主にコラボ記事タイトル）。
+// 例:「ちいかわ × パレード 7月24日よりプレゼントキャンペーン実施!」→「ちいかわ × パレード」。
+// 日付（YYYY年M月D日 / M月上旬 等）を起点に、告知動詞＋！で終わる末尾節を丸ごと剥がす。
+// 発売日・イベント種別は eventDate バッジ・eventType バッジで別途表示されるので、
+// タイトル末尾の重複した告知文は純粋なノイズ。本番collabo_cafe 356件で75件を整形、
+// channeltono/torecasoku/figisland/pokemon_goods/ichiban_kuji では0件（＝告知型でない
+// タイトルには誤爆しない）ことを検証済み。安全側＝剥がして6字未満になるなら原文を返す。
+const DATE_NOTICE_TAIL =
+  /(?:\s|　|を|は|も|が|、|・)*(?:\d{4}\s*年\s*)?\d{1,2}\s*月\s*(?:\d{1,2}\s*日|上旬|中旬|下旬|末)(?:\s*\([日月火水木金土]\))?\s*(?:週)?\s*(?:より|から|〜|~|以降)?[^!！。]*?(?:開催|登場|発売|配信|スタート|販売|受付|開始|実施|オープン|解禁|予約|決定)[^!！。]*[!！]\s*$/;
+
+/** 末尾の日付告知（「〜8月6日よりコラボ開催!」等）を表示用に除去する。全ソース対象・非破壊。 */
+export function stripDateNoticeTail(title: string): string {
+  const t = title.replace(DATE_NOTICE_TAIL, "").trim();
+  return t.length >= 6 ? t : title.trim();
+}
+
 /**
  * subGenre（種別）バッジの表示値。収集元の痕跡（X巡回ハンドル @xxx）は非公開方針のため出さない。
  * 書き込み側(xWatch)は修正済みだが、既存DBに残る @handle の subGenre を表示層でも握りつぶす。
@@ -158,8 +174,10 @@ function stripTrailingCommentary(title: string): string {
 
 /** 一覧カード表示用にタイトルを整形（非破壊・失敗時は原文）。 */
 export function cleanListTitle(source: string, title: string): string {
-  // まず全ソース共通で情報元由来の定型ラベル（snkrdunkの「｜…」）を剥がす。
-  const base = stripSourceLabel(title);
+  // まず全ソース共通で情報元由来の定型ラベル（snkrdunkの「｜…」）と、末尾の日付告知
+  // （コラボ記事の「〜8月6日よりコラボ開催!」等）を剥がす。後者は eventDate/eventType
+  // バッジと重複するノイズで、告知型でないタイトルには誤爆しないことを検証済み。
+  const base = stripDateNoticeTail(stripSourceLabel(title));
   if (!CLEANABLE_SOURCES.has(source)) return base;
   const raw = base.trim();
 
