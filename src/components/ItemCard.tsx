@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { countdown, formatShort } from "@/lib/date";
+import { countdown, displayEventDateText, formatShort } from "@/lib/date";
 import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
@@ -60,7 +60,8 @@ function formatDate(date: Date | string | null): string | null {
 }
 
 export function ItemCard({ item }: { item: Item }) {
-  const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  // 日付欄は発売日と同じ赤字なので、発売日でないテキスト（投稿日＝記事を拾った日）は出さない。
+  const dateLabel = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText);
   const cd = countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。

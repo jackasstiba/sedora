@@ -57,3 +57,5 @@ scripts/x_watch/x_watch_inbox.json
 /.claude/
 /.windsurf/
 /skills-lock.json
+# 監査の観測プロファイル（ローカルの実行状態。前回との差分検出に使う）
+audit-profile.json

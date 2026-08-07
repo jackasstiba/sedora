@@ -20,12 +20,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "../src/lib/prisma";
-import { todayJst } from "../src/lib/date";
+import { displayEventDateText, todayJst } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
+import { runDrift } from "./auditDrift";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -289,6 +290,60 @@ async function main() {
     report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
   }
 
+  // (9b) 括弧の対応が取れていない表示タイトル。
+  //      ランダム標本の目視で見つかった型（『で始まって閉じない）。人間なら一瞬で気付く。
+  {
+    const pairs: [string, string][] = [["『", "』"], ["「", "」"], ["【", "】"], ["（", "）"]];
+    const bad: string[] = [];
+    for (const r of shown) {
+      const t = cleanListTitle(r.source, r.title);
+      for (const [open, close] of pairs) {
+        if (t.split(open).length !== t.split(close).length) {
+          bad.push(`[${r.source} #${r.id}] ${open}${close} の対応なし: ${t}`);
+          break;
+        }
+      }
+    }
+    report("unbalanced_bracket", "表示タイトルの括弧が閉じていない", "warn", bad, baseline);
+  }
+
+  // (9c) 日付欄に「発売日でないもの」を出していないか。
+  //      日付欄は発売日と同じ赤字なので、そこに出た文字列は発売日として読まれる。
+  //      実測: Xミラー由来の275件が「投稿日: 2026-08-07」（記事を拾った日）を表示していた。
+  //      裏取り済みの事実だけを約束する原則（[[UIラベルは裏取り済みのみ約束]]）の日付版。
+  {
+    const bad: string[] = [];
+    const pastText: string[] = [];
+    for (const r of shown) {
+      if (r.eventDate) continue;
+      // 検査するのは**画面に出る文字列**。DBの生の値ではなく、表示層を通した結果を見る。
+      const label = displayEventDateText(r.eventDateText);
+      if (!label) continue;
+      if (/投稿日|掲載日|更新日/.test(label))
+        bad.push(`[${r.source} #${r.id}] 日付欄に «${label}» ${cleanListTitle(r.source, r.title)}`);
+      // 「これから◯◯する」と読める表記なのに、日付が過去を指している＝陳腐化した予定。
+      // ※「登場 2026/07/31」のように**既に起きたこと**を書いている表記は正常（ポケモン公式の
+      //   新商品は"今買える"意味で過去日を持つ）。予定を約束する語がある時だけ粗とみなす。
+      //   正常を故障と鳴らす検査は、すぐ読み飛ばされるようになる。
+      if (!/予定|開始|受付|締切|まで/.test(label)) continue;
+      // 日付の読み取りは、書式ごとに明示的に分ける。ここは2回間違えた:
+      //  ・曖昧な `\D{0,2}` で「2026年08月下旬」を「2026年0月8日」と読み、過去と誤判定（180件）
+      //  ・「2026年08月05週」（8月第5週＝月末）を 8月5日と読み、過去と誤判定（93件）
+      // 「それらしく読めてしまう」書式ほど危ない。週表記を先に処理し、日が無い表記は判定しない。
+      const week = label.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:第)?\s*(\d{1,2})\s*週/);
+      const ymd = label.match(/(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})\s*日?(?!\s*週)/);
+      const d = week
+        ? Date.UTC(Number(week[1]), Number(week[2]) - 1, (Number(week[3]) - 1) * 7 + 1)
+        : ymd
+          ? Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3]))
+          : null;
+      if (d !== null && d < today.getTime())
+        pastText.push(`[${r.source} #${r.id}] 予定が過去 «${label}» ${cleanListTitle(r.source, r.title)}`);
+    }
+    report("date_text_not_event", "日付欄に発売日でないものを出している", "error", bad, baseline);
+    report("date_text_past", "日付欄のテキストが過去を指している（陳腐化）", "warn", pastText, baseline);
+  }
+
   // (10) 一番くじの各賞（prizes JSON）。構造の壊れと、**相場が1件も付いていない=機能の死**。
   {
     const broken: string[] = [];
@@ -468,6 +523,11 @@ async function main() {
     report("link_dead", "リンク先が404等を返している（抜き取り）", "warn", bad, baseline);
     console.log(`(参考) リンク到達性: ${targets.length}件を抜き取り検査（GET・失敗は再確認）`);
   }
+
+  // ── 未知の型のための観測（判定はしない。差分と標本を出して人間が読む） ──
+  // 不変条件は「私が過去に見た型」しか捕まえられない。ここは型を定義せずに
+  // 「前回と違うところ」と「生の標本」を毎回出す枠。判定しないので ERROR にはしない。
+  runDrift(shown, today, UPDATE_BASELINE);
 
   // ── 出力 ──
   const errors = findings.filter((f) => f.level === "error");

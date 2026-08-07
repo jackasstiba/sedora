@@ -1,6 +1,6 @@
 // サーバー(Prisma)とクライアント(ブラウザ内フィルタ)で共有する、絞り込みの純粋ロジック。
 // prisma を import しないこと（クライアントバンドルに載せるため）。
-import { todayJst } from "./date";
+import { isStalePlan, todayJst } from "./date";
 import { parseYen } from "./margin";
 import { cleanListTitle, hasProductSegment } from "./title";
 
@@ -350,16 +350,29 @@ function dropNonProductPosts<T extends DedupeItem>(items: T[]): T[] {
   return items.filter((it) => hasProductSegment(it.source, it.title));
 }
 
+/**
+ * 過ぎた予定を一覧から外す。
+ *
+ * 日付が確定していない（eventDate=null）商品でも、テキストには「2026年06月04週登場予定」の
+ * ように予定が書かれていることがある。この行は日付条件に引っかからないので、**予定日が
+ * 何ヶ月前でも「今後の予定」に居座り**、カードには過去日が発売日と同じ赤字で出ていた（実測69件）。
+ * 日付を勝手に推定して埋める（＝こちらが精度を足す）のではなく、**過ぎた予定は載せない**。
+ */
+function dropStalePlans<T extends DedupeItem & { eventDateText?: string | null }>(items: T[]): T[] {
+  const today = todayJst();
+  return items.filter((it) => !isStalePlan(it.eventDate ?? null, it.eventDateText ?? null, today));
+}
+
 /** 一覧に出す前の整理をまとめて適用（重複解消4種＋商品として成立していない投稿の除外）。
  *  ページごとに呼び出しが分かれると必ず適用漏れが出るので、表示用の取得は全てここを通す。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
-  return dropNonProductPosts(
+  return dropStalePlans(dropNonProductPosts(
     dedupeSneakerCrossSource(
       dedupeSameSourceExact(
         dedupeWordOrderCrossSource(dedupeCrossSource(dedupeIdenticalTitle(items)))
       )
     )
-  );
+  ));
 }
 
 // ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────

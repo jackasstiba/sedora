@@ -7,7 +7,7 @@ import { OutboundLink } from "@/components/OutboundLink";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
-import { countdown, formatLong } from "@/lib/date";
+import { countdown, displayEventDateText, formatLong } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { groupStoresByLabel, parseStoresJson } from "@/lib/stores";
@@ -27,7 +27,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const item = await getItemById(Number(id));
   if (!item) return { title: "見つかりませんでした | ハツコレ" };
 
-  const dateStr = formatDate(item.eventDate) ?? item.eventDateText ?? "";
+  const dateStr = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText) ?? "";
   // 一覧カードと同じ整形を使う。以前は stripSourceLabel だけだったため、Xミラー由来の商品は
   // 一覧では商品名なのに、開いた先のタイトル・<title> がツイート全文（実況コメント込み）になり、
   // 同じ商品の名前がページ間で食い違っていた。
@@ -61,7 +61,7 @@ export default async function ItemPage({ params }: Props) {
   if (!item) notFound();
 
   const related = await getRelatedItems(item);
-  const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
+  const dateLabel = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText);
   const cd = countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。

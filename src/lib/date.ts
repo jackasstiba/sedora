@@ -90,3 +90,52 @@ export function formatDateTimeJst(d: Date | string): string {
 }
 
 export const WEEKDAY_LABELS = DAYS;
+
+/**
+ * 日付が確定していないときに、日付欄へ出してよいテキストかどうか。
+ *
+ * カードは `formatDate(eventDate) ?? eventDateText` を**発売日と同じ赤字**で出すので、
+ * eventDateText に発売日でないものが入っていると、そのまま発売日として読まれる。
+ * 実測: Xミラー由来の **275件が「投稿日: 2026-08-07」を日付欄に表示**していた。
+ * 投稿日はこちらが記事を拾った日で、商品の発売日・開催日とは何の関係もない。
+ * 「裏取り済みの事実だけを約束する」原則に照らすと、これは日付の過剰約束にあたる。
+ * 発売日でないと分かるものは、日付欄には出さない（何も出さない方が正しい）。
+ */
+/**
+ * 「これから起きる」と読める日付テキストから、その予定日を読む（読めなければ null）。
+ *
+ * 書式ごとに明示的に分ける。曖昧に読むと逆に誤りを生む（実測でこの関数の元になった検査は
+ * 2回間違えた: 「2026年08月下旬」を「0月8日」と読み、「2026年08月05週」を「8月5日」と読んだ）。
+ * 日が特定できない表記（下旬・頃）は **null を返す＝判定しない**。曖昧なものを無理に
+ * 日付にすると、こちらが勝手に精度を足したことになる。
+ */
+export function plannedDateFromText(text: string | null): Date | null {
+  if (!text) return null;
+  if (!/予定|開始|受付|締切|まで/.test(text)) return null; // 未来を約束していない表記は対象外
+  const week = text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月\s*(?:第)?\s*(\d{1,2})\s*週/);
+  if (week) {
+    // 「M月N週」はその週の初日として扱う（週の中のどの日かは分からないので最も早い日）。
+    return new Date(Date.UTC(Number(week[1]), Number(week[2]) - 1, (Number(week[3]) - 1) * 7 + 1));
+  }
+  const ymd = text.match(/(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})\s*日?(?!\s*週)/);
+  if (ymd) return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
+  return null;
+}
+
+/** 日付未定として表示している予定が、既に過ぎているか（＝陳腐化した予定）。 */
+export function isStalePlan(
+  eventDate: Date | string | null,
+  eventDateText: string | null,
+  today: Date
+): boolean {
+  if (eventDate) return false;
+  const planned = plannedDateFromText(eventDateText);
+  return planned !== null && planned.getTime() < today.getTime();
+}
+
+export function displayEventDateText(eventDateText: string | null): string | null {
+  if (!eventDateText) return null;
+  // 「投稿日」「掲載日」＝こちらが記事を拾った日。商品の日付ではないので日付欄に出さない。
+  if (/投稿日|掲載日|更新日/.test(eventDateText)) return null;
+  return eventDateText;
+}
