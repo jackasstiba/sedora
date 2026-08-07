@@ -95,7 +95,7 @@ async function main() {
   // (1) 整形後タイトルに残る実況の断片。
   //     対象は実況本文をタイトルにしているXミラー系だけ。他ソースは公式・記事の正規タイトルで、
   //     「くじを手にする戦いなのです！」のような正当な商品名を実況と誤検知してしまう。
-  const MIRROR_SOURCES = new Set(["channeltono", "rarecheck"]);
+  const MIRROR_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
   for (const { key, re } of NOISE_CHECKS) {
     const bad: string[] = [];
     for (const r of shown) {

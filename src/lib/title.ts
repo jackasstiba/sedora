@@ -4,7 +4,10 @@
 //   誤って商品名を削らないよう、剥がすのは実況コメント語を含む部分だけに限定し、
 //   商品タグ(【特典】等)や『』内は決して削らない。結果が短くなりすぎたら生titleに戻す。
 
-const CLEANABLE_SOURCES = new Set(["channeltono", "rarecheck"]);
+// タイトルが「商品名」ではなく投稿本文（実況・告知の自由文）であるソース。
+// x_watch も X の投稿をそのまま取り込むので同じ性質（実測: 「7月24日11時より30日まで！
+// ガンダムカードゲーム ブースターパック…」が /premium の先頭に出ていた）。
+const CLEANABLE_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
 
 // snkrdunk（スニーカーダンク）は全商品タイトル末尾に「｜抽選/販売/定価情報」という
 // 内部向けの定型ラベルが付く。ユーザーには無意味なノイズなので、表示時に必ず剥がす。
@@ -210,6 +213,17 @@ function isCommentSeg(seg: string): boolean {
   // 商品名らしい語（英字3字以上・カタカナ4字以上）が無いなら値段の実況にすぎない。
   if (core.length <= 24 && /[０-９0-9]\s*円/.test(core) && !/[A-Za-z]{3,}|[ァ-ヶー・]{4,}/.test(core.replace(STORE_NAME_G, "")))
     return true;
+  // 日付・時刻の告知だけの断片（「7月24日11時より30日まで」）。数字を含むので商品名判定を
+  // 通ってしまうが、日付語を取り除いて商品名らしい語が残らないなら告知にすぎない。
+  // 実測: これが残ると「7月24日11時より30日まで！ガンダムカードゲーム…」が
+  // /premium の先頭（最も目立つ場所）に出ていた。
+  if (/[０-９0-9]\s*[月日時]|[０-９0-9]{1,2}\s*\/\s*[０-９0-9]{1,2}/.test(core)) {
+    const rest = core
+      .replace(/[０-９0-9]{1,4}\s*[年月日時分/:：]/g, "")
+      .replace(/(?:本日|明日|昨日|より|から|まで|以降|頃|ごろ|開始|終了|受付|予約|抽選|[（(][日月火水木金土][）)])/g, "")
+      .trim();
+    if (!/[A-Za-z]{2,}|[ァ-ヶー・]{4,}|[【『「]/.test(rest)) return true;
+  }
   if (ALWAYS_COMMENT.test(core)) return true;
   if (STRONG_COMMENT_END.test(core)) return true;
   if (PROMO_NOISE.test(core)) return true;
