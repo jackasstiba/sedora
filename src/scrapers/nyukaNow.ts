@@ -1,6 +1,7 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
 import { classifyAggregatorGenre, cleanStoreUrl, NOISE_LINK, stripTags } from "./aggregatorUtil";
+import { summarizeStores } from "../lib/stores";
 
 // 「日本時間の今日」を時刻なしの暦日(UTC0時)で返す（util.ts の calDate 規約と同じ）。
 function todayCal(): Date {
@@ -203,11 +204,13 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
       .sort((x, y) => x.getTime() - y.getTime());
     const eventDate = futureDates[0] ?? null;
 
-    const summary = stores
-      .slice(0, 3)
-      .map((s) => `${s.name}${s.form || s.when ? `（${[s.form, s.when].filter(Boolean).join("・")}）` : ""}`)
-      .join("、");
-    const more = stores.length > 3 ? ` 他${stores.length - 3}店` : "";
+    // 要約は表示ラベル単位でまとめる（同じ店が別の応募ページを複数開くと、同じ文字列が
+    // 2回並ぶだけで区別がつかないため。まとめて「・N口」を添える）。
+    const summary = summarizeStores(
+      stores.map((s) => ({ name: s.name, url: s.url, form: s.form, when: s.when, note: s.note })),
+      3
+    );
+    const more = "";
 
     // 販売形式から抽選/先着を判定する。入荷Nowの「抽選情報」カテゴリでも、受付中の実店舗は
     // 「先着販売」「予約」のことがある。全ストアが先着/予約なら“抽選ではない”ので抽選扱いしない。

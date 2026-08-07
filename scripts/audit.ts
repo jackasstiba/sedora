@@ -356,6 +356,22 @@ async function main() {
       }
     }
     report("stores_broken", "受付中ストアのデータが壊れている", "error", bad, baseline);
+
+    // 表示上まったく同じ文字列が並ぶと、読む側には区別がつかない（人間なら一瞬で気付く）。
+    // データが正しくても「表示が同じ」なら粗。カードの要約文と詳細のラベルの両方を見る。
+    // ※ 検査するのは「実際に画面に出る文字列」だけ。詳細ページは同一ラベルの行に
+    //   「応募ページ 1/2」を付けて区別済みなので、データ側に同じラベルが複数あること自体は
+    //   粗ではない。データを理由に鳴らすと**決して0にならない検査**になり、網全体の信用を削る。
+    const indistinguishable: string[] = [];
+    for (const r of shown) {
+      // カード/一覧に出る要約文に、同じ表記が2回出ていないか。
+      const summary = (r.highlights ?? "").replace(/^受付中ストア：/, "");
+      if (!summary) continue;
+      const segs = summary.split("、").map((s) => s.trim()).filter(Boolean);
+      if (new Set(segs).size < segs.length)
+        indistinguishable.push(`[${r.source} #${r.id}] 要約に同一表記が重複: ${summary}`);
+    }
+    report("stores_indistinguishable", "受付中ストアの表示が区別できない（同じ表記が並ぶ）", "warn", indistinguishable, baseline);
   }
 
   // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。
@@ -414,8 +430,28 @@ async function main() {
     report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
   }
 
-  // (15) リンク到達性（--links のときだけ。各ソース2件をHEADで抜き取り）
+  // (15) リンク到達性（--links のときだけ。各ソース2件を抜き取り）
+  //
+  // ※ HEAD を使ってはいけない。snkrdunk は **HEAD に 404、GET に 200** を返すため、
+  //   HEAD で判定した初回実行は生きているリンクを「404」と誤報した（実測）。
+  //   誤報する検査は本物を埋もれさせるので、実際のユーザーと同じ GET で確かめ、
+  //   さらに1回再試行して一時的な失敗と区別する。本文は読まずに捨てる。
   if (CHECK_LINKS) {
+    const UA = "Mozilla/5.0 (compatible; SedoriRadar/1.0)";
+    const status = async (url: string): Promise<number | null> => {
+      try {
+        const res = await fetch(url, {
+          method: "GET",
+          redirect: "follow",
+          headers: { "User-Agent": UA },
+          signal: AbortSignal.timeout(12000),
+        });
+        res.body?.cancel();
+        return res.status;
+      } catch {
+        return null; // ネットワーク側の一時失敗は判定しない
+      }
+    };
     const bySource = new Map<string, Row[]>();
     for (const r of shown) (bySource.get(r.source) ?? bySource.set(r.source, []).get(r.source)!).push(r);
     const targets: Row[] = [];
@@ -423,16 +459,14 @@ async function main() {
     const bad: string[] = [];
     await Promise.all(
       targets.map(async (r) => {
-        try {
-          const res = await fetch(r.url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
-          if (res.status >= 400) bad.push(`[${r.source} #${r.id}] HTTP ${res.status} ${r.url}`);
-        } catch {
-          /* ネットワーク側の一時失敗は判定しない（誤検知を出さない） */
-        }
+        const first = await status(r.url);
+        if (first === null || first < 400) return;
+        const second = await status(r.url); // 一時的な失敗と区別するための再確認
+        if (second !== null && second >= 400) bad.push(`[${r.source} #${r.id}] HTTP ${second} ${r.url}`);
       })
     );
     report("link_dead", "リンク先が404等を返している（抜き取り）", "warn", bad, baseline);
-    console.log(`(参考) リンク到達性: ${targets.length}件を抜き取り検査`);
+    console.log(`(参考) リンク到達性: ${targets.length}件を抜き取り検査（GET・失敗は再確認）`);
   }
 
   // ── 出力 ──

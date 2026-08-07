@@ -10,7 +10,7 @@ import { getItemById, getRelatedItems } from "@/lib/seo";
 import { countdown, formatLong } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
-import { parseStoresJson } from "@/lib/stores";
+import { groupStoresByLabel, parseStoresJson } from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -78,6 +78,8 @@ export default async function ItemPage({ params }: Props) {
   const prizesHaveResale = prizeGallery?.some((p) => !!p.resaleText) ?? false;
   // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
   const storeList = parseStoresJson(item.stores);
+  // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
+  const storeGroups = storeList ? groupStoresByLabel(storeList) : [];
 
   // Product構造化データの必須要件はoffers/review/aggregateRatingのいずれかをGoogleが要求する。
   // レビュー・評価は実データが無いので付けない（推測値は約束しない方針）。定価(price)は裏取り済みの
@@ -351,19 +353,29 @@ export default async function ItemPage({ params }: Props) {
       {storeList && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-            🎯 抽選・予約 受付中ストア（公式 {storeList.length}店）
+            🎯 抽選・予約 受付中ストア（公式 {storeGroups.length}店・応募ページ {storeList.length}件）
           </h2>
           <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
             現在応募・予約を受付中のストアです。応募条件（購入履歴・会員登録など）・在庫・締切は各公式ページでご確認ください。
           </p>
           <ul className="grid gap-2 sm:grid-cols-2">
-            {storeList.map((s) => (
+            {storeGroups.flatMap((g) =>
+              g.entries.map((s, i) => (
               <li
                 key={s.name + s.url}
                 className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
               >
                 <div className="min-w-0">
-                  <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">{s.name}</div>
+                  <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
+                    {s.name}
+                    {/* 同じ店が別の応募ページを複数開くことがある。同じ行が2つ並ぶと区別が
+                        つかないので、何口目かを事実として添える（推測は足さない）。 */}
+                    {g.entries.length > 1 && (
+                      <span className="ml-1 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                        応募ページ {i + 1}/{g.entries.length}
+                      </span>
+                    )}
+                  </div>
                   {(s.form || s.when) && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
                       {s.form && (
@@ -390,7 +402,8 @@ export default async function ItemPage({ params }: Props) {
                   応募ページ →
                 </OutboundLink>
               </li>
-            ))}
+              ))
+            )}
           </ul>
         </section>
       )}

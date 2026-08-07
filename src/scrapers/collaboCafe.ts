@@ -7,6 +7,7 @@ import {
   extractOfficialUrl,
   formatOfficialItems,
   formatSale,
+  pickVerifiedEventDate,
 } from "./collaboEnrich";
 import {
   classifyGenre,
@@ -124,8 +125,22 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
   for (const item of items) {
     try {
       const html = await fetchHtml(item.url);
-      const enr = analyzeCollab(extractArticleBody(html), item.subGenre);
+      const body = extractArticleBody(html);
+      const enr = analyzeCollab(body, item.subGenre);
       item.hasLottery = enr.hasLottery;
+
+      // 開催日の裏取り。一覧の「期間 :」は収集元側で誤っていることがあるので、記事本文の
+      // 「開催期間」とタイトルの日付が一致したときだけ訂正する（推測では動かさない）。
+      //
+      // ※ これは reenrich でも行うが、**スクレイプ自体に入れないと訂正が消える**。
+      //   実測: 再エンリッチで 8/6→8/8 に直した #20308 が、次の通常スクレイプで
+      //   一覧の誤った日付に上書きされ、監査のラチェットで再発が検出された。
+      //   「一度直した正しい値が通常の更新で壊される」経路を塞ぐ。
+      const verified = pickVerifiedEventDate(body, item.title, item.eventDate ?? null);
+      if (verified) {
+        item.eventDate = verified.date;
+        item.eventDateText = verified.text;
+      }
 
       // 一次情報（公式）へ飛んで販売商品を取る（best-effort・12秒でアボート）。
       // 対応ドメイン（rakuspa等）は商品名＋個別価格をカテゴリ正規化して要約、
