@@ -31,6 +31,11 @@ export async function scrapeFigisland(): Promise<ScrapedItem[]> {
       // 本物の商品は必ず詳細リンク(fiXXXX)か画像を持つので、両方欠けている行は捨てる
       // （薄いSEOページ・空カードの混入を防ぐ）。
       if (!idMatch && !imageUrl) return;
+      // ※ 上の条件だけでは足りなかった。この見出し行は**画像を持っている**ため素通りし、
+      //   DBから消しても次のスクレイプで新しいIDで復活していた（実測 #1 → #34535）。
+      //   ページ自身の見出し語（入荷予定表）は商品名には現れない（全2566件中この行だけ）ので、
+      //   個別ページを持たない＋見出し語を含む、の両方を満たす行を落とす。
+      if (!idMatch && /入荷予定表/.test(title)) return;
 
       items.push({
         source: "figisland",

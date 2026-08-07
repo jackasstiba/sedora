@@ -26,14 +26,31 @@ const BRACKET_PAIRS: [string, string][] = [
   ["（", "）"],
 ];
 
-/** 先頭の「閉じられていない開き括弧」を落とす。対応が取れている括弧には触らない。 */
-function dropUnmatchedLeadingBracket(title: string): string {
-  const t = title.trim();
+/**
+ * 対応が取れていない括弧記号だけを落とす。対応が取れている括弧には触らない。
+ *
+ * 収集元の原文が壊れていることがある（実測: 「…世界最強の戦士【OP-17」＝投稿者が閉じ括弧を
+ * 打ち忘れ、「ヴァンガード『征標艦隊提督 …(70枚入り)」＝記事側の誤記）。中身は正しい情報なので
+ * 消さず、**余った記号だけ**を取り除いて「…世界最強の戦士OP-17」と読める形にする。
+ * 括弧を補って閉じる（＝無い文字を足す）ことはしない。
+ */
+function dropUnmatchedBrackets(title: string): string {
+  let t = title.trim();
   for (const [open, close] of BRACKET_PAIRS) {
-    if (!t.startsWith(open)) continue;
-    const opens = t.split(open).length - 1;
-    const closes = t.split(close).length - 1;
-    if (opens > closes) return t.slice(open.length).trim();
+    let opens = t.split(open).length - 1;
+    let closes = t.split(close).length - 1;
+    // 開きが余る → 最後の開き括弧を落とす（先頭の孤立した『も同じ規則で消える）
+    while (opens > closes && opens > 0) {
+      const i = t.lastIndexOf(open);
+      t = (t.slice(0, i) + t.slice(i + open.length)).trim();
+      opens--;
+    }
+    // 閉じが余る → 最初の閉じ括弧を落とす
+    while (closes > opens && closes > 0) {
+      const i = t.indexOf(close);
+      t = (t.slice(0, i) + t.slice(i + close.length)).trim();
+      closes--;
+    }
   }
   return t;
 }
@@ -44,7 +61,7 @@ const INVISIBLE = /[​-‍﻿⁠­]/g;
 
 /** 情報元由来の定型ラベル（末尾「｜抽選/販売/定価情報」・先頭「最新リーク｜」等）を表示用に除去する。全ソース対象。 */
 export function stripSourceLabel(title: string): string {
-  const t = dropUnmatchedLeadingBracket(
+  const t = dropUnmatchedBrackets(
     title.replace(INVISIBLE, "").replace(SOURCE_LABEL_TAIL, "").replace(SOURCE_LABEL_HEAD, "").trim()
   );
   return t.length >= 4 ? t : title.trim();

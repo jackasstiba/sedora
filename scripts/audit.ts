@@ -11,7 +11,8 @@
  *     → 新しいページを作ったら PAGES に足す。足し忘れは registry のカバレッジ検査で落ちる。
  *  2. **WARN を放置しない。** 種類ごとの件数を audit-baseline.json に記録し、**増えたら ERROR**
  *     （ラチェット）。「WARNだから通す」を無くすための仕組み。baseline の更新は
- *     `npm run audit -- --update-baseline`（減った時だけ自動で締まる）。
+ *     `npm run audit -- --update-baseline`（減った時だけ自動で締まる）。増加が正当だと
+ *     **中身を確認した上で**受け入れるときだけ `--accept` を併用する。
  *  3. **「無い・0である」も検査する。** 値が変なものだけでなく、あるべきデータが消えたこと
  *     （ソースが更新されない／相場の付与が0件になる）も落とす。機能は静かに死ぬ。
  *
@@ -185,7 +186,11 @@ async function main() {
       const y = parseYen(r.price.split(" / ")[0]);
       const t = cleanListTitle(r.source, r.title);
       const isBoxWord = /BOX|ＢＯＸ|box|箱|入り|カートン|セット/.test(r.title);
-      const isSinglePack = /(?:ブースター|スターター)?パック/.test(t) && !isBoxWord;
+      // 「パック」はトレカだけの単位ではない。プラモの「ストライカーパック」「拡張パーツ
+      // パック」は部品セットで、単価が数千円でも正常（実測で ＭＧ 1/100 …ストライカーパック
+      // 3,520円 を誤検知した）。カードの単パックという概念があるトレカ系に限定する。
+      const isCardGenre = r.genre === "トレカ" || r.genre === "ポケモン";
+      const isSinglePack = isCardGenre && /(?:ブースター|スターター)?パック/.test(t) && !isBoxWord;
       if (y != null && isSinglePack && y >= 3000) bad.push(`[${r.source} #${r.id}] ${y.toLocaleString()}円(BOX表記なしの単パック?) ${t}`);
       if (y != null && (y <= 0 || y > 3_000_000)) bad.push(`[${r.source} #${r.id}] 異常価格 ${r.price} ${t}`);
     }
@@ -260,7 +265,10 @@ async function main() {
     for (const r of shown) {
       if (!r.eventDate) continue;
       // 「8月8日」型のみ。「8/8」型はプラモの縮尺（1/144 等）と区別できず誤検知になる。
-      const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)]
+      // 「8月8日まで」は**終了日**であって開催日ではない。バッジ（開始日）と食い違って当然なので
+      // 突合の対象から外す（実測 #35299「8月8日まで仙台七夕まつりに掲出!」＝開催 8/6〜8/8）。
+      // 締切・終了を表す助詞が続く日付を比較すると、正しいデータを誤りとして鳴らし続ける。
+      const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!\s*(?:まで|迄))/g)]
         .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
         .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
       if (hits.length !== 1) continue;
@@ -371,11 +379,19 @@ async function main() {
   //   ただし1つの抽選ページが複数商品を本当に扱う場合もある（近鉄百貨店のウイスキー4種）ので、
   //   断定せず数える。増えたらラチェットで ERROR になる。
   {
+    // 1つのページが複数商品を本当に扱うソースは対象外にする。ここを分けないと、
+    // 正常な構造に対して毎回鳴り続け、本当の指摘（商品ページに送れていない）が埋もれる。
+    const PAGE_COVERS_MANY: Record<string, string> = {
+      nyuka_now: "1つの抽選ページで複数商品の応募を受け付ける（百貨店のウイスキー3種など）",
+      pokemon_goods: "1つのキャンペーン特集ページに複数グッズが載る",
+      nike_snkrs: "1つの launch ページに大人用とキッズ用が並ぶ",
+    };
     const byUrl = new Map<string, Row[]>();
     for (const r of shown) (byUrl.get(r.url) ?? byUrl.set(r.url, []).get(r.url)!).push(r);
     const bad: string[] = [];
     for (const [url, arr] of byUrl) {
       if (arr.length < 2) continue;
+      if (arr.every((x) => PAGE_COVERS_MANY[x.source])) continue;
       bad.push(
         `${arr.length}件が同じURLを共有 → ${url}\n        ` +
           arr.slice(0, 3).map((x) => `[${x.source} #${x.id}] ${cleanListTitle(x.source, x.title).slice(0, 34)}`).join("\n        ")
@@ -634,9 +650,14 @@ async function main() {
   }
 
   // 減った分は baseline を締める（ラチェット）。増えた分は ERROR なので通らない。
+  //
+  // ただし「増えたが、中身を確認したら正当だった」場合の逃げ道が要る。無いと、
+  // 正しいデータが増えただけで永久に ERROR が居座り、いずれ誰も見なくなる（＝WARN放置の再来）。
+  // その場合だけ `--accept` を明示して受け入れる。**中身を1件ずつ見た後にだけ使うこと。**
+  const ACCEPT = args.includes("--accept");
   const nextChecks: Record<string, number> = { ...(baseline.checks ?? {}) };
   for (const [k, v] of Object.entries(counts)) {
-    if (nextChecks[k] == null || v < nextChecks[k]) nextChecks[k] = v;
+    if (nextChecks[k] == null || v < nextChecks[k] || ACCEPT) nextChecks[k] = v;
   }
   const nextPages: Record<string, number> = { ...(baseline.pages ?? {}) };
   for (const p of pages) nextPages[p.name] = Math.max(nextPages[p.name] ?? 0, p.rows.length);
