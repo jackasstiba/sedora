@@ -119,6 +119,15 @@ export function plannedDateFromText(text: string | null): Date | null {
   }
   const ymd = text.match(/(\d{4})\s*[年/.-]\s*(\d{1,2})\s*[月/.-]\s*(\d{1,2})\s*日?(?!\s*週)/);
   if (ymd) return new Date(Date.UTC(Number(ymd[1]), Number(ymd[2]) - 1, Number(ymd[3])));
+  // 「2026年07月下旬」のように日が無い表記は、**その月の末日**として扱う。
+  // 日を特定できない曖昧さは「最も遅い日」に倒す＝まだ来ていない可能性を潰さない。
+  // これなら「07月下旬」は7/31、「08月下旬」は8/31になり、過ぎた月だけが確実に落ちる。
+  const ym = text.match(/(\d{4})\s*年\s*(\d{1,2})\s*月/);
+  if (ym) {
+    const y = Number(ym[1]);
+    const m = Number(ym[2]);
+    return new Date(Date.UTC(y, m, 0)); // 翌月0日＝その月の末日
+  }
   return null;
 }
 

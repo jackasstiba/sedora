@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-07T05:07:23.169Z",
+  "updatedAt": "2026-08-07T05:12:58.373Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -29,7 +29,7 @@
     "image_missing_rate": 0,
     "page_count_drop": 0,
     "stores_indistinguishable": 0,
-    "unbalanced_bracket": 2,
+    "unbalanced_bracket": 1,
     "date_text_not_event": 0,
     "date_text_past": 0
   },
