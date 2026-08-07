@@ -18,7 +18,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { cleanListTitle, __debugSegments } from "../src/lib/title";
-import { displayEventDateText } from "../src/lib/date";
+import { eventDateLabel } from "../src/lib/date";
 
 const PROFILE_PATH = path.join(process.cwd(), "audit-profile.json");
 const MIRROR_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
@@ -181,9 +181,10 @@ export function runDrift(shown: Row[], today: Date, update: boolean): void {
     // 標本は**画面に出るのと同じもの**でなければ意味がない。生の値を出すと、表示層で
     // 弾いているはずの「投稿日: …」が標本にだけ現れ、直したのに直っていないように見える
     // （逆に、表示の粗を見落とす）。表示層と同じ関数を通す。
-    const date = r.eventDate
-      ? new Date(r.eventDate).toISOString().slice(0, 10)
-      : (displayEventDateText(r.eventDateText) ?? "日付未定");
+    // ※ 日付ありの側も表示層を通す。前回は null の場合だけ直して、日付がある場合に
+    //   ISO日付をそのまま出していたため、画面が「2026年9月」なのに標本は「2026-09-01」
+    //   と特定日を出していた＝**標本を見ても表示の粗に気付けない**状態だった。
+    const date = eventDateLabel(r.eventDate, r.eventDateText, "short") ?? "日付未定";
     const hl = r.highlights ? ` ｜ ${r.highlights.slice(0, 60)}` : "";
     console.log(`  [${r.genre}/${r.eventType}/${date}] ${cleanListTitle(r.source, r.title)}${r.price ? ` ${r.price}` : ""}${hl}`);
   }
