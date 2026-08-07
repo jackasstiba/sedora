@@ -19,7 +19,7 @@ const MAX_LIST_PAGES = 5; // 開催中の抽選は新しい投稿に集中する
 const CAT_GENRE: Record<string, string> = {
   フィギュア: "フィギュア",
   スニーカー: "スニーカー",
-  ゲーム: "ゲーム",
+  ゲーム: "家電・ゲーム機", // 語彙は GENRE_ORDER に揃える
   音楽: "映像・音楽",
 };
 

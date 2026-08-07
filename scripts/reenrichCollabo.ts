@@ -7,7 +7,7 @@
  * 表示スコープの collabo 全件を再取得して作り直す。冪等・非破壊（highlights/hasLottery のみ更新）。
  */
 import { prisma } from "../src/lib/prisma";
-import { todayJst } from "../src/lib/date";
+import { loadDisplayedItems } from "../src/lib/pages";
 import { fetchHtml, sleep } from "../src/scrapers/util";
 import {
   analyzeCollab,
@@ -33,26 +33,13 @@ async function fetchOfficial(url: string): Promise<string | null> {
 }
 
 async function main() {
-  const today = todayJst();
-  const items = await prisma.item.findMany({
-    // 表示スコープ（今後＋日付未定）に加え、相場つきの発売済み品も対象。後者は /premium に
-    // 載り続けるのに再エンリッチの外だったため、旧ラベル（未確認の「抽選賞品：」）が固着していた。
-    where: {
-      source: "collabo_cafe",
-      OR: [{ eventDate: { gte: today } }, { eventDate: null }, { marketPrice: { not: null } }],
-    },
-    select: {
-      id: true,
-      url: true,
-      title: true,
-      subGenre: true,
-      hasLottery: true,
-      highlights: true,
-      eventDate: true,
-      eventDateText: true,
-    },
-  });
-  console.log(`表示スコープの collabo_cafe ${items.length}件を再エンリッチ`);
+  // 対象は「サイトが実際に表示しているアイテム」（src/lib/pages.ts）から取る。
+  // 自前の where で「表示スコープ」を書き直すと必ずズレる: 以前は「今後＋日付未定＋相場つき」
+  // で絞っていたため、月ページが見せる**当月の過ぎた日**の記事がエンリッチの外に落ち、
+  // 廃止したはずの未確認ラベル「抽選賞品：X」が10件、本番に固着していた（実測）。
+  const displayed = await loadDisplayedItems();
+  const items = displayed.filter((r) => r.source === "collabo_cafe");
+  console.log(`表示中の collabo_cafe ${items.length}件を再エンリッチ`);
 
   let changed = 0;
   let dateFixed = 0;

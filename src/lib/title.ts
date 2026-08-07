@@ -60,88 +60,276 @@ export function displaySubGenre(subGenre: string | null | undefined): string | n
 const COMMENTARY =
   /(予約|販売|再開|開始|完売|まだあり|まだいけ|ご注意|注意を|きたー|来たー|復活|オフ|％オフ|値引|大幅|残り|即完売|豪華|人気|お早め|お早目|きました|いけます|即完|抽選受付|受付開始|更新|動画|いいね)/;
 
-// 商品タグ（ここから商品名が始まることが多い）。
-const PRODUCT_TAG = /【(?:特典|限定販売|あみあみ限定特典|予約特典|数量限定|再販)/;
-
-// 先頭の日付・締切・時刻告知（「7月28日10時より」「本日7月30日まで！」「5/5 13時より」
-// 「8月5日まで！」等）。日付・締切は決して商品名ではないので安全に剥がせる。
-// 日付範囲（「7月30日より8月4日まで！」）は stripLeading のループで1節ずつ順に除去される。
-// 日付部の直後に「月」「日」が続く場合は連続する月・日の列挙（「10月11月12月出荷分」等の
-// 出荷月スペック）なので、途中で切らないよう負の先読み (?!\s*[月日]) でマッチさせない。
-// 各桁グループ直後の (?!\d) は最大一致を強制し、連続月（「10月11月12月」）で先読みが
-// 失敗したとき桁を縮めて途中マッチする（「10月1」→「2月出荷分」化）バックトラックを防ぐ。
-const LEADING_DATE =
-  /^\s*(?:本日|明日|もうすぐ|まもなく)?\s*\d{1,2}(?!\d)\s*[月\/]\s*\d{1,2}(?!\d)\s*[日]?(?!\s*[月日])\s*(?:\([月火水木金土日]\))?\s*(?:\d{1,2}\s*時(?:\d{1,2}\s*分)?)?\s*(?:より|から|まで(?:に)?)?\s*[！!、]?\s*/;
-
-// 「まで/締切/完売」や日付を含む告知節（商品名ではない）。先頭の店舗＋締切告知の判定に使う。
-const NOTICE_SEG = /(まで|締切|完売|\d{1,2}\s*月\s*\d{1,2}\s*日|\d{1,2}\/\d{1,2})/;
-
-// 販売・予約・入荷などの状態告知語（商品名ではない）。全角スペース区切りの先頭節を剥がす判定に使う。
-// 例:「販売再開中です」「予約開始中」「8月発売予定です」等の店舗ステータス文。
-const NOTICE_VERB =
-  /(?:予約(?:受付)?(?:開始|中)|受付(?:開始|中)|販売(?:中|開始|再開)|再入荷|入荷予定|出荷予定|発売予定|発売日|抽選受付)/;
-
-// 先頭の店舗名プレフィックス（「プレバンで」「あみあみで」「ビックカメラにて」「エディオン楽天で」等）。
-// この直後から商品名が始まる。家電量販店系も追加（Xミラーは「◯◯にて/で 販売開始」型が多い）。
-// 店舗名の直後に「楽天/モール/オンライン/ブックス」等の系列サフィックスが付く複合形（エディオン楽天で等）も許容。
-const LEADING_STORE =
-  /^(?:プレバン|プレミアムバンダイ|あみあみ|駿河屋|楽天ブックス|楽天|ヨドバシ(?:カメラ)?|Amazon|アマゾン|ビックカメラ|ビック|アキバソフマップ|ソフマップ|エディオン|ジョーシン|ケーズデンキ|ノジマ|dショッピング|ミニストップ(?:オンライン)?|セブン(?:ネット)?|ローソン|イオン|タカラトミーモール)(?:楽天|モール|オンライン|ネット|ドットコム)?(?:で|にて|は|より|なら)/;
-
 // 末尾の「〜が抽選受付開始！」等のアクション告知（商品名ではない）。連結助詞＋動作句＋記号。
 const TRAILING_ACTION =
   /\s*(?:が|も|を|は|、|。)?\s*(?:(?:抽選)?受付開始|予約(?:受付)?開始|販売(?:開始|再開)|受注(?:生産)?(?:開始)?|再販(?:開始|決定)?|再入荷|復活)(?:へ|中|です)?[！!。\s]*$/;
 
-/** 商品名らしさ（英数・4字以上のカタカナ・商品タグを含む＝コメントとして剥がしてはいけない）。 */
+/** 商品名らしさ（英数・4字以上のカタカナ・商品タグを含む＝コメントとして剥がしてはいけない）。
+ *  カタカナ判定には長音「ー」と中黒「・」を含める。[ァ-ヶ] だけだと「ボードゲーム」「リコール」が
+ *  長音で分断されて3字扱いになり、商品名なのにコメントと誤判定されていた（実測で掲載漏れ）。 */
 function looksProduct(s: string): boolean {
-  return /[【『「]/.test(s) || /[A-Za-z0-9]/.test(s) || /[ァ-ヶ]{4,}/.test(s);
+  return /[【『「]/.test(s) || /[A-Za-z0-9]/.test(s) || /[ァ-ヶー・]{4,}/.test(s);
 }
 
-/** 『...』または「...」で囲まれた最初の商品名（長さ4以上）を取り出す */
+// ── 節（セグメント）選択方式 ─────────────────────────────────────────────
+// Xミラー(channeltono)の生タイトルは商品名ではなく**実況ツイート本文**で、商品名は文中の
+// どこに現れるか決まっていない。「先頭から剥がす／末尾から剥がす」手続き型だと、商品名が
+// 中間にある投稿で逆に商品名を捨ててコメントを残す（実測: 「あみあみで販売再開まさかの
+// まだあり！キルラキル 纏流子…　ヤフオク高騰の人気なのでお早めに」→「ヤフオク高騰の
+// 人気なのでお早めに」）。正規表現を足し続けても、この非対称は消えない。
+//
+// そこで「剥がす」のをやめ、**節に割って商品名の節だけを選ぶ**方式にする。人間が一瞬で
+// 見分けているのも節単位（これは実況、これは商品名）なので、判断の単位を合わせる。
+//   1) 「！」「。」「全角スペース」で節に割る
+//   2) 節ごとに前後の店舗告知を落としてから、商品節／コメント節に分類する
+//   3) コメント節を捨て、残った**隣接する商品節ブロックの最長**を元の区切りで結合して採用
+// 商品節が1つも無い投稿（「もうすぐあみあみで復活更新があるかと…」等）は商品として成立
+// していない＝ hasProductSegment() が false になり、一覧から除外する（itemFilter 側）。
+
+// 販促・ランキング告知（商品名ではない）。楽天セール文言・順位・いいね数など。
+const PROMO_NOISE =
+  /(?:楽天スーパーDEAL|お買い物マラソン|楽天カード\s*\d+\s*倍|ポイント\s*\d+\s*倍|スーパーセール|ブランドデー|クーポン|送料無料|\d+\s*位(?:と\d+\s*位)*|いいね数|独占へ|上位へ)/;
+
+// 販売チャネル（店舗）名。単体では商品名を含む節にも出るので、動作語との併用で判定する。
+const STORE_NAME =
+  /(?:あみあみ|プレバン|プレミアムバンダイ|駿河屋|楽天ブックス|楽天|ヨドバシ(?:カメラ)?|Amazon|アマゾン|ビックカメラ|ビック|アキバソフマップ|ソフマップ|エディオン|ジョーシン|ヤマダ電機|ケーズデンキ|ノジマ|DMM|HMV|Neowing|でじたみん|イエローサブマリン|ぐるぐる王国|バトンストア|ミニストップ|セブン(?:ネット)?|ローソン|イオン|タカラトミーモール|ハピネット|dショッピング|マクドナルド|ホビーストック|ホビーサーチ|アニメイト|メディアワールド|A-TOYS|TSUTAYA|ドン・キホーテ)/;
+
+const STORE_NAME_G = new RegExp(STORE_NAME.source, "g");
+
+// 在庫・受付の状態語（商品名ではない）。
+const STOCK_ACTION =
+  /(?:予約(?:受付)?(?:開始|再開|中)|販売(?:開始|再開|中)|受付(?:開始|中)|再入荷|入荷|復活(?:更新)?|受注|抽選受付|完売|品薄|即完|値引|[％%]オフ|特価)/;
+
+// 節の末尾に付く実況の締め（「〜お早めに」「〜ご注意を」「〜まだあり」「〜人気かと」等）。
+// 商品名の後ろに直付けされることが多く、区切り文字が無いので節内で落とす必要がある。
+const SEG_TAIL_NOISE = new RegExp(
+  "(?:" +
+    [
+      "(?:お|ご)?(?:早|はや)めに?どうぞ?",
+      "ご?注意(?:を|ください|下さい)?",
+      "まだあり(?:ます)?",
+      "まだいけ(?:ます)?",
+      "お知らせ",
+      "が?(?:特に)?(?:大変)?人気(?:だった)?(?:かと|です|高そうです|そうです|ようです)?",
+      "入手困難かと",
+      "だそうです",
+      "(?:だった)?ようです",
+      "完売(?:中|です)?",
+      "他店[もは]?(?:即)?完売の?(?:人気)?",
+      "の?予約(?:再開|開始)など?",
+      "送料無料へ?",
+      "(?:まだ)?[０-９0-9]{1,3}\\s*[％%]\\s*オフ(?:あり|で)?",
+      "の?(?:予約|販売)?(?:開始|再開)が?あったので[^、。！!]{0,12}",
+      "が[^、。！!]{0,16}(?:で|にて)(?:の)?(?:販売|予約)?(?:再開|開始|中|復活)(?:です|中)?[^、。！!]{0,10}",
+      "が(?:予約|販売|受注|抽選)?(?:受付)?(?:開始|再開|中|決定)(?:です|でした|中)?",
+      // 「が」を伴わない受付告知の末尾（「…などで予約開始」）。これを残すと、告知節の方が
+      // 商品名の節より長くなり、最長ブロック選択で告知側が採用されてしまう（実測）。
+      "(?:など)?(?:で|にて)?(?:予約|販売|受注)(?:受付)?(?:開始|再開|中)(?:です|中|きたー|来たー)?",
+      "が?多数あり(?:今回も)?",
+      // 楽天のセール文言が商品名の後ろに直付けされるケース（区切り記号が無い）。
+      // ※ セール語の手前に「任意の文字」を許すと商品名を巻き込んで削る（実測で
+      //   「TurboPowerチャージャー同梱 本日楽天カード4倍…」→「TurboPowerチャー」）。
+      //   手前に許すのは空白と定型の副詞・接続助詞だけに限定する。
+      "[\\s　]*(?:本日|しかも|さらに|なお)?[\\s　]*(?:や|と|、)?(?:楽天)?(?:楽天カード\\s*[０-９0-9]+\\s*倍|お買い物マラソン|楽天スーパーDEAL|ブランドデー)[^、。！!]{0,16}",
+    ].join("|") +
+    ")[。、！!\\s　]*$"
+);
+
+// 節の先頭に付く実況の入り（「まずは」「残り10個ですが」「昼間あみあみで」「◯◯楽天で」等）。
+const SEG_HEAD_NOISE = new RegExp(
+  "^[\\s　]*(?:" +
+    [
+      "まずは",
+      "まさかの",
+      "しかも",
+      "(?:本日|昨日|一昨日|明日|昼間|今朝|先ほど|最近|もうすぐ|まもなく|いつのまにか)",
+      "[^、。！!]{0,10}(?:ですが|ますが)",
+      "残り\\d+\\s*個(?:ですが)?",
+      "各店(?:で|にて)?",
+      "(?:大幅)?値引き?(?:率高いです|あり)?",
+      "[^、。！!]{0,12}?[０-９0-9]{1,3}\\s*[％%]\\s*オフと値引き率高いです",
+      "[^、。！!]{0,10}?(?:も|は)まだあり",
+      "[０-９0-9]{1,3}\\s*[％%]\\s*オフ(?:で|あり)?",
+      "(?:販売|予約)(?:受付)?(?:再開|開始|中)(?:です|中)?",
+      "オンライン(?:品薄|即完売|完売)(?:多数)?(?:だった)?の?",
+      "他店(?:も|は)?(?:即)?完売(?:多数)?(?:の人気)?の?",
+      "[０-９0-9]{1,3}\\s*個まで(?:いけます|購入可)?",
+      "[^、。！!]{0,12}?(?:なので|ので)?(?:お|ご)(?:早|はや)めに?",
+      STORE_NAME.source + "[^、。！!]{0,8}?(?:完売中|品薄|即完売)の",
+      // 店舗名を辞書に持たない販売告知（「播州セレクト楽天で販売再開」「ガチャガチャ侍楽天も予約再開」）。
+      // 「〜で/にて/も/は」＋受付動作 で始まる先頭節は、店舗名を知らなくても告知と判定できる。
+      "[^、。！!]{0,12}?(?:で|にて|も|は)(?:の)?(?:再販)?(?:販売|予約|受注)(?:受付)?(?:再開|開始|中)(?:きたー|来たー|です|中)?",
+      // 店名が長い告知（「漫画全巻ドットコム楽天やヨドバシなどで予約開始まだあり」）。
+      // 窓を広げる代わりに、店らしい語（楽天/ストア/など…）を必ず含むことを条件にして
+      // 商品名を巻き込まないようにする。
+      "[^、。！!]{0,20}?(?:楽天|ドットコム|ストア|ショップ|など)[^、。！!]{0,8}?(?:で|にて|も|は)(?:の)?(?:販売|予約|受注)(?:受付)?(?:再開|開始|中)(?:きたー|来たー|です|中)?",
+      // 「アイロボット楽天で57％オフセール開催中」型の値引き告知。
+      "[^、。！!]{0,12}?(?:で|にて)\\s*[０-９0-9]{1,3}\\s*[％%]\\s*オフ[^、。！!]{0,12}",
+      STORE_NAME.source + "[^、。！!]{0,10}?(?:で|にて|は|より|なら)",
+      // ※ 短い接頭辞（「他店」単体）は長い方の後に置く。正規表現の選択は先に書いた方が
+      //   優先されるため、先頭に置くと「他店完売多数」から「他店」だけを削って
+      //   「完売多数」が商品名の前に残る（実測）。
+      "他店[もは]?",
+    ].join("|") +
+    ")[\\s　]*"
+);
+
+/** 節から前後の実況断片（店舗告知・締め文句）を落とす。
+ *  節まるごとが告知なら空文字を返してよい（＝その節は捨てる）。商品名側は削らない
+ *  （4字未満の中途半端な残りは採らず、直前の状態に戻す）。 */
+function trimSegNoise(seg: string): string {
+  let s = seg.trim();
+  for (let i = 0; i < 4; i++) {
+    const before = s;
+    const h = s.replace(SEG_HEAD_NOISE, "").trim();
+    if (h.length >= 4 || h.length === 0) s = h;
+    const t = s.replace(SEG_TAIL_NOISE, "").trim();
+    if (t.length >= 4 || t.length === 0) s = t;
+    if (s === before || s === "") break;
+  }
+  return s;
+}
+
+// 商品名には決して現れない実況語（相場・在庫の実況）。商品らしさに関係なく捨ててよい。
+const ALWAYS_COMMENT =
+  /(?:高騰|ヤフオク|メルカリ|転売|せどり|まだあり|まだいけ|品薄|即完|人気(?:です|かと|順|高|沸騰|爆発)|お(?:早|はや)めに|ご注意|完売(?:へ|中|多数|だった|です|しました))/;
+// 商品名にも現れうる語（「（再販）」「限定販売」等）。**その節に商品名が含まれない時だけ**実況とみなす。
+const CONTEXT_COMMENT = /(?:完売|再開|再販|復活|値引|[％%]オフ|特価)/;
+
+/** 節が「実況コメント」か（＝捨ててよいか）。
+ *  商品タグ【】『』を含む節、および商品名を含む節は残す（＝コメント語が同居していても捨てない）。
+ *  過去に「あみあみ箱破損特価で販売再開S.H.Figuarts…」のような**店舗告知と商品名が同じ節に
+ *  同居する**投稿を丸ごと捨ててしまい、実在商品が一覧から消えたため、この優先順にする。 */
+function isCommentSeg(seg: string): boolean {
+  const s = seg.trim();
+  if (!s) return true;
+  if (/[【『「]/.test(s)) return false;
+  // 「（再販）」「(再販版)」等の仕様括弧は商品名の一部なので、実況語の判定から外す。
+  const core = s.replace(/[（(][^）)]{0,10}[）)]/g, "");
+  // 価格・数量だけの断片（「6パックで2380円」）。英数を含むので商品名判定を通ってしまうが、
+  // 商品名らしい語（英字3字以上・カタカナ4字以上）が無いなら値段の実況にすぎない。
+  if (core.length <= 24 && /[０-９0-9]\s*円/.test(core) && !/[A-Za-z]{3,}|[ァ-ヶー・]{4,}/.test(core.replace(STORE_NAME_G, "")))
+    return true;
+  if (ALWAYS_COMMENT.test(core)) return true;
+  if (STRONG_COMMENT_END.test(core)) return true;
+  if (PROMO_NOISE.test(core)) return true;
+  // ここから先は「商品名が無い節だけ」実況とみなす。
+  if (isProductSeg(core)) return false;
+  if (CONTEXT_COMMENT.test(core)) return true;
+  if (STORE_NAME.test(core) && STOCK_ACTION.test(core)) return true;
+  if (COMMENTARY.test(core)) return true;
+  return false;
+}
+
+/** 節が「商品名」として通用するか（英数・型番・4字以上カタカナ・商品タグのいずれか＋長さ）。
+ *  店舗名（アキバソフマップ等）は4字以上のカタカナなので、除いてから判定する。
+ *  除かないと「あみあみやアキバソフマップなど大幅値引きでまだあり」が商品名扱いになる。 */
+function isProductSeg(seg: string): boolean {
+  const s = seg.replace(STORE_NAME_G, "").trim();
+  if (s.length < 4) return false;
+  return looksProduct(s);
+}
+
+type Seg = { text: string; sep: string };
+
+/** 「！」「。」「全角スペース」で節に割る（区切り文字は復元用に保持）。 */
+function splitSegments(s: string): Seg[] {
+  const out: Seg[] = [];
+  const re = /([！!。]+|[　]+)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(s)) !== null) {
+    const text = s.slice(last, m.index);
+    if (text.trim() === "" && out.length) out[out.length - 1].sep += m[1];
+    else out.push({ text, sep: m[1] });
+    last = m.index + m[1].length;
+  }
+  if (last < s.length) out.push({ text: s.slice(last), sep: "" });
+  return out.filter((x) => x.text.trim() !== "");
+}
+
+/** 商品名として採れる節が1つでもあるか（＝商品として成立している投稿か）。 */
+export function hasProductSegment(source: string, title: string): boolean {
+  if (!CLEANABLE_SOURCES.has(source)) return true;
+  if (NON_PRODUCT_POST.test(title)) return false;
+  const base = stripDateNoticeTail(stripSourceLabel(title));
+  if (source === "rarecheck" && firstBracketed(base)) return true;
+  return pickProductBlock(base) !== null;
+}
+
+/** 開発用: 節分解と判定結果を可視化する（表示には使わない）。 */
+export function __debugSegments(title: string) {
+  const base = stripDateNoticeTail(stripSourceLabel(title));
+  return splitSegments(base).map((s) => {
+    const trimmed = trimSegNoise(s.text);
+    return {
+      orig: s.text,
+      trimmed,
+      product: isProductSeg(trimmed),
+      keep: trimmed.trim() !== "" && isProductSeg(trimmed) && !isCommentSeg(trimmed),
+    };
+  });
+}
+
+/** 節に割り、コメント節を捨て、残った隣接ブロックのうち最長を返す（無ければ null）。 */
+function pickProductBlock(raw: string): string | null {
+  const segs = splitSegments(raw);
+  if (!segs.length) return null;
+  const cleaned = segs.map((s) => ({ ...s, text: trimSegNoise(s.text) }));
+  // 残すのは「商品名として通用する節」だけ。単に実況語が無いだけの断片（告知を削った残りの
+  // 「店の早期」等）を残すと、商品名の前後にゴミが付いたまま表示される。
+  const keep = cleaned.map((s) => s.text.trim() !== "" && isProductSeg(s.text) && !isCommentSeg(s.text));
+
+  // 隣接する keep 節をブロックにまとめ、商品節を含む最長ブロックを選ぶ。
+  let best: { text: string; len: number } | null = null;
+  let i = 0;
+  while (i < cleaned.length) {
+    if (!keep[i]) {
+      i++;
+      continue;
+    }
+    let j = i;
+    let text = "";
+    let hasProduct = false;
+    while (j < cleaned.length && keep[j]) {
+      // 元の区切り文字で結合し直す（商品名内の「！」を割ってしまっても復元される。
+      // 例:「ウルトラマン カードゲーム ブースターパック09 きたぞ！われらの 24パック入りBOX」）
+      if (text) text += cleaned[j - 1].sep;
+      text += cleaned[j].text;
+      if (isProductSeg(cleaned[j].text)) hasProduct = true;
+      j++;
+    }
+    text = text.trim();
+    if (hasProduct && text.length >= 6 && (!best || text.length > best.len)) {
+      best = { text, len: text.length };
+    }
+    i = j;
+  }
+  return best ? best.text : null;
+}
+
+/** 『...』で囲まれた最初の商品名（長さ4以上）を取り出す。
+ *  ※ rarecheck 専用。レアチェックの記事タイトルは『商品名』がビックカメラにて販売開始。という
+ *    定型なので、『』の中＝商品名で確実。
+ *  ※ 「...」（一重）は対象にしない。channeltono では作品名の囲みに使われるため、
+ *    「【特典】ヴァイスシュヴァルツ ブースターパック「Re：ゼロから始める異世界生活」Vol.4
+ *    10パック入りBOX」が丸ごと「Re：ゼロから始める異世界生活」に化け、実際の商品（BOX）が
+ *    消えていた（実測66件が過剰に短縮）。 */
 function firstBracketed(title: string): string | null {
-  const m = title.match(/[『「]([^』」]{4,})[』」]/);
+  const m = title.match(/『([^』]{4,})』/);
   return m ? m[1].trim() : null;
 }
 
-// 「8月発売予定です」「7月末入荷予定」等、日付＋発売/入荷告知だけで構成された節。
-// 数字を含むため looksProduct が商品名と誤判定してしまうが、この厳密パターンに合致すれば
-// 商品名ではない告知節と断定できるので、digitガードを飛び越えて剥がしてよい。
-const DATE_NOTICE_SEG =
-  /^\d{1,2}\s*月(?:末|上旬|中旬|下旬|\d{1,2}\s*日)?\s*(?:頃|ごろ)?\s*(?:発売予定|発売日|出荷予定|入荷予定|販売予定|予約開始)(?:です|予定)?[。！!]?$/;
+// 商品ではない実況投稿（店の在庫「復活更新」の予告など）。商品名が存在しないので掲載しない。
+const NON_PRODUCT_POST = /復活更新/;
 
-// 明確に実況コメントと断定できる先頭節の兆候。これに該当する節は、カタカナを含んで
+// 明確に実況コメントと断定できる節の兆候。これに該当する節は、カタカナを含んで
 // looksProduct が真になっても（例:「ヤフオクめちゃ高騰の復刻です」の"ヤフオク"）実況と見なして剥がす。
 // ・コメント文の終止（です/ます/でした/かと/そうです/ください/お早めに/ご注意を/注意を）
 // ・転売相場・在庫状況の語（高騰/ヤフオク/メルカリ/転売/完売/再開/再販/値引/％オフ/品薄/即完/まだあり/人気…）
 // ※商品タグ『「【 を含む節は商品名なので strongComment 扱いにしない（呼び出し側でガード）。
 const STRONG_COMMENT_END =
   /(?:です|ます|ました|でした|かと|そうです?|ください|お(?:早|はや)めに?|ご注意を?|注意を?)[！!。]?$/;
-const STRONG_COMMENT_WORD =
-  /(?:高騰|ヤフオク|メルカリ|転売|完売|再開|再販|値引き?|[％%]オフ|品薄|即完|まだあり|まだいけ|人気(?:です|かと|順|高|沸騰|爆発))/;
-
-/** 先頭の全角スペース区切りの告知節（「他店即完売の人気　」「◯◯は7月31日まで　」等）を剥がす。
- *  コメント語 or 締切・日付を含み、商品らしさ（英数・長いカタカナ・商品タグ）が無い節だけ。
- *  例外: 「8月発売予定です」等の日付＋発売告知(DATE_NOTICE_SEG)や、実況と断定できる節
- *  (STRONG_COMMENT_*) は数字・カタカナを含んでも告知節と見なして剥がす。 */
-function stripLeadingSpaceSegs(title: string): string {
-  let s = title;
-  for (let i = 0; i < 4; i++) {
-    const idx = s.indexOf("　");
-    if (idx <= 0) break;
-    const head = s.slice(0, idx);
-    const rest = s.slice(idx + 1).trim();
-    if (rest.length < 6) break;
-    const headTrim = head.trim();
-    const isDateNotice = DATE_NOTICE_SEG.test(headTrim);
-    // 商品タグ『「【 を含む節は商品名の一部なので、強制コメント判定の対象から外す。
-    const hasBracket = /[【『「]/.test(head);
-    const strongComment = !hasBracket && (STRONG_COMMENT_END.test(headTrim) || STRONG_COMMENT_WORD.test(head));
-    if (!isDateNotice && !strongComment && looksProduct(head)) break;
-    if (isDateNotice || strongComment || COMMENTARY.test(head) || NOTICE_SEG.test(head) || NOTICE_VERB.test(head))
-      s = rest;
-    else break;
-  }
-  return s;
-}
 
 /** 末尾のアクション告知（「〜が抽選受付開始！」）と、！で終わるコメント節を剥がす。 */
 function stripTrailingActions(title: string): string {
@@ -173,27 +361,6 @@ function stripDanglingChannelTail(title: string): string {
   return t.length >= 6 ? t : title;
 }
 
-/** 先頭側の告知を繰り返し剥がす。1周ごとに
- *  (a) 日付・締切・時刻告知（LEADING_DATE。商品名ではないので安全）と
- *  (b) 実況コメント節（！。区切りでコメント語を含む節）を順に試す。
- *  日付とコメントが交互に来ても（「7月30日より8月4日まで！あみあみで予約開始！商品名」等）
- *  ループで剥がしきれる。商品タグ【…】や『』を含む節は商品名の一部なので剥がさない（安全側）。 */
-function stripLeadingCommentary(title: string): string {
-  let t = title.trim();
-  for (let i = 0; i < 8; i++) {
-    const before = t;
-    // (a) 先頭の日付・締切・時刻告知を除去
-    t = t.replace(LEADING_DATE, "").trim();
-    // (b) 先頭の実況コメント節（！。で区切られコメント語を含む）を除去
-    const m = t.match(/^([^！!。]{2,40}[！!。])\s*(.+)$/);
-    if (m && COMMENTARY.test(m[1]) && !/[【『「]/.test(m[1]) && m[2].trim().length >= 6) {
-      t = m[2].trim();
-    }
-    if (t === before) break;
-  }
-  return t;
-}
-
 /** 末尾側の実況コメント（全角スペース以降がコメント語主体）を剥がす */
 function stripTrailingCommentary(title: string): string {
   const parts = title.split("　");
@@ -218,35 +385,24 @@ export function cleanListTitle(source: string, title: string): string {
   if (!CLEANABLE_SOURCES.has(source)) return base;
   const raw = base.trim();
 
-  // 1) 『』「」があれば最も信頼できる商品名としてそれを採用（主に rarecheck）。
-  const bracketed = firstBracketed(raw);
-  if (bracketed) return bracketed;
-
-  // 2) 【特典】等の商品タグがあり、その手前が実況コメントなら、タグから商品名が始まるとみなす。
-  const tagIdx = raw.search(PRODUCT_TAG);
-  if (tagIdx > 0 && COMMENTARY.test(raw.slice(0, tagIdx))) {
-    const fromTag = stripDanglingChannelTail(
-      stripTrailingActions(stripTrailingCommentary(raw.slice(tagIdx).trim()))
-    );
-    if (fromTag.length >= 6) return fromTag;
+  // 1) rarecheck は『商品名』が定型なので、『』の中を最も信頼できる商品名として採用。
+  if (source === "rarecheck") {
+    const bracketed = firstBracketed(raw);
+    if (bracketed) return bracketed;
   }
 
-  // 3) 先頭の告知を繰り返し剥がす：全角スペース区切りの締切/コメント節 → 日付・実況コメント節
-  //    → 店舗プレフィックス。カタカナ店舗名（ミニストップ等）＋締切が連なるケースも周回で剥がす。
-  let t = raw;
-  for (let i = 0; i < 4; i++) {
-    const before = t;
-    t = stripLeadingSpaceSegs(t);
-    t = stripLeadingCommentary(t);
-    const noStore = t.replace(LEADING_STORE, "").trim();
-    if (noStore.length >= 6 && looksProduct(noStore)) t = noStore;
-    if (t === before) break;
-  }
+  // 2) 節に割って商品名の節だけを選ぶ（実況本文のどこに商品名があっても採れる）。
+  //    ※ 以前はここに「【特典】等の商品タグ以降を丸ごと採る」近道があったが、タグ以降に
+  //      続く感想文（「B2タペストリーがついてない分かなり価格が抑えられてるほうです！」）まで
+  //      連れてきてしまい、節判定が正しくても表示が汚れていた。節選択に一本化する。
+  const picked = pickProductBlock(raw);
+  let t = picked ?? raw;
 
-  // 4) 末尾の実況コメント（全角スペース以降）と、アクション告知（「〜が抽選受付開始！」）を剥がす。
+  // 3) 選んだブロックの端に残る告知（「〜が抽選受付開始！」「…があみあみやDMMなどで」）を落とす。
   t = stripTrailingCommentary(t);
   t = stripTrailingActions(t);
   t = stripDanglingChannelTail(t);
+  t = trimSegNoise(t);
   t = t.trim();
 
   // 5) 削りすぎ・空は原文に戻す（安全側）。

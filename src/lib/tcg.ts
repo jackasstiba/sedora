@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeCrossSource } from "./itemFilter";
+import { dedupeItems } from "./itemFilter";
 
 // トレカを「タイトル別」（ポケカ / ワンピースカード / 遊戯王 …）に束ねるための定義。
 // DBにタイトル列は無く、データが源ごとに分散している（pokemoncard=ポケカ、
@@ -79,8 +79,9 @@ async function upcomingTcgRows() {
     where: { genre: "トレカ", OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
   });
-  // タイトル別ページ／件数も重複を除いたものに揃える（pokemoncard↔torecamap 等）。
-  return dedupeCrossSource(rows);
+  // 他の一覧と同じ整理を通す。以前は dedupeCrossSource だけを呼んでいたため、語順違い・
+  // 同一ソース再投稿の重複と、商品として成立していない投稿がこのページにだけ残っていた。
+  return dedupeItems(rows);
 }
 
 /** ナビ/サイトマップ用：現在アイテムを持つタイトルと件数（TCG_TITLESの並び順を保持） */

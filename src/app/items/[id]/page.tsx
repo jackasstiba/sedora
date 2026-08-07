@@ -8,7 +8,7 @@ import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } fr
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { countdown, formatLong } from "@/lib/date";
-import { displaySubGenre, stripSourceLabel } from "@/lib/title";
+import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { parseStoresJson } from "@/lib/stores";
 
@@ -28,7 +28,10 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   if (!item) return { title: "見つかりませんでした | ハツコレ" };
 
   const dateStr = formatDate(item.eventDate) ?? item.eventDateText ?? "";
-  const cleanTitle = stripSourceLabel(item.title);
+  // 一覧カードと同じ整形を使う。以前は stripSourceLabel だけだったため、Xミラー由来の商品は
+  // 一覧では商品名なのに、開いた先のタイトル・<title> がツイート全文（実況コメント込み）になり、
+  // 同じ商品の名前がページ間で食い違っていた。
+  const cleanTitle = cleanListTitle(item.source, item.title);
   const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const description = [
@@ -61,8 +64,9 @@ export default async function ItemPage({ params }: Props) {
   const dateLabel = formatDate(item.eventDate) ?? item.eventDateText;
   const cd = countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
-  // 情報元由来の定型ラベル（snkrdunkの「｜抽選/販売/定価情報」等）は表示・構造化データから除去。
-  const displayTitle = stripSourceLabel(item.title);
+  // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。
+  // ※ 楽天検索へのリンクだけは生タイトルを使う経路が別にある（検索語は情報量が多い方が当たる）。
+  const displayTitle = cleanListTitle(item.source, item.title);
   // 一番くじの各等賞。構造化JSON（画像＋賞ごと相場）があればギャラリー表示、
   // 無ければ highlights の畳み込み文字列からリスト展開（旧データ後方互換）。
   const prizeGallery = parsePrizesJson(item.prizes);

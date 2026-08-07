@@ -2,13 +2,31 @@
 // prisma を import しないこと（クライアントバンドルに載せるため）。
 import { todayJst } from "./date";
 import { parseYen } from "./margin";
-import { cleanListTitle } from "./title";
+import { cleanListTitle, hasProductSegment } from "./title";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
 
 // 日付なしのうち「日程未定の予定品」を表す eventType（＝いま買えるわけではない）。
 export const TBD_EVENT_TYPES = ["登場予定", "開催"];
+
+/** サイトで使うジャンルの語彙（表示順も兼ねる）。**ここに無いジャンルは監査でERROR**にする。
+ *  語彙を固定しないと、スクレイパーを足すたびに「ゲーム」と「家電・ゲーム機」のような
+ *  同義の別ラベルが増え、同じ商品が別ジャンルに散る（実測で分類ブレを検出）。 */
+export const GENRE_ORDER = [
+  "フィギュア",
+  "トレカ",
+  "スニーカー",
+  "プラモ",
+  "一番くじ",
+  "コラボ",
+  "ポケモン",
+  "ソフビ・アートトイ",
+  "家電・ゲーム機",
+  "酒・ウイスキー",
+  "映像・音楽",
+  "その他",
+];
 
 // バラバラな eventType 文字列を、せどり視点の3グループに正規化する。
 export const STATUS_EVENT_TYPES: Record<Exclude<ItemStatus, "now">, string[]> = {
@@ -149,7 +167,10 @@ function repScore(it: DedupeItem): number {
 export function dedupeCrossSource<T extends DedupeItem>(items: T[]): T[] {
   const groups = new Map<string, T[]>();
   for (const it of items) {
-    const k = dedupeKey(it.title);
+    // 突合キーは**整形後**タイトルで作る。生タイトルで作ると、Xミラー(channeltono)は
+    // 本文が実況ツイートまるごとなので、同じ商品でも他ソースと絶対に一致しない
+    // （実測: トレカ速報と同一商品5組が重複したまま一覧に並んでいた）。
+    const k = dedupeKey(cleanListTitle(it.source, it.title));
     if (k.length < 6) continue; // 短すぎるタイトルは別商品衝突の危険があるので触らない
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
   }
@@ -181,6 +202,11 @@ function anagramKey(title: string): string {
   return [...dedupeKey(title)].sort().join("");
 }
 
+/** 整形後タイトルの正規化キー（クロスソース突合はこちらを使う）。 */
+function cleanKey(it: DedupeItem): string {
+  return dedupeKey(cleanListTitle(it.source, it.title));
+}
+
 /**
  * 語順の入れ替えによるクロスソース重複を解消する（dedupeCrossSource の補助）。
  * 例: 一番くじ倶楽部が「一番くじ ◯◯」、コラボカフェが「◯◯ 一番くじ」と語順違いで
@@ -193,8 +219,9 @@ function anagramKey(title: string): string {
 function dedupeWordOrderCrossSource<T extends DedupeItem>(items: T[]): T[] {
   const groups = new Map<string, T[]>();
   for (const it of items) {
-    if (dedupeKey(it.title).length < 10) continue;
-    const k = anagramKey(it.title);
+    const c = cleanListTitle(it.source, it.title);
+    if (dedupeKey(c).length < 10) continue;
+    const k = anagramKey(c);
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
   }
   const drop = new Set<number>();
@@ -202,7 +229,7 @@ function dedupeWordOrderCrossSource<T extends DedupeItem>(items: T[]): T[] {
     if (g.length < 2) continue;
     if (new Set(g.map((x) => x.source)).size < 2) continue; // 同一ソースのみ→残す
     // dedupeKey が既に一致するものは dedupeCrossSource が処理済み。キー違い（＝真の語順違い）だけ扱う。
-    if (new Set(g.map((x) => dedupeKey(x.title))).size < 2) continue;
+    if (new Set(g.map(cleanKey)).size < 2) continue;
     let best = g[0];
     for (const it of g) {
       if (it === best) continue;
@@ -282,10 +309,56 @@ function dedupeSameSourceExact<T extends DedupeItem>(items: T[]): T[] {
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
 }
 
-/** 一覧に出す前の重複解消をまとめて適用（クロスソース一致＋語順違い＋同一ソース再投稿＋スニーカー日英別名）。 */
+/**
+ * 同一ソースが**完全に同じ生タイトル**で二重登録されているケースを畳む。
+ * dedupeSameSourceExact は整形後タイトルの正規化キーが8字以上のものしか見ないため、
+ * 短いタイトル（実測「コービー 5」#27860/#27861）が検査も解消もされず、一覧に同じカードが
+ * 2枚並んでいた。生タイトルが1文字違わず同じなら別商品ではありえないので、長さ条件なしで畳む。
+ */
+function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    const day = it.eventDate ? dayISO(it.eventDate) : "none";
+    const k = `${it.source}|${it.title}|${day}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    let best = g[0];
+    for (const it of g) {
+      if (it === best) continue;
+      const d = repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/**
+ * 商品として成立していない投稿を一覧から外す。
+ * Xミラー(channeltono)には「もうすぐあみあみで復活更新があるかと…」のような、商品名を一切
+ * 含まない実況投稿が混ざる。整形しても商品名が出てこない＝何が買えるか特定できないので、
+ * 「特定できないなら出さない」（相場の教訓と同じ原則）に従って掲載しない。
+ */
+function dropNonProductPosts<T extends DedupeItem>(items: T[]): T[] {
+  return items.filter((it) => hasProductSegment(it.source, it.title));
+}
+
+/** 一覧に出す前の整理をまとめて適用（重複解消4種＋商品として成立していない投稿の除外）。
+ *  ページごとに呼び出しが分かれると必ず適用漏れが出るので、表示用の取得は全てここを通す。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
-  return dedupeSneakerCrossSource(
-    dedupeSameSourceExact(dedupeWordOrderCrossSource(dedupeCrossSource(items)))
+  return dropNonProductPosts(
+    dedupeSneakerCrossSource(
+      dedupeSameSourceExact(
+        dedupeWordOrderCrossSource(dedupeCrossSource(dedupeIdenticalTitle(items)))
+      )
+    )
   );
 }
 

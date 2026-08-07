@@ -1,23 +1,12 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeItems, dedupeKey } from "./itemFilter";
+import { dedupeItems, dedupeKey, GENRE_ORDER } from "./itemFilter";
 import { computeMargin } from "./margin";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
 
-const GENRE_ORDER = [
-  "フィギュア",
-  "トレカ",
-  "スニーカー",
-  "プラモ",
-  "一番くじ",
-  "コラボ",
-  "ポケモン",
-  "ソフビ・アートトイ",
-  "家電・ゲーム機",
-  "酒・ウイスキー",
-];
+// ジャンルの語彙・表示順は itemFilter.ts に集約（監査が同じ定義で語彙を検査するため）。
 
 export type SeoItem = Awaited<ReturnType<typeof getItemById>>;
 
@@ -184,11 +173,15 @@ function monthRange(month: string): { start: Date; end: Date } | null {
 export async function getItemsByMonth(month: string, take = 300) {
   const range = monthRange(month);
   if (!range) return [];
-  return prisma.item.findMany({
-    where: { eventDate: { gte: range.start, lt: range.end } },
-    orderBy: [{ eventDate: "asc" }, { id: "desc" }],
-    take,
-  });
+  // 月ページも他の一覧と同じ整理（重複解消・非商品投稿の除外）を通す。ここだけ dedupeItems を
+  // 呼んでいなかったため、同じ商品が2枚並ぶ・実況投稿が載るのが月ページだけ起きていた。
+  return dedupeItems(
+    await prisma.item.findMany({
+      where: { eventDate: { gte: range.start, lt: range.end } },
+      orderBy: [{ eventDate: "asc" }, { id: "desc" }],
+      take,
+    })
+  );
 }
 
 export function isValidMonth(month: string): boolean {

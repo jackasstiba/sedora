@@ -2,122 +2,178 @@
  * データ品質の常設監査（`npm run audit`）。
  *
  * 目的: 「人間なら一瞬で気付く表記/数字/日付の粗」を、その都度目視で探すのではなく、
- * サイトの表示スコープ全件に対して不変条件（invariant）を毎回機械チェックする。
- * スクレイプ後に回す想定（run_scrape.bat / 手動）。違反は種類ごとに件数＋サンプルを出す。
+ * サイトが実際に表示する全件に対して不変条件（invariant）を毎回機械チェックする。
  *
- * 追加した観点はここに invariant を足す＝「全方位チェック」を仕組みとして育てる場所。
+ * 設計上の約束（過去にここを外して粗が素通りした）:
+ *  1. **検査対象はページ関数から取る。** 監査が自前でクエリを書くと、ページ側の条件変更や
+ *     dedupe の代表選択の違いで「画面に出ているのに監査の外」の行が生まれる（実測: /premium が
+ *     丸ごと外、ジャンルページで数件が外）。下の PAGES に登録した関数の**出力そのもの**を見る。
+ *     → 新しいページを作ったら PAGES に足す。足し忘れは registry のカバレッジ検査で落ちる。
+ *  2. **WARN を放置しない。** 種類ごとの件数を audit-baseline.json に記録し、**増えたら ERROR**
+ *     （ラチェット）。「WARNだから通す」を無くすための仕組み。baseline の更新は
+ *     `npm run audit -- --update-baseline`（減った時だけ自動で締まる）。
+ *  3. **「無い・0である」も検査する。** 値が変なものだけでなく、あるべきデータが消えたこと
+ *     （ソースが更新されない／相場の付与が0件になる）も落とす。機能は静かに死ぬ。
+ *
+ * 新しい粗の型に気づいたら invariant をここに足す＝「全方位」を言葉でなく実装で担保する。
  */
+import fs from "node:fs";
+import path from "node:path";
 import { prisma } from "../src/lib/prisma";
 import { todayJst } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
-import { dedupeItems, dedupeKey } from "../src/lib/itemFilter";
+import { dedupeKey, GENRE_ORDER } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
+import { parsePrizesJson } from "../src/lib/prizes";
+import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 
-type Row = Awaited<ReturnType<typeof fetchRows>>[number];
+type Row = DisplayedPage["rows"][number];
 
-async function fetchRows() {
-  const today = todayJst();
-  return prisma.item.findMany({
-    // 一覧の表示スコープ（今後＋日付未定）に加え、**相場が付いている発売済み品**も含める。
-    // /premium は発売済みも載せるので、そこだけ検査の外にあると
-    // 「抽選賞品：〇〇」等の未確認ラベルが素通りする（実際に素通りしていた）。
-    where: {
-      OR: [{ eventDate: { gte: today } }, { eventDate: null }, { marketPrice: { not: null } }],
-    },
-    take: 6000,
-  });
-}
+const BASELINE_PATH = path.join(process.cwd(), "audit-baseline.json");
+const args = process.argv.slice(2);
+const UPDATE_BASELINE = args.includes("--update-baseline");
+const CHECK_LINKS = args.includes("--links");
 
-type Finding = { title: string; detail: string; samples: string[]; level: "error" | "warn" };
+// ── 所見の記録とラチェット ─────────────────────────────────────────────────
+type Level = "error" | "warn";
+type Finding = { key: string; title: string; level: Level; items: string[]; baseline: number | null };
 const findings: Finding[] = [];
-function report(title: string, level: "error" | "warn", items: string[], cap = 8) {
+const counts: Record<string, number> = {};
+
+/** 検査結果を記録する。level="warn" でも baseline を超えたら ERROR に昇格する。 */
+function report(key: string, title: string, level: Level, items: string[], baseline: Baseline) {
+  counts[key] = items.length;
+  const base = baseline.checks?.[key] ?? null;
   if (!items.length) return;
-  findings.push({ title, detail: `${items.length}件`, samples: items.slice(0, cap), level });
+  const exceeded = base !== null && items.length > base;
+  findings.push({ key, title, level: exceeded ? "error" : level, items, baseline: base });
 }
 
-// 整形後タイトルに残る実況コメント/告知の兆候（商品名にはまず現れない語）。
-const NOISE = [
-  /高騰/, /ヤフオク/, /メルカリ/, /転売/, /せどり/, /まだあり|まだいけ/, /完売/, /再開|再販/,
-  /お(?:早|はや)め/, /ご注意/, /人気(?:です|かと|順|高|沸騰|爆発)/, /です[！!]|ます[！!]/, /かと$/, /そうです/,
-  /より.{0,12}(?:コラボ|開催|発売|登場|配信|上映|スタート|開始|実施|オープン|解禁|決定)[！!]/,
-  /^【ニュース】|^【速報】/, /値引|[％%]オフ/, /品薄|即完/,
+type Baseline = { updatedAt?: string; checks?: Record<string, number>; pages?: Record<string, number> };
+function loadBaseline(): Baseline {
+  try {
+    return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")) as Baseline;
+  } catch {
+    return {};
+  }
+}
+
+const NOISE_CHECKS: { key: string; re: RegExp }[] = [
+  // 実況の残骸だけを拾う。「（再販）」「9月再販!」のように商品名・記事見出しとして
+  // 正当な語は対象にしない（以前の検出器はこれで大量の誤検知を出し、本物が埋もれていた）。
+  { key: "相場・在庫の実況", re: /高騰|ヤフオク|メルカリ|転売|せどり|まだあり|まだいけ|品薄|即完|完売(?:へ|中|多数|だった|です)/ },
+  { key: "呼びかけ・感想の残り", re: /お(?:早|はや)めに|ご注意|人気(?:です|かと|順|高|沸騰|爆発)|(?:です|ます)[！!]\s*$|かと\s*$|そうです\s*$/ },
+  { key: "店舗＋受付の告知", re: /(?:で|にて)(?:の)?(?:販売|予約)(?:再開|開始)(?:きたー|中|です)/ },
+  { key: "値引き・ポイント告知", re: /[０-９0-9]{1,3}\s*[％%]\s*オフ|楽天カード\s*\d+\s*倍|お買い物マラソン|楽天スーパーDEAL/ },
 ];
 
 async function main() {
-  const rows = await fetchRows();
-  const deduped = dedupeItems(rows);
+  const baseline = loadBaseline();
   const today = todayJst();
   const curYear = today.getUTCFullYear();
-  console.log(`== ハツコレ データ監査 ==`);
-  console.log(`表示スコープ ${rows.length}件 / dedupe後(掲載) ${deduped.length}件 / 基準日 ${today.toISOString().slice(0, 10)}\n`);
 
-  // (1) 整形後タイトルの残ノイズ
+  const pages = await loadDisplayedPages();
+  // 全ページの和集合＝「サイトが今見せている全件」。個別の検査はこれに対して回す。
+  const byId = new Map<number, Row>();
+  for (const p of pages) for (const r of p.rows) byId.set(r.id, r);
+  const shown = [...byId.values()];
+  const all = await prisma.item.findMany({ take: 100000 });
+
+  console.log("== ハツコレ データ監査 ==");
+  console.log(`ページ ${pages.length}種 / 表示される実体 ${shown.length}件 / DB全体 ${all.length}件 / 基準日 ${today.toISOString().slice(0, 10)}`);
+  console.log(pages.map((p) => `${p.name}:${p.rows.length}`).join("  "));
+  console.log("");
+
+  // (0) ページ登録のカバレッジ。DB に居て一覧に出る条件を満たすのに、どのページにも
+  //     現れない＝登録漏れか、意図しない除外。どちらも知りたいので数える。
   {
+    const upcoming = all.filter((r) => !r.eventDate || r.eventDate >= today);
+    const missing = upcoming.filter((r) => !byId.has(r.id));
+    console.log(`(参考) 今後＋日付未定 ${upcoming.length}件のうち、どのページにも出ないもの ${missing.length}件（重複解消・非商品投稿の除外を含む）`);
+  }
+
+  // (1) 整形後タイトルに残る実況の断片。
+  //     対象は実況本文をタイトルにしているXミラー系だけ。他ソースは公式・記事の正規タイトルで、
+  //     「くじを手にする戦いなのです！」のような正当な商品名を実況と誤検知してしまう。
+  const MIRROR_SOURCES = new Set(["channeltono", "rarecheck"]);
+  for (const { key, re } of NOISE_CHECKS) {
     const bad: string[] = [];
-    for (const r of rows) {
+    for (const r of shown) {
+      if (!MIRROR_SOURCES.has(r.source)) continue;
       const c = cleanListTitle(r.source, r.title);
-      const hit = NOISE.find((re) => re.test(c));
-      if (hit) bad.push(`[${r.source} #${r.id}] «${hit.source}» ${c}`);
+      if (re.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
-    report("タイトル残ノイズ（実況/告知の混入疑い）", "warn", bad);
+    report(`title_noise:${key}`, `タイトルに実況が残る（${key}）`, "error", bad, baseline);
   }
 
-  // (2) クロスソース/語順の近似重複が dedupe 後に残っていないか
+  // (1b) 商品名が特定できない投稿（ニュース/速報の実況記事）。掲載自体を見直す対象。
   {
-    const loose = (t: string) => [...dedupeKey(t)].sort().join("");
-    const g = new Map<string, Row[]>();
-    for (const it of deduped) {
-      const k = loose(it.title);
-      if (k.length < 8) continue;
-      (g.get(k) ?? g.set(k, []).get(k)!).push(it);
-    }
-    const bad: string[] = [];
-    for (const arr of g.values()) {
-      if (arr.length < 2) continue;
-      if (new Set(arr.map((x) => x.source)).size < 2) continue;
-      if (new Set(arr.map((x) => dedupeKey(x.title))).size < 2) continue;
-      bad.push(arr.map((x) => `${x.source}#${x.id}:${x.title}`).join("  ||  "));
-    }
-    report("クロスソース近似重複（dedupe漏れ）", "error", bad);
+    const bad = shown
+      .filter((r) => /^【(?:ニュース|速報)】/.test(cleanListTitle(r.source, r.title)))
+      .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title)}`);
+    report("news_post", "商品ではないニュース投稿が掲載されている", "warn", bad, baseline);
   }
 
-  // (3) 同一ソースの二重掲載（整形後タイトル＋発売日一致）
+  // (2) 同じページの中に同じ商品が2枚出ていないか（クロスソース／同一ソースの両方）。
+  //     ※ 長さの下限を設けない。以前は正規化キー8字未満を検査から外していたため、
+  //       「コービー 5」の二重掲載が検査も解消もされないまま本番に出ていた。
   {
-    const g = new Map<string, Row[]>();
-    for (const it of deduped) {
-      const key = dedupeKey(cleanListTitle(it.source, it.title));
-      if (key.length < 8) continue;
-      const day = it.eventDate ? new Date(it.eventDate).toISOString().slice(0, 10) : "none";
-      (g.get(`${it.source}|${key}|${day}`) ?? g.set(`${it.source}|${key}|${day}`, []).get(`${it.source}|${key}|${day}`)!).push(it);
-    }
-    const bad: string[] = [];
-    for (const arr of g.values()) if (arr.length >= 2) bad.push(arr.map((x) => `#${x.id}:${cleanListTitle(x.source, x.title)}`).join("  ||  "));
-    report("同一ソース二重掲載（整形後タイトル＋日付一致）", "error", bad);
-  }
-
-  // (4) 抽選ラベルの整合性
-  {
-    const badPrize: string[] = []; // 旧「抽選賞品」ラベルの残存（未確認の断定）
-    const badFlag: string[] = []; // hasLottery と highlights の仕組み表記の食い違い
-    // highlights が「抽選・くじあり…」形式で仕組みを表すソースだけ、表記との整合を見る。
-    // nyuka_now/tenbaiquest は highlights がストア形式表記なので対象外（抽選判定は販売形式で担保）。
-    const HL_MECH = new Set(["collabo_cafe"]);
-    for (const r of deduped) {
-      const h = r.highlights ?? "";
-      if (/賞品[:：]/.test(h) && !h.includes("各賞ラインナップ")) badPrize.push(`[${r.source} #${r.id}] ${h}`);
-      if (HL_MECH.has(r.source)) {
-        if (r.hasLottery && h && !/抽選|くじ|各賞ラインナップ/.test(h)) badFlag.push(`[${r.source} #${r.id}] hasLottery=true だが highlights に抽選表記なし: ${h}`);
-        if (!r.hasLottery && /抽選・くじあり|抽選賞品/.test(h)) badFlag.push(`[${r.source} #${r.id}] hasLottery=false だが抽選表記: ${h}`);
+    const crossBad: string[] = [];
+    const sameBad: string[] = [];
+    for (const p of pages) {
+      const loose = new Map<string, Row[]>();
+      const exact = new Map<string, Row[]>();
+      for (const it of p.rows) {
+        const lk = [...dedupeKey(cleanListTitle(it.source, it.title))].sort().join("");
+        if (lk.length >= 8) (loose.get(lk) ?? loose.set(lk, []).get(lk)!).push(it);
+        const ek = `${it.source}|${it.title}`;
+        (exact.get(ek) ?? exact.set(ek, []).get(ek)!).push(it);
+      }
+      for (const arr of loose.values()) {
+        if (arr.length < 2) continue;
+        if (new Set(arr.map((x) => x.source)).size < 2) continue;
+        crossBad.push(`${p.name}: ` + arr.map((x) => `${x.source}#${x.id}:${cleanListTitle(x.source, x.title)}`).join("  ||  "));
+      }
+      for (const arr of exact.values()) {
+        if (arr.length < 2) continue;
+        sameBad.push(`${p.name}: ` + arr.map((x) => `#${x.id}`).join(" ") + ` ${cleanListTitle(arr[0].source, arr[0].title)}`);
       }
     }
-    report("抽選: 未確認の『賞品』断定ラベル", "error", badPrize);
-    report("抽選: hasLottery と highlights の不整合", "error", badFlag);
+    report("dup_cross", "同じページにクロスソース重複が残っている", "error", crossBad, baseline);
+    report("dup_exact", "同じページに同一ソース・同一タイトルが二重掲載", "error", sameBad, baseline);
   }
 
-  // (5) 価格の健全性
+  // (3) 抽選まわりの断定。裏取りできていない表示は出さない（原則: 確認済みのみ約束）。
+  //     ※ ソースのホワイトリストで検査対象を絞らない。絞ると新しいソースを足した瞬間に
+  //       検査から外れ、未確認の断定が素通りする（実際に tenbaiquest がそうなっていた）。
+  //       仕組み表記を持たないソースだけを、理由付きでここに明示する。
+  {
+    const HL_IS_STORE_LIST = new Set(["nyuka_now", "tenbaiquest"]); // highlights が受付中ストアの一覧
+    const badPrize: string[] = [];
+    const badFlag: string[] = [];
+    const noEvidence: string[] = [];
+    for (const r of shown) {
+      const h = r.highlights ?? "";
+      if (/賞品[:：]/.test(h) && !h.includes("各賞ラインナップ")) badPrize.push(`[${r.source} #${r.id}] ${h}`);
+      if (HL_IS_STORE_LIST.has(r.source)) continue;
+      // 「賞品ラインナップ：」は一次くじプラットフォーム(raffle_kuji)が出す各賞一覧＝抽選の根拠。
+      if (r.hasLottery && h && !/抽選|くじ|各賞ラインナップ|賞品ラインナップ/.test(h))
+        badFlag.push(`[${r.source} #${r.id}] hasLottery=true だが highlights に抽選表記なし: ${h}`);
+      if (!r.hasLottery && /抽選・くじあり|抽選賞品/.test(h))
+        badFlag.push(`[${r.source} #${r.id}] hasLottery=false だが抽選表記: ${h}`);
+      // 抽選だと表示するなら、その根拠（賞品ラインナップ等）が無いとおかしい。
+      if (r.hasLottery && !h && !r.prizes)
+        noEvidence.push(`[${r.source} #${r.id}] hasLottery=true だが根拠(highlights/prizes)なし ${cleanListTitle(r.source, r.title)}`);
+    }
+    report("lottery_prize_claim", "抽選: 未確認の『賞品』断定ラベル", "error", badPrize, baseline);
+    report("lottery_flag", "抽選: hasLottery と表記の不整合", "error", badFlag, baseline);
+    report("lottery_no_evidence", "抽選: 根拠なしで抽選と表示している", "warn", noEvidence, baseline);
+  }
+
+  // (4) 価格の健全性
   {
     const bad: string[] = [];
-    for (const r of deduped) {
+    for (const r of shown) {
       if (!r.price) continue;
       const y = parseYen(r.price.split(" / ")[0]);
       const t = cleanListTitle(r.source, r.title);
@@ -126,42 +182,43 @@ async function main() {
       if (y != null && isSinglePack && y >= 3000) bad.push(`[${r.source} #${r.id}] ${y.toLocaleString()}円(BOX表記なしの単パック?) ${t}`);
       if (y != null && (y <= 0 || y > 3_000_000)) bad.push(`[${r.source} #${r.id}] 異常価格 ${r.price} ${t}`);
     }
-    report("価格の疑い（単パックがBOX価格 / 異常値）", "warn", bad);
+    report("price_sanity", "価格の疑い（単パックがBOX価格 / 異常値）", "warn", bad, baseline);
   }
 
-  // (5b) 相場（marketPrice）の健全性
-  // 「相場・プレ値ランキング」は marketPrice 降順なので、誤マッチはページの**上位**に出る
-  // ＝最も目立つ場所が壊れる。実測で ①1パックにカートン価格(定価440円→¥86,592) ②別シリーズへの
-  // 誤マッチ ③駿河屋の「予約」価格を「中古」と表示、の3種が見つかった。定価との比と
-  // ラベルの実在で機械的に見張る。
+  // (5) 相場（marketPrice）の健全性。相場降順のページなので誤りほど上位＝最も目立つ。
   {
     const ratioBad: string[] = [];
     const labelBad: string[] = [];
-    for (const r of deduped) {
+    for (const r of shown) {
       if (r.marketPrice == null) continue;
       const label = r.marketPriceText ?? "";
-      // 相場ラベルは実際に取得できた種別のみ（中古/新品 と X 由来の実売）。
-      if (!/中古|新品|メルカリ|実売|落札/.test(label)) {
+      if (!/中古|新品|メルカリ|実売|落札/.test(label))
         labelBad.push(`[${r.source} #${r.id}] 種別不明の相場表記「${label}」 ${cleanListTitle(r.source, r.title)}`);
-      }
       const face = r.price ? parseYen(r.price.split(" / ")[0]) : null;
-      // 定価の20倍以上は単品↔BOX/カートンの取り違え等を疑う（真のプレ値でも通常この比は稀）。
-      if (face && face > 0 && r.marketPrice >= face * 20) {
+      if (face && face > 0 && r.marketPrice >= face * 20)
         ratioBad.push(
-          `[${r.source} #${r.id}] 定価${face.toLocaleString()}円 → 相場${r.marketPrice.toLocaleString()}円 ` +
-            `(${Math.round(r.marketPrice / face)}倍) ${cleanListTitle(r.source, r.title)}`
+          `[${r.source} #${r.id}] 定価${face.toLocaleString()}円 → 相場${r.marketPrice.toLocaleString()}円 (${Math.round(r.marketPrice / face)}倍) ${cleanListTitle(r.source, r.title)}`
         );
-      }
     }
-    report("相場が定価の20倍以上（単品↔BOX/カートンの取り違え疑い）", "error", ratioBad);
-    report("相場ラベルが実体不明（中古/新品以外を相場として表示）", "error", labelBad);
+    report("market_ratio", "相場が定価の20倍以上（単品↔BOX/カートンの取り違え疑い）", "error", ratioBad, baseline);
+    report("market_label", "相場ラベルが実体不明（中古/新品以外を相場として表示）", "error", labelBad, baseline);
   }
 
-  // (6) 同名商品が別ジャンルに分類（表記ゆれではなく分類ブレ）
+  // (6) ジャンルの語彙と分類ブレ
   {
+    const unknown = new Map<string, number>();
+    for (const r of all) if (!GENRE_ORDER.includes(r.genre)) unknown.set(r.genre, (unknown.get(r.genre) ?? 0) + 1);
+    report(
+      "genre_vocab",
+      "語彙に無いジャンルが使われている（表示順・絞り込みから漏れる）",
+      "error",
+      [...unknown.entries()].map(([g, n]) => `「${g}」${n}件`),
+      baseline
+    );
+
     const g = new Map<string, Set<string>>();
     const ex = new Map<string, string[]>();
-    for (const it of deduped) {
+    for (const it of shown) {
       const key = dedupeKey(cleanListTitle(it.source, it.title));
       if (key.length < 10) continue;
       (g.get(key) ?? g.set(key, new Set()).get(key)!).add(it.genre);
@@ -169,65 +226,55 @@ async function main() {
     }
     const bad: string[] = [];
     for (const [k, genres] of g) if (genres.size >= 2) bad.push(`${[...genres].join("/")}: ${ex.get(k)!.join(" ")}`);
-    report("同名商品のジャンル分類ブレ", "warn", bad);
+    report("genre_split", "同名商品が別ジャンルに分類されている", "warn", bad, baseline);
   }
 
-  // (7) 日付の健全性（表示スコープに過去/遠すぎる未来が無いか）
+  // (7) 日付の健全性（一覧に過去/遠すぎる未来が出ていないか）
   {
     const bad: string[] = [];
-    for (const r of deduped) {
-      if (!r.eventDate) continue;
-      // 相場つきの発売済み品は /premium に意図して載せているので「過去日」は正常。
-      // 一覧の表示スコープに出るものだけを対象にする。
-      if (r.marketPrice != null) continue;
-      const d = new Date(r.eventDate);
-      const y = d.getUTCFullYear();
-      if (d < today) bad.push(`[${r.source} #${r.id}] 過去日 ${d.toISOString().slice(0, 10)} ${cleanListTitle(r.source, r.title)}`);
-      if (y > curYear + 2) bad.push(`[${r.source} #${r.id}] 遠未来 ${d.toISOString().slice(0, 10)} ${cleanListTitle(r.source, r.title)}`);
+    for (const p of pages) {
+      if (p.name.startsWith("/release/") || p.name === "/premium") continue; // 過去も意図して載せるページ
+      for (const r of p.rows) {
+        if (!r.eventDate) continue;
+        const d = new Date(r.eventDate);
+        if (d < today) bad.push(`${p.name} [${r.source} #${r.id}] 過去日 ${d.toISOString().slice(0, 10)} ${cleanListTitle(r.source, r.title)}`);
+        if (d.getUTCFullYear() > curYear + 2)
+          bad.push(`${p.name} [${r.source} #${r.id}] 遠未来 ${d.toISOString().slice(0, 10)} ${cleanListTitle(r.source, r.title)}`);
+      }
     }
-    report("日付の健全性（過去/遠未来の混入）", "error", bad);
+    report("date_sanity", "日付の健全性（過去/遠未来の混入）", "error", bad, baseline);
   }
 
-  // (8) タイトル中の日付とバッジの日付(eventDate)の食い違い
-  // 本サイトの中核価値＝発売日が正しいこと。過去に全件1日ズレ（JST/UTC）を出しており
-  // （[[System/mistakes]] ミス7）、あれは「タイトルには8/8と書いてあるのにバッジが8/7」という
-  // 人間なら一瞬で気付く形で表に出ていた。それを機械で見る。
-  // 個別の食い違いは正当な場合がある（コラボ終了日・応募締切など本文由来の別の日付）ので WARN。
-  // ただし「ズレの向きと量が揃っている」＝系統的バグなので、±1日ズレが多数を占めたら ERROR。
+  // (8) タイトル中の日付とバッジ(eventDate)の食い違い。系統的な±1日ズレは TZ バグ。
   {
     const bad: string[] = [];
     let compared = 0;
-    const offsets = new Map<number, number>(); // ズレ日数 → 件数
-    for (const r of deduped) {
+    const offsets = new Map<number, number>();
+    for (const r of shown) {
       if (!r.eventDate) continue;
-      // 「8月8日」型のみ拾う。年跨ぎ誤判定を避けるため月日のみで比較する。
-      // ※「8/8」型のスラッシュ表記は採らない。プラモの縮尺（1/144・MG 1/100・1/7 フィギュア）を
-      //   日付と誤読して全件誤検知になるため（実データで確認）。日本語タイトルでは
-      //   発売日はほぼ「M月D日」で書かれるので、漢字表記に限っても取りこぼしは小さい。
+      // 「8月8日」型のみ。「8/8」型はプラモの縮尺（1/144 等）と区別できず誤検知になる。
       const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日/g)]
         .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
         .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
-      if (hits.length !== 1) continue; // 複数日付(期間)は「どれが発売日か」を決められないので対象外
+      if (hits.length !== 1) continue;
       const { mm, dd } = hits[0];
       const d = new Date(r.eventDate);
       compared++;
       if (d.getUTCMonth() + 1 === mm && d.getUTCDate() === dd) continue;
-      // ズレ日数（同年と仮定して算出。月跨ぎも拾える）
-      const asTitle = Date.UTC(d.getUTCFullYear(), mm - 1, dd);
-      const off = Math.round((d.getTime() - asTitle) / 86_400_000);
+      const off = Math.round((d.getTime() - Date.UTC(d.getUTCFullYear(), mm - 1, dd)) / 86_400_000);
       offsets.set(off, (offsets.get(off) ?? 0) + 1);
       bad.push(
-        `[${r.source} #${r.id}] バッジ ${d.toISOString().slice(0, 10)} ↔ タイトル ${mm}/${dd}` +
-          `${Math.abs(off) === 1 ? "（1日ズレ）" : ""} ${cleanListTitle(r.source, r.title)}`
+        `[${r.source} #${r.id}] バッジ ${d.toISOString().slice(0, 10)} ↔ タイトル ${mm}/${dd}${Math.abs(off) === 1 ? "（1日ズレ）" : ""} ${cleanListTitle(r.source, r.title)}`
       );
     }
     const offBy1 = (offsets.get(1) ?? 0) + (offsets.get(-1) ?? 0);
-    // 系統的な1日ズレ（比較できた件数の1割以上かつ10件以上）はタイムゾーン起因のバグを疑う。
     const systematic = compared >= 30 && offBy1 >= 10 && offBy1 >= compared * 0.1;
     report(
+      "date_title_mismatch",
       `日付の食い違い（タイトル↔バッジ）${systematic ? `／±1日ズレ ${offBy1}件が集中＝TZバグ疑い` : ""}`,
       systematic ? "error" : "warn",
-      bad
+      bad,
+      baseline
     );
     console.log(`(参考) タイトルに日付が1つだけある ${compared}件を突合 / 食い違い ${bad.length}件`);
   }
@@ -235,21 +282,189 @@ async function main() {
   // (9) タイトル末尾の宙ぶらりん助詞（文が途中で切れた痕跡）
   {
     const bad: string[] = [];
-    for (const r of deduped) {
+    for (const r of shown) {
       const c = cleanListTitle(r.source, r.title);
       if (/[ぁ-ん一-龥][でにをはがのへ]$/.test(c) && /\s/.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
-    report("タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, 12);
+    report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
+  }
+
+  // (10) 一番くじの各賞（prizes JSON）。構造の壊れと、**相場が1件も付いていない=機能の死**。
+  {
+    const broken: string[] = [];
+    let prizeItems = 0;
+    let prizeRows = 0;
+    let resaleRows = 0;
+    const suspect: string[] = [];
+    for (const r of all) {
+      if (!r.prizes) continue;
+      prizeItems++;
+      const p = parsePrizesJson(r.prizes);
+      if (!p) {
+        broken.push(`#${r.id} prizes が壊れている ${r.title.slice(0, 40)}`);
+        continue;
+      }
+      const face = r.price ? parseYen(r.price.split(" / ")[0]) : null;
+      for (const x of p) {
+        prizeRows++;
+        if (!x.name) broken.push(`#${r.id} 賞名なし ${x.label}`);
+        if (x.resalePrice == null) continue;
+        resaleRows++;
+        if (x.resaleText && !/中古|新品|メルカリ|実売|落札/.test(x.resaleText))
+          suspect.push(`#${r.id} ${x.label} 種別不明の相場表記「${x.resaleText}」`);
+        if (face && face > 0 && x.resalePrice >= face * 40)
+          suspect.push(`#${r.id} 1回${face}円 → ${x.label} ${x.resalePrice.toLocaleString()}円（${Math.round(x.resalePrice / face)}倍）`);
+      }
+    }
+    report("prizes_broken", "一番くじの各賞データが壊れている", "error", broken, baseline);
+    report("prizes_resale_suspect", "各賞の二次相場が疑わしい", "error", suspect, baseline);
+    // 存在検査: 機能が静かに死んでいないか。
+    // ※ 駿河屋の中古は発売済みにしか付かないので、未発売くじで0件なのは正常。
+    //   「発売から十分に経った」くじだけを母数にしないと、正常を故障と誤報する。
+    const ripe = new Date(today);
+    ripe.setUTCDate(ripe.getUTCDate() - 14);
+    const ripeKuji = all.filter((r) => r.prizes && r.eventDate && r.eventDate < ripe);
+    const ripeWithResale = ripeKuji.filter((r) => /"resalePrice"/.test(r.prizes!));
+    const dead =
+      ripeKuji.length >= 5 && ripeWithResale.length === 0
+        ? [`発売から14日以上経ったくじ ${ripeKuji.length}件のどれにも二次相場が付いていない（scrape:kuji:prices が機能していない疑い）`]
+        : [];
+    report("prizes_resale_missing", "各賞の二次相場が1件も付かない（機能が死んでいる疑い）", "error", dead, baseline);
+    console.log(
+      `(参考) 一番くじ各賞: ${prizeItems}件 / ${prizeRows}賞 / 二次相場 ${resaleRows}件` +
+        `（発売から14日以上 ${ripeKuji.length}件・うち相場付き ${ripeWithResale.length}件）`
+    );
+  }
+
+  // (11) 受付中ストア（stores JSON）の構造
+  {
+    const bad: string[] = [];
+    for (const r of all) {
+      if (!r.stores) continue;
+      try {
+        const arr = JSON.parse(r.stores);
+        if (!Array.isArray(arr) || !arr.length) {
+          bad.push(`#${r.id} stores が空`);
+          continue;
+        }
+        for (const s of arr) {
+          if (!s?.name || !s?.url) bad.push(`#${r.id} ストアの name/url 欠落`);
+          else if (!/^https?:\/\//.test(s.url)) bad.push(`#${r.id} 不正なストアURL ${s.url}`);
+        }
+      } catch {
+        bad.push(`#${r.id} stores の JSON が壊れている`);
+      }
+    }
+    report("stores_broken", "受付中ストアのデータが壊れている", "error", bad, baseline);
+  }
+
+  // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。
+  {
+    const last = new Map<string, number>();
+    const count = new Map<string, number>();
+    for (const r of all) {
+      const t = new Date(r.scrapedAt).getTime();
+      last.set(r.source, Math.max(last.get(r.source) ?? 0, t));
+      count.set(r.source, (count.get(r.source) ?? 0) + 1);
+    }
+    // 毎回の scrape で全件を取り直さない設計のソースは、scrapedAt が古いのが正常。
+    // ただし「古いデータが表示され続けている」事実は変わらないので、黙らせずWARNで数える。
+    const BY_DESIGN: Record<string, string> = {
+      figisland_pb: "差分取得（価格まで取得済みは再取得しない）ため0件が正常",
+      x_watch: "手動のX巡回で取り込むため自動更新されない",
+    };
+    const stale: string[] = [];
+    const staleByDesign: string[] = [];
+    for (const [src, t] of last) {
+      const days = (Date.now() - t) / 86_400_000;
+      if (days < 3) continue;
+      const line = `${src}: ${count.get(src)}件が ${Math.round(days)}日前の取得のまま`;
+      if (BY_DESIGN[src]) staleByDesign.push(`${line}（${BY_DESIGN[src]}）`);
+      else stale.push(line);
+    }
+    report("source_stale", "更新が止まっているソースがある", "error", stale, baseline);
+    report("source_stale_by_design", "設計上更新されないソースの鮮度", "warn", staleByDesign, baseline);
+  }
+
+  // (13) 画像の付与状況（無い＝カードが灰色になる。率で見張る）
+  {
+    const noImg = shown.filter((r) => !r.imageUrl);
+    const badUrl = shown.filter((r) => r.imageUrl && !/^https?:\/\//.test(r.imageUrl));
+    report("image_bad_url", "画像URLが不正", "error", badUrl.map((r) => `#${r.id} ${r.imageUrl}`), baseline);
+    const rate = shown.length ? noImg.length / shown.length : 0;
+    report(
+      "image_missing_rate",
+      `画像が無い割合が高い（${Math.round(rate * 100)}%）`,
+      "warn",
+      rate > 0.4 ? [`${noImg.length}/${shown.length}件に画像が無い`] : [],
+      baseline
+    );
+    console.log(`(参考) 画像なし ${noImg.length}/${shown.length}件（${Math.round(rate * 100)}%）`);
+  }
+
+  // (14) ページ件数の急変（前回比。ページが空になった・半減したのは事故）
+  {
+    const bad: string[] = [];
+    for (const p of pages) {
+      const prev = baseline.pages?.[p.name];
+      if (prev == null || prev < 10) continue;
+      if (p.rows.length === 0) bad.push(`${p.name} が0件（前回${prev}件）`);
+      else if (p.rows.length < prev * 0.5) bad.push(`${p.name} が急減 ${prev}→${p.rows.length}件`);
+    }
+    report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
+  }
+
+  // (15) リンク到達性（--links のときだけ。各ソース2件をHEADで抜き取り）
+  if (CHECK_LINKS) {
+    const bySource = new Map<string, Row[]>();
+    for (const r of shown) (bySource.get(r.source) ?? bySource.set(r.source, []).get(r.source)!).push(r);
+    const targets: Row[] = [];
+    for (const arr of bySource.values()) targets.push(...arr.slice(0, 2));
+    const bad: string[] = [];
+    await Promise.all(
+      targets.map(async (r) => {
+        try {
+          const res = await fetch(r.url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
+          if (res.status >= 400) bad.push(`[${r.source} #${r.id}] HTTP ${res.status} ${r.url}`);
+        } catch {
+          /* ネットワーク側の一時失敗は判定しない（誤検知を出さない） */
+        }
+      })
+    );
+    report("link_dead", "リンク先が404等を返している（抜き取り）", "warn", bad, baseline);
+    console.log(`(参考) リンク到達性: ${targets.length}件を抜き取り検査`);
   }
 
   // ── 出力 ──
   const errors = findings.filter((f) => f.level === "error");
   const warns = findings.filter((f) => f.level === "warn");
   for (const f of [...errors, ...warns]) {
-    console.log(`\n【${f.level === "error" ? "❌ERROR" : "⚠️WARN"}】${f.title}: ${f.detail}`);
-    for (const s of f.samples) console.log(`   - ${s}`);
-    if (f.samples.length < Number(f.detail.replace("件", ""))) console.log(`   … 他`);
+    const ratchet = f.baseline !== null ? `（前回 ${f.baseline}件 → 今回 ${f.items.length}件）` : "";
+    console.log(`\n【${f.level === "error" ? "❌ERROR" : "⚠️WARN"}】${f.title}: ${f.items.length}件${ratchet}`);
+    for (const s of f.items.slice(0, 8)) console.log(`   - ${s}`);
+    if (f.items.length > 8) console.log(`   … 他 ${f.items.length - 8}件`);
   }
+
+  // 減った分は baseline を締める（ラチェット）。増えた分は ERROR なので通らない。
+  const nextChecks: Record<string, number> = { ...(baseline.checks ?? {}) };
+  for (const [k, v] of Object.entries(counts)) {
+    if (nextChecks[k] == null || v < nextChecks[k]) nextChecks[k] = v;
+  }
+  const nextPages: Record<string, number> = { ...(baseline.pages ?? {}) };
+  for (const p of pages) nextPages[p.name] = Math.max(nextPages[p.name] ?? 0, p.rows.length);
+
+  if (UPDATE_BASELINE) {
+    fs.writeFileSync(
+      BASELINE_PATH,
+      JSON.stringify({ updatedAt: new Date().toISOString(), checks: nextChecks, pages: nextPages }, null, 2) + "\n"
+    );
+    console.log(`\nbaseline を更新: ${BASELINE_PATH}`);
+  } else {
+    const loosened = Object.entries(counts).filter(([k, v]) => (baseline.checks?.[k] ?? Infinity) > v);
+    if (loosened.length)
+      console.log(`\n(参考) 改善した検査が ${loosened.length}種あります。\`npm run audit -- --update-baseline\` で上限を締められます。`);
+  }
+
   console.log(`\n==== 監査結果: ERROR ${errors.length}種 / WARN ${warns.length}種 ====`);
   await prisma.$disconnect();
   if (errors.length) process.exitCode = 1;

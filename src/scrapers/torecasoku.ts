@@ -45,7 +45,7 @@ const CARD_RE =
   /ブースター|拡張パック|デッキ|トライアルセット|スリーブ|ラバーマット|プレイ(?:ヤーズ)?マット|カードローダー|バインダー|トレーディングカード|カードゲーム|シングルカード|カードダス|Reバース|フュージョンワールド|オーバーラッシュ|Secret\s?Lair|Commander|\bMTG\b|マジック[:：]?ザ|\bTCG\b|Booster|Starter|Card\s?Game|Bundle|パック/i;
 
 function classifyTorecasokuGenre(title: string): string {
-  if (GAME_RE.test(title)) return "ゲーム";
+  if (GAME_RE.test(title)) return "家電・ゲーム機"; // 語彙は GENRE_ORDER に揃える
   if (GOODS_RE.test(title)) return "その他";
   if (FIGURE_RE.test(title)) return "フィギュア";
   if (CARD_RE.test(title)) return "トレカ";
