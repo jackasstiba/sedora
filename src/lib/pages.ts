@@ -7,6 +7,11 @@
  * 月ページの"当月の過ぎた日"が再エンリッチの外＝未確認の「抽選賞品：」が固着）。
  *
  * 新しいページを作ったら、ここに1行足す。足せば監査もエンリッチも自動で追随する。
+ *
+ * この定義を使う側:
+ *   - scripts/audit.ts        … データの不変条件（表示される全件に対して）
+ *   - scripts/auditRendered.ts … 描画結果（このページ一覧を実際に取得して検査）
+ *   - scripts/reenrichCollabo.ts … 再エンリッチの対象
  */
 import { getItems } from "./items";
 import {
