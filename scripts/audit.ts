@@ -20,9 +20,9 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "../src/lib/prisma";
-import { displayEventDateText, todayJst } from "../src/lib/date";
+import { displayEventDateText, eventDateLabel, isMonthPrecision, todayJst } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
-import { dedupeKey, GENRE_ORDER } from "../src/lib/itemFilter";
+import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
@@ -67,6 +67,12 @@ const NOISE_CHECKS: { key: string; re: RegExp }[] = [
   { key: "店舗＋受付の告知", re: /(?:で|にて)(?:の)?(?:販売|予約)(?:再開|開始)(?:きたー|中|です)/ },
   { key: "値引き・ポイント告知", re: /[０-９0-9]{1,3}\s*[％%]\s*オフ|楽天カード\s*\d+\s*倍|お買い物マラソン|楽天スーパーDEAL/ },
 ];
+
+// 検索ボックスのプレースホルダが例示している語（src/components/FilterBar.tsx と揃える）。
+// 例示する以上、0件であってはならない。
+const SEARCH_PLACEHOLDER_EXAMPLES = ["初音ミク", "ポケカ"];
+// 表記ゆれの正規化が効いているかを確かめる語（全角型番・不可視文字・半角記号）。
+const SEARCH_NORMALIZE_PROBES = ["hg", "mg", "rg", "ぬいぐるみ", "コカ・コーラ"];
 
 async function main() {
   const baseline = loadBaseline();
@@ -288,6 +294,94 @@ async function main() {
       if (/[ぁ-ん一-龥][でにをはがのへ]$/.test(c) && /\s/.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
     report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
+  }
+
+  // (9a) 文字そのものの異常。**目視では見つけられない層**なので機械でしか守れない。
+  //      実測: collabo_cafe のタイトルにゼロ幅スペースが混入し（「ぬいぐる​み」）、
+  //      見た目は正常なまま検索・重複判定を壊していた（検索の取りこぼし59件の一部）。
+  {
+    // ※ g フラグ付きの正規表現を .test() に使うと lastIndex が持ち越され、
+    //   同じ入力でも呼ぶたびに結果が変わる。判定用にフラグ無しのコピーを作る。
+    const invisibleRe = new RegExp(INVISIBLE_CHARS.source);
+    const invisible: string[] = [];
+    const broken: string[] = [];
+    const spacing: string[] = [];
+    for (const r of shown) {
+      const t = cleanListTitle(r.source, r.title);
+      const fields: [string, string][] = [["タイトル", t]];
+      if (r.highlights) fields.push(["要約", r.highlights]);
+      for (const [where, v] of fields) {
+        if (invisibleRe.test(v)) invisible.push(`[${r.source} #${r.id}] ${where}に不可視文字: ${JSON.stringify(v.slice(0, 40))}`);
+        if (/�|[ --]/.test(v))
+          broken.push(`[${r.source} #${r.id}] ${where}に文字化け/制御文字: ${JSON.stringify(v.slice(0, 40))}`);
+        if (/^[\s　]|[\s　]$|　{3,}/.test(v)) spacing.push(`[${r.source} #${r.id}] ${where}の空白が異常: ${JSON.stringify(v.slice(0, 40))}`);
+      }
+    }
+    report("text_invisible", "表示テキストに不可視文字が混入（検索・重複判定を壊す）", "error", invisible, baseline);
+    report("text_broken_char", "表示テキストに文字化け・制御文字", "error", broken, baseline);
+    report("text_spacing", "表示テキストの空白が異常（前後の空白・全角3連）", "warn", spacing, baseline);
+  }
+
+  // (9a2) 検索が実際に当たるか。
+  //   ・UIがプレースホルダで例示している語が0件なら、それは案内が嘘をついている
+  //     （実測で過去に「ポケカ」が0件だった）。例示する以上は当たらなければならない。
+  //   ・表記ゆれの正規化が効いているか（全角「ＨＧ」を「hg」で引けるか等）。
+  //     正規化が外れると、見た目は何も壊れていないのに検索だけが静かに痩せる。
+  {
+    const bad: string[] = [];
+    for (const q of SEARCH_PLACEHOLDER_EXAMPLES) {
+      const n = shown.filter((r) => matchesQuery(r.title, q.toLowerCase())).length;
+      if (n === 0) bad.push(`検索例「${q}」が0件（UIが例示しているのに当たらない）`);
+    }
+    // 正規化の実効性: 正規化した本文に含まれるのに matchesQuery が拾えない件数。
+    let missed = 0;
+    for (const q of SEARCH_NORMALIZE_PROBES) {
+      const should = shown.filter((r) => normalizeForSearch(r.title).includes(normalizeForSearch(q)));
+      const got = should.filter((r) => matchesQuery(r.title, q.toLowerCase()));
+      if (got.length < should.length) {
+        missed += should.length - got.length;
+        bad.push(`「${q}」: 本来 ${should.length}件のうち ${should.length - got.length}件を取りこぼし（表記ゆれの正規化が効いていない）`);
+      }
+    }
+    report("search_broken", "検索が当たらない（例示語が0件／正規化漏れ）", "error", bad, baseline);
+    console.log(`(参考) 検索: 例示語 ${SEARCH_PLACEHOLDER_EXAMPLES.length}種・正規化プローブ ${SEARCH_NORMALIZE_PROBES.length}種を確認 / 取りこぼし ${missed}件`);
+  }
+
+  // (9a3) 元情報より高い精度を表示していないか（＝こちらが精度を捏造していないか）。
+  //   実測: プレミアムバンダイの79件は元が「2026年9月発送予定」なのに、eventDate の月初が
+  //   そのまま「9/1(火)」として発売日と同じ赤字で出ていた（表示日の分布が全件1日＝合成の証拠）。
+  //   日付の正確さはこのサイトの中核価値なので、**分かっている精度でしか書かない**。
+  {
+    const bad: string[] = [];
+    for (const r of shown) {
+      if (!r.eventDate || !isMonthPrecision(r.eventDateText)) continue;
+      const label = eventDateLabel(r.eventDate, r.eventDateText, "short");
+      // 月精度の情報なのに、ラベルに「日」相当（M/D 形式）が出ていたら捏造。
+      if (label && /\d{1,2}\/\d{1,2}/.test(label))
+        bad.push(`[${r.source} #${r.id}] 元は «${r.eventDateText}» なのに「${label}」と特定日で表示`);
+    }
+    report("date_fabricated_precision", "月までしか分からない情報を特定日として表示している", "error", bad, baseline);
+    const monthOnly = shown.filter((r) => r.eventDate && isMonthPrecision(r.eventDateText)).length;
+    console.log(`(参考) 月精度の情報 ${monthOnly}件は「YYYY年M月」で表示（特定日にしない）`);
+  }
+
+  // (9a4) リンク先が個別の商品ページになっているか。
+  //   同じURLを複数の商品が共有していたら、少なくともどれかは「商品ページに送れていない」。
+  //   実測: pokemoncard の2件が一覧ページ（/products/）止まりで、クリックしても商品に辿り着けない。
+  //   ただし1つの抽選ページが複数商品を本当に扱う場合もある（近鉄百貨店のウイスキー4種）ので、
+  //   断定せず数える。増えたらラチェットで ERROR になる。
+  {
+    const byUrl = new Map<string, Row[]>();
+    for (const r of shown) (byUrl.get(r.url) ?? byUrl.set(r.url, []).get(r.url)!).push(r);
+    const bad: string[] = [];
+    for (const [url, arr] of byUrl) {
+      if (arr.length < 2) continue;
+      bad.push(
+        `${arr.length}件が同じURLを共有 → ${url}\n        ` +
+          arr.slice(0, 3).map((x) => `[${x.source} #${x.id}] ${cleanListTitle(x.source, x.title).slice(0, 34)}`).join("\n        ")
+      );
+    }
+    report("shared_url", "複数の商品が同じリンク先を指している（個別ページに送れていない）", "warn", bad, baseline);
   }
 
   // (9b) 括弧の対応が取れていない表示タイトル。

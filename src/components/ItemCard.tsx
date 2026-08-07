@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { countdown, displayEventDateText, formatShort } from "@/lib/date";
+import { countdown, eventDateLabel, isMonthPrecision } from "@/lib/date";
 import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
@@ -55,14 +55,12 @@ function eventColor(eventType: string): string {
   return EVENT_COLORS[eventType] ?? "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200";
 }
 
-function formatDate(date: Date | string | null): string | null {
-  return date ? formatShort(date) : null;
-}
-
 export function ItemCard({ item }: { item: Item }) {
-  // 日付欄は発売日と同じ赤字なので、発売日でないテキスト（投稿日＝記事を拾った日）は出さない。
-  const dateLabel = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText);
-  const cd = countdown(item.eventDate);
+  // 日付は「分かっている精度」でしか書かない。発売日でないテキスト（投稿日）は出さず、
+  // 月までしか分からないものは特定日にしない（「2026年9月」と出す）。
+  const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "short");
+  // 月精度のものに「🔥 本日/明日」を出すと、合成した月初へのカウントダウンになってしまう。
+  const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
   const displayTitle = cleanListTitle(item.source, item.title);

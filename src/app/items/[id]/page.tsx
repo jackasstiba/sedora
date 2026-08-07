@@ -7,7 +7,8 @@ import { OutboundLink } from "@/components/OutboundLink";
 import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
-import { countdown, displayEventDateText, formatLong } from "@/lib/date";
+import { eventDateHeading } from "@/lib/itemFilter";
+import { countdown, eventDateLabel, isMonthPrecision } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { groupStoresByLabel, parseStoresJson } from "@/lib/stores";
@@ -16,10 +17,6 @@ export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・T
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
-function formatDate(date: Date | null): string | null {
-  return date ? formatLong(date) : null;
-}
-
 type Props = { params: Promise<{ id: string }> };
 
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
@@ -27,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const item = await getItemById(Number(id));
   if (!item) return { title: "見つかりませんでした | ハツコレ" };
 
-  const dateStr = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText) ?? "";
+  const dateStr = eventDateLabel(item.eventDate, item.eventDateText, "long") ?? "";
   // 一覧カードと同じ整形を使う。以前は stripSourceLabel だけだったため、Xミラー由来の商品は
   // 一覧では商品名なのに、開いた先のタイトル・<title> がツイート全文（実況コメント込み）になり、
   // 同じ商品の名前がページ間で食い違っていた。
@@ -35,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const description = [
-    dateStr ? `${item.eventType}日: ${dateStr}` : null,
+    dateStr ? `${eventDateHeading(item.eventType)}: ${dateStr}` : null,
     item.price ? `価格: ${item.price}` : null,
     `ジャンル: ${item.genre}`,
   ]
@@ -61,8 +58,10 @@ export default async function ItemPage({ params }: Props) {
   if (!item) notFound();
 
   const related = await getRelatedItems(item);
-  const dateLabel = formatDate(item.eventDate) ?? displayEventDateText(item.eventDateText);
-  const cd = countdown(item.eventDate);
+  // 一覧カードと同じ規則で、分かっている精度でしか日付を書かない。
+  const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "long");
+  // 月精度のものは合成した月初へのカウントダウンになるので出さない。
+  const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
   const margin = computeMargin(item.price, item.marketPrice);
   // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。
   // ※ 楽天検索へのリンクだけは生タイトルを使う経路が別にある（検索語は情報量が多い方が当たる）。
@@ -176,7 +175,7 @@ export default async function ItemPage({ params }: Props) {
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
             {dateLabel && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">{item.eventType}日</dt>
+                <dt className="text-neutral-500 dark:text-neutral-400">{eventDateHeading(item.eventType)}</dt>
                 <dd className="font-semibold text-rose-600 dark:text-rose-400">
                   {dateLabel}
                   {cd && (

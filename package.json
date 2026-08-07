@@ -11,6 +11,7 @@
     "scrape": "node --env-file-if-exists=.env --import tsx scripts/scrape.ts",
     "audit": "node --env-file-if-exists=.env --import tsx scripts/audit.ts",
     "audit:page": "node --env-file-if-exists=.env --import tsx scripts/auditRendered.ts",
+    "audit:facts": "node --env-file-if-exists=.env --import tsx scripts/auditFacts.ts",
     "reenrich:collabo": "node --env-file-if-exists=.env --import tsx scripts/reenrichCollabo.ts",
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "prices:recheck": "node --env-file-if-exists=.env --import tsx scripts/recheckPrices.ts",

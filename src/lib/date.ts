@@ -142,6 +142,40 @@ export function isStalePlan(
   return planned !== null && planned.getTime() < today.getTime();
 }
 
+/**
+ * 元の情報が「月までしか分かっていない」か（＝日を特定できていない）。
+ *
+ * 実測: プレミアムバンダイの79件は元テキストが「2026年9月発送予定」なのに、
+ * eventDate に月初(9/1)が入っていたため、カードには **「9/1(火)」という特定日** が
+ * 発売日と同じ赤字で出ていた（表示日の分布が全件1日＝合成の動かぬ証拠）。
+ * 実際には「9月中に発送」であって、9月1日に何かが起きるわけではない。
+ * ソート・月ページのために月初を保持するのは妥当だが、**表示まで特定日にしてはいけない**。
+ */
+export function isMonthPrecision(eventDateText: string | null): boolean {
+  if (!eventDateText) return false;
+  if (/\d{1,2}\s*[日週]/.test(eventDateText)) return false; // 日・週まで分かっている
+  return /\d{1,2}\s*月/.test(eventDateText);
+}
+
+/**
+ * カード・詳細に出す日付ラベル。分かっている精度でしか書かない。
+ *  ・日まで分かっている → "8/8(土)" / "2026年8月8日(土)"
+ *  ・月までしか分からない → "2026年9月"（合成した日を出さない）
+ *  ・日付が無い → 発売日でないテキスト（投稿日等）は出さない
+ */
+export function eventDateLabel(
+  eventDate: Date | string | null,
+  eventDateText: string | null,
+  style: "short" | "long" = "short"
+): string | null {
+  if (eventDate && isMonthPrecision(eventDateText)) {
+    const x = new Date(eventDate);
+    return `${x.getUTCFullYear()}年${x.getUTCMonth() + 1}月`;
+  }
+  if (eventDate) return style === "long" ? formatLong(eventDate) : formatShort(eventDate);
+  return displayEventDateText(eventDateText);
+}
+
 export function displayEventDateText(eventDateText: string | null): string | null {
   if (!eventDateText) return null;
   // 「投稿日」「掲載日」＝こちらが記事を拾った日。商品の日付ではないので日付欄に出さない。

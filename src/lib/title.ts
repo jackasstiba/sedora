@@ -38,10 +38,14 @@ function dropUnmatchedLeadingBracket(title: string): string {
   return t;
 }
 
+// 見えない文字（ゼロ幅スペース等）。表示は正常に見えるのに、検索・重複判定・文字数を狂わせる。
+// 収集元のHTMLから紛れ込むので、表示用整形の入口で必ず落とす。
+const INVISIBLE = /[​-‍﻿⁠­]/g;
+
 /** 情報元由来の定型ラベル（末尾「｜抽選/販売/定価情報」・先頭「最新リーク｜」等）を表示用に除去する。全ソース対象。 */
 export function stripSourceLabel(title: string): string {
   const t = dropUnmatchedLeadingBracket(
-    title.replace(SOURCE_LABEL_TAIL, "").replace(SOURCE_LABEL_HEAD, "").trim()
+    title.replace(INVISIBLE, "").replace(SOURCE_LABEL_TAIL, "").replace(SOURCE_LABEL_HEAD, "").trim()
   );
   return t.length >= 4 ? t : title.trim();
 }

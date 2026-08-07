@@ -64,6 +64,15 @@ export function sourceLabel(source: string): string {
 }
 
 /**
+ * 日付欄の見出し。`${eventType}日` と機械的に繋ぐと「予約受付中日」「登場予定日」のような
+ * 日本語にならない見出しが出る（実測・詳細ページで表示されていた）。
+ * 「〜中」「〜予定」で終わる種別には「日」を付けない。
+ */
+export function eventDateHeading(eventType: string): string {
+  return /(?:中|予定)$/.test(eventType) ? eventType : `${eventType}日`;
+}
+
+/**
  * 「抽選」種別に該当するかの純粋述語（サーバーのPrisma版 getItems と意味論を共有）。
  * eventType が「抽選」のものに加え、タイトルに「抽選」を含むもの（例: eventType=登場予定
  * だが「抽選販売」）も拾う。
@@ -133,8 +142,14 @@ function inheritEnrichment(keep: DedupeItem, from: DedupeItem): void {
  *  例: 「ワンピース Grandista-LUFFY-」→ "ワンピースgrandistaluffy"
  *  引用符（"" '' “” ‘’ 〝〟）も除去する。同一商品を figisland が“レゼ”、koretore が
  *  ‐レゼ‐ のように別の括り記号で載せると別キーになり重複が残っていたため。 */
+// ゼロ幅スペース・BOM・ソフトハイフン等の「見えない文字」。実データに混入しており
+// （collabo_cafe の「ぬいぐる​み」）、見た目は正常なのに検索と重複判定を壊す。
+// 目視では絶対に見つからないので、機械側で必ず落とす。
+export const INVISIBLE_CHARS = /[​-‍﻿⁠­]/g;
+
 export function dedupeKey(title: string): string {
   return title
+    .replace(INVISIBLE_CHARS, "") // ゼロ幅スペース等。見えないのに別キーになり重複が残る
     .normalize("NFKC")
     .toLowerCase()
     .replace(/[\s　]+/g, "")
@@ -392,12 +407,27 @@ const SEARCH_SYNONYMS: { alias: string; canon: string[] }[] = [
   { alias: "プリキュア", canon: ["プリキュア"] },
 ];
 
-/** タイトルが検索語に一致するか。素の部分一致に加え、略称(ポケカ等)は正式表記にも当てる。 */
+/**
+ * 表記ゆれを吸収するための正規化。**不可視文字の除去 → NFKC → 小文字化** の順。
+ *
+ * 実測でここが検索を壊していた（表示1351件に対し取りこぼし59件）:
+ *  ・プレミアムバンダイの正式表記が全角の「ＨＧ 1/144」なので「hg」で当たらない（HG30/MG18/RG7件）
+ *  ・collabo_cafe のタイトルに**ゼロ幅スペース**が混入していて「ぬいぐるみ」で当たらない（3件）
+ *    → 見た目は完全に正常なので、目視では絶対に見つからない類の粗。
+ *  ・半角中黒の「コカ･コーラ」が「コカ・コーラ」で当たらない（1件）
+ */
+export function normalizeForSearch(s: string): string {
+  return s.replace(INVISIBLE_CHARS, "").normalize("NFKC").toLowerCase();
+}
+
+/** タイトルが検索語に一致するか。表記ゆれを正規化し、略称(ポケカ等)は正式表記にも当てる。 */
 export function matchesQuery(title: string, q: string): boolean {
-  const t = title.toLowerCase();
-  if (t.includes(q)) return true;
+  const t = normalizeForSearch(title);
+  const nq = normalizeForSearch(q);
+  if (t.includes(nq)) return true;
   for (const { alias, canon } of SEARCH_SYNONYMS) {
-    if (q.includes(alias) && canon.some((c) => t.includes(c.toLowerCase()))) return true;
+    if (nq.includes(normalizeForSearch(alias)) && canon.some((c) => t.includes(normalizeForSearch(c))))
+      return true;
   }
   return false;
 }
