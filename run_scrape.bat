@@ -1,33 +1,48 @@
 @echo off
 chcp 65001 > nul
-rem Sedori Radar: scrape reservation/release info and save to DB
+rem ハツコレ 定例更新＋チェック（System/rules.md の「ハツコレを更新して」の定義に合わせる）
+rem
+rem ここが「更新とチェックはセット」を**機械で**担保する唯一の場所。
+rem 人間（や私）が手順を覚えていることに依存させない。どこかで ERROR が出たら
+rem bat 自体を exit 1 で終えるので、スケジューラから見ても失敗として残る。
 cd /d "%~dp0"
-echo [%date% %time%] scrape start >> scrape_log.txt
-call npm run scrape >> scrape_log.txt 2>&1
-echo [%date% %time%] scrape end >> scrape_log.txt
-rem 一覧完結型ソース(rarecheck等)は記事本文を開かず画像を持てないので、og:imageを後付けする。
-rem scrape.ts が imageUrl=null で上書きしないため、一度付いた画像は次回以降も温存される。
-echo [%date% %time%] backfill images start >> scrape_log.txt
-call npm run scrape:images >> scrape_log.txt 2>&1
-echo [%date% %time%] backfill images end >> scrape_log.txt
-rem 監査を回す前に、監査自身が「鳴るべき入力で鳴る」ことを確かめる。
-rem 検査は本番を壊さないので、壊れていても咎められずに残る（＝発火しようのない検査を
-rem 持っているだけの状態で「0件」と報告してしまう）。合成データで固定した期待値で守る。
-echo [%date% %time%] audit selftest start >> scrape_log.txt
-call npm run audit:selftest >> scrape_log.txt 2>&1
+set LOG=scrape_log.txt
+
+echo. >> %LOG%
+echo ========================================= >> %LOG%
+echo [%date% %time%] 定例更新 開始 >> %LOG%
+
+rem ── 1. データ更新 ────────────────────────────────────────────────
+call :step "scrape"            "npm run scrape"            || exit /b 1
+call :step "backfill images"   "npm run scrape:images"     || exit /b 1
+call :step "reenrich collabo"  "npm run reenrich:collabo"  || exit /b 1
+call :step "scrape prices"     "npm run scrape:prices"     || exit /b 1
+rem 既存の相場も洗う。scrape:prices は未取得を優先するので、一度付いた誤りは
+rem これを回さないと永久に残る（しかも相場降順の /premium では誤りほど上位に出る）。
+call :step "recheck prices"    "npm run prices:recheck"    || exit /b 1
+call :step "kuji prices"       "npm run scrape:kuji:prices" || exit /b 1
+
+rem ── 2. チェック ──────────────────────────────────────────────────
+rem 監査より先に「監査自身が鳴るべき入力で鳴るか」を確かめる。検査は本番を壊さないので、
+rem 壊れていても咎められずに残る＝空振りしたまま「0件」と報告してしまう。
+call :step "audit selftest"    "npm run audit:selftest"    || exit /b 1
+rem 表示品質の常設監査。ERROR があれば「きれい」と言えない。
+call :step "audit"             "npm run audit"             || exit /b 1
+rem 一次情報との突合（リンク先の本文と識別語・価格を照合）。要確認は WARN 相当。
+call :step "audit facts"       "npm run audit:facts"       || exit /b 1
+
+echo [%date% %time%] 定例更新 正常終了 >> %LOG%
+echo 定例更新とチェックが正常に終わりました。
+echo 残り: npm run audit:page（描画監査。dev サーバか本番URLが要るので手動）
+exit /b 0
+
+:step
+echo [%date% %time%] %~1 start >> %LOG%
+call %~2 >> %LOG% 2>&1
 if errorlevel 1 (
-  echo [%date% %time%] audit selftest FAILED ^(監査自身が壊れている^) >> scrape_log.txt
-  echo 監査の自己テストが失敗しました。監査結果は信用できません。scrape_log.txt を確認してください。
+  echo [%date% %time%] %~1 FAILED >> %LOG%
+  echo 【失敗】%~1 で ERROR が出ました。%LOG% を確認してください。
   exit /b 1
 )
-echo [%date% %time%] audit selftest ok >> scrape_log.txt
-rem 表示品質の常設監査。ERROR が出たら「きれい」と言えない状態なので、この bat 自体を
-rem 失敗（exit 1）で終える。監査を回すかどうかを人間の記憶に委ねないための固定。
-echo [%date% %time%] audit start >> scrape_log.txt
-call npm run audit >> scrape_log.txt 2>&1
-if errorlevel 1 (
-  echo [%date% %time%] audit FAILED ^(ERROR あり: scrape_log.txt を確認^) >> scrape_log.txt
-  echo 監査でERRORが出ました。scrape_log.txt を確認してください。
-  exit /b 1
-)
-echo [%date% %time%] audit ok >> scrape_log.txt
+echo [%date% %time%] %~1 ok >> %LOG%
+exit /b 0
