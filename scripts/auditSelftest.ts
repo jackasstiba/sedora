@@ -12,6 +12,22 @@
  * 未知の「エントリー受付中」まで「予約終了」に書き換えていた（予約ではないのに予約と断定）。
  */
 import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
+import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
+
+// 巡回で取り直した prizes（相場なし）に、既存の相場が引き継がれるか。
+// 実測: これが無かったため、付与直後に別件で scrape を回しただけで 67件すべての
+// 二次相場が消えた（列単位の null 上書き対策では守れない、JSON の中身の問題）。
+const PRIZES_OLD = JSON.stringify([
+  { label: "A賞", name: "クッション", image: "a.jpg", resalePrice: 1989, resaleText: "中古 ¥1,989" },
+  { label: "B賞", name: "皿", image: "b.jpg" },
+]);
+const PRIZES_FRESH = JSON.stringify([
+  { label: "A賞", name: "クッション", image: "a2.jpg" },
+  { label: "B賞", name: "皿", image: "b2.jpg" },
+]);
+const PRIZES_RELABELED = JSON.stringify([{ label: "C賞", name: "タオル", image: "c.jpg" }]);
+const merged = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_FRESH));
+const relabeled = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_RELABELED));
 
 const today = new Date(Date.UTC(2026, 7, 8)); // 2026-08-08 固定（今日に依存させない）
 const PAST = "2023年4月発送予定";
@@ -45,6 +61,12 @@ const cases: Case[] = [
   { name: "未来を約束しない文は判定しない", fn: () => plannedDateFromText("2026年8月6日に発売しました"), want: null },
   { name: "日付未定の過ぎた予定は落とす", fn: () => isStalePlan(null, "2026年06月04週登場予定", today), want: true },
   { name: "日付未定の未来の予定は残す", fn: () => isStalePlan(null, "2026年09月下旬登場予定", today), want: false },
+
+  // ── 巡回が後付けの二次相場を潰さないか（実測で67件が消えた型） ──────────
+  { name: "再スクレイプでも二次相場が残る", fn: () => merged?.find((p) => p.label === "A賞")?.resalePrice, want: 1989 },
+  { name: "相場は引き継ぐが賞の内容は新しい方を採る", fn: () => merged?.find((p) => p.label === "A賞")?.image, want: "a2.jpg" },
+  { name: "元々相場が無い賞には足さない", fn: () => merged?.find((p) => p.label === "B賞")?.resalePrice, want: undefined },
+  { name: "賞の構成が変わったら相場を付け替えない", fn: () => relabeled?.find((p) => p.label === "C賞")?.resalePrice, want: undefined },
 ];
 
 let ng = 0;

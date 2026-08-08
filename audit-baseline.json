@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-08T03:21:49.126Z",
+  "updatedAt": "2026-08-08T05:53:05.499Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -39,24 +39,25 @@
     "date_fabricated_precision": 0,
     "shared_url": 0,
     "stale_promise": 0,
-    "page_count_shrink": 0
+    "page_count_shrink": 0,
+    "prizes_resale_lost": 0
   },
   "pages": {
-    "/": 1125,
+    "/": 1129,
     "/premium": 63,
     "/lottery": 181,
-    "/genre/フィギュア": 218,
+    "/genre/フィギュア": 219,
     "/genre/トレカ": 215,
     "/genre/スニーカー": 25,
     "/genre/プラモ": 57,
     "/genre/一番くじ": 59,
-    "/genre/コラボ": 196,
+    "/genre/コラボ": 198,
     "/genre/ポケモン": 93,
     "/genre/ソフビ・アートトイ": 1,
     "/genre/家電・ゲーム機": 14,
     "/genre/酒・ウイスキー": 5,
     "/genre/映像・音楽": 10,
-    "/genre/その他": 237,
+    "/genre/その他": 238,
     "/release/2027-06": 3,
     "/release/2027-05": 4,
     "/release/2027-04": 1,
@@ -76,5 +77,8 @@
     "/tcg/ヴァイスシュヴァルツ": 33,
     "/tcg/MTG": 47,
     "/tcg/デジモンカード": 2
+  },
+  "metrics": {
+    "prizes_resale": 1
   }
 }

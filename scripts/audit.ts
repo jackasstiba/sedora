@@ -51,7 +51,14 @@ function report(key: string, title: string, level: Level, items: string[], basel
   findings.push({ key, title, level: exceeded ? "error" : level, items, baseline: base });
 }
 
-type Baseline = { updatedAt?: string; checks?: Record<string, number>; pages?: Record<string, number> };
+type Baseline = {
+  updatedAt?: string;
+  checks?: Record<string, number>;
+  pages?: Record<string, number>;
+  // 指摘の件数ではなく「機能が生きている量」。0 になったら機能の死なので、
+  // 前提条件を必要とする存在検査とは別に、単純な減少で捕まえる。
+  metrics?: Record<string, number>;
+};
 function loadBaseline(): Baseline {
   try {
     return JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")) as Baseline;
@@ -77,6 +84,8 @@ const SEARCH_NORMALIZE_PROBES = ["hg", "mg", "rg", "ぬいぐるみ", "コカ・
 
 async function main() {
   const baseline = loadBaseline();
+  // 「機能が生きている量」。--update-baseline のときだけ記録を進める（＝受け入れた状態）。
+  const metrics: Record<string, number> = {};
   const today = todayJst();
   const curYear = today.getUTCFullYear();
 
@@ -512,6 +521,18 @@ async function main() {
         ? [`発売から14日以上経ったくじ ${ripeKuji.length}件のどれにも二次相場が付いていない（scrape:kuji:prices が機能していない疑い）`]
         : [];
     report("prizes_resale_missing", "各賞の二次相場が1件も付かない（機能が死んでいる疑い）", "error", dead, baseline);
+
+    // **上の検査は前提条件（発売から14日以上のくじが5件以上）が満たされないと発火できない。**
+    // 実測でその状態のまま、付与済みの二次相場が再スクレイプに潰されて 1件→0件 になったのを
+    // 素通りさせた。前提の要らない見方＝「**前より減った**」を別に持つ（ラチェットが検出する）。
+    // 相場は増える方向にしか動かないはず（付与はするが取り消しは prices:recheck だけ）。
+    const baselineResale = baseline.metrics?.prizes_resale;
+    const lost = resaleRows === 0 && (baselineResale ?? 0) > 0
+      ? [`二次相場が ${baselineResale}件 → 0件 に消えた（巡回で上書きされた疑い。scrape:kuji:prices を回し直す）`]
+      : [];
+    report("prizes_resale_lost", "付いていた二次相場が消えた", "error", lost, baseline);
+    metrics.prizes_resale = resaleRows;
+
     console.log(
       `(参考) 一番くじ各賞: ${prizeItems}件 / ${prizeRows}賞 / 二次相場 ${resaleRows}件` +
         `（発売から14日以上 ${ripeKuji.length}件・うち相場付き ${ripeWithResale.length}件）`
@@ -707,7 +728,16 @@ async function main() {
   if (UPDATE_BASELINE) {
     fs.writeFileSync(
       BASELINE_PATH,
-      JSON.stringify({ updatedAt: new Date().toISOString(), checks: nextChecks, pages: nextPages }, null, 2) + "\n"
+      JSON.stringify(
+        {
+          updatedAt: new Date().toISOString(),
+          checks: nextChecks,
+          pages: nextPages,
+          metrics: { ...(baseline.metrics ?? {}), ...metrics },
+        },
+        null,
+        2
+      ) + "\n"
     );
     console.log(`\nbaseline を更新: ${BASELINE_PATH}`);
   } else {

@@ -63,6 +63,43 @@ export function parsePrizesJson(json: string | null | undefined): PrizeFull[] | 
   }
 }
 
+/**
+ * 再スクレイプした prizes に、既存行の**後付け情報（二次相場）だけ**を引き継ぐ。
+ *
+ * scraper が返す prizes は {label,name,image} だけなので、そのまま上書きすると
+ * `npm run scrape:kuji:prices` が付けた相場が**毎回の巡回で消える**。実測: 相場を付けた
+ * 直後に別件で scrape を回しただけで、67件すべて resalePrice が 0件になっていた。
+ * 画像の null 上書き対策（scrape.ts の `imageUrl ?? undefined`）と同じ問題が、
+ * JSON の中身という**列単位では守れない場所**で起きていた。
+ *
+ * 賞ラベルで突合する。賞の構成が変わった（ラベルが消えた）場合はその相場を捨てる＝
+ * 別の賞に付け替えない（間違った商品の相場を出すより、出さない方が正しい）。
+ */
+export function mergePrizeEnrichment(
+  existingJson: string | null | undefined,
+  freshJson: string | null | undefined
+): string | null | undefined {
+  if (!freshJson) return freshJson;
+  const prev = parsePrizesJson(existingJson);
+  const next = parsePrizesJson(freshJson);
+  if (!prev || !next) return freshJson;
+  const byLabel = new Map(prev.map((p) => [p.label, p]));
+  let carried = 0;
+  const merged = next.map((p) => {
+    const old = byLabel.get(p.label);
+    if (!old || old.resalePrice == null) return p;
+    carried++;
+    return {
+      ...p,
+      resalePrice: old.resalePrice,
+      resaleText: old.resaleText,
+      resaleUrl: old.resaleUrl,
+      resaleSource: old.resaleSource,
+    };
+  });
+  return carried ? JSON.stringify(merged) : freshJson;
+}
+
 /** せどり相場の核＝注目賞（A賞・ラストワン賞等）を先に見せるための並べ替え用キー。 */
 export function notablePrizeLabels(prizes: PrizeFull[]): PrizeFull[] {
   return prizes.filter((p) => isHotPrize(p.label));

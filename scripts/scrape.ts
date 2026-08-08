@@ -2,6 +2,7 @@ import { prisma } from "../src/lib/prisma";
 import { runAllScrapers } from "../src/scrapers";
 import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
+import { mergePrizeEnrichment } from "../src/lib/prizes";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now"]);
@@ -26,6 +27,16 @@ async function main() {
     for (const raw of items) {
       // 配信元タイトルの日付告知・編集タグを落として商品名として読みやすくする
       const item = { ...raw, title: cleanTitle(raw.title) };
+      // 各賞の二次相場は別スクリプト（scrape:kuji:prices）が後付けするので、
+      // 巡回で取り直した prizes をそのまま書くと毎回消える。賞ラベルで突合して引き継ぐ。
+      let prizes = item.prizes ?? null;
+      if (prizes) {
+        const existing = await prisma.item.findUnique({
+          where: { source_sourceId: { source: item.source, sourceId: item.sourceId } },
+          select: { prizes: true },
+        });
+        prizes = mergePrizeEnrichment(existing?.prizes, prizes) ?? null;
+      }
       await prisma.item.upsert({
         where: { source_sourceId: { source: item.source, sourceId: item.sourceId } },
         create: item,
@@ -45,7 +56,7 @@ async function main() {
           highlights: item.highlights ?? null,
           hasLottery: item.hasLottery ?? null,
           officialUrl: item.officialUrl ?? null,
-          prizes: item.prizes ?? null,
+          prizes,
           stores: item.stores ?? null,
           scrapedAt: new Date(),
         },
