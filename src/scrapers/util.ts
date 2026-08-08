@@ -57,20 +57,43 @@ export function parseSlashMonthDay(text: string, baseYear: number, baseMonth: nu
   return calDate(year, month, day);
 }
 
-/** "7月6日" (no year) -> resolves to nearest future/past-tolerant year */
+/**
+ * 年の無い「7月6日」を日付にする。**基準日にいちばん近い年**を選ぶ。
+ *
+ * 以前は「60日以上前なら翌年」という規則だった。これは *過ぎた日付を未来に化けさせる*:
+ *  ・rarecheck … 数ヶ月前の記事の「4月28日」が **2027年4月28日** になり、掲載9件中7件が
+ *    2027年4〜6月という嘘の日付で並んでいた。
+ *  ・nyuka_now … 小売の応募ページに残る過去の「6月2日」が **2027年6月2日** になり、
+ *    「今日以降で最も近い日を表示日にする」という正しいはずの選別を素通りして、
+ *    10ヶ月先の抽選日として表示されていた（3件）。
+ *
+ * 最も近い年なら「6月2日」(基準8/8)は 67日前の今年になり過去として扱える。
+ * 「1月7日」は 152日後の翌年になり、年またぎの先行情報も正しく読める。
+ * **基準日は記事の投稿日を渡すこと**（呼び出し側の責任）。今日を基準にすると、
+ * 古い記事の日付が「まだ来ていない日」に見えてしまう。
+ */
 export function resolveMonthDay(month: number, day: number, reference = new Date()): Date {
-  let year = reference.getUTCFullYear();
-  const guess = calDate(year, month, day);
-  const sixtyDaysMs = 60 * 24 * 60 * 60 * 1000;
-  if (guess.getTime() < reference.getTime() - sixtyDaysMs) {
-    year += 1;
+  const base = reference.getUTCFullYear();
+  let best = calDate(base, month, day);
+  for (const y of [base - 1, base + 1]) {
+    const cand = calDate(y, month, day);
+    if (Math.abs(cand.getTime() - reference.getTime()) < Math.abs(best.getTime() - reference.getTime()))
+      best = cand;
   }
-  return calDate(year, month, day);
+  return best;
 }
 
 /** Extract first "N月N日" occurrence + optional event-type keyword from free text */
+/**
+ * @param reference 年の無い「4月28日」をどの時点から見て解決するか。
+ *   **記事の投稿日を渡すこと。** 省略すると「今日」基準になり、数ヶ月前の記事に書かれた
+ *   過去の日付が「まだ来ていない日」と解釈されて**翌年に倒れる**。
+ *   実測: rarecheck の掲載9件中7件が 2027年4〜6月 と表示されていた（実際は2026年＝過去）。
+ *   日付の正確さがこのサイトの中核価値なので、基準点を推測に委ねない。
+ */
 export function extractDateAndEventFromText(
-  text: string
+  text: string,
+  reference?: Date | string | null
 ): { date: Date | null; eventType: string | null; dateText: string | null } {
   const dateMatch = text.match(/(\d{1,2})月(\d{1,2})日(?:\([月火水木金土日]\))?(?:\s*(\d{1,2})時)?/);
   const eventMatch = text.match(/(予約開始|抽選|受付開始|販売開始|発売開始|発売|値下げ|再販|再登場)/);
@@ -79,8 +102,9 @@ export function extractDateAndEventFromText(
   }
   const month = Number(dateMatch[1]);
   const day = Number(dateMatch[2]);
+  const ref = reference ? new Date(reference) : new Date();
   return {
-    date: resolveMonthDay(month, day),
+    date: resolveMonthDay(month, day, Number.isNaN(ref.getTime()) ? new Date() : ref),
     eventType: eventMatch ? eventMatch[1] : null,
     dateText: dateMatch[0],
   };

@@ -25,7 +25,8 @@ export async function scrapeRarecheck(): Promise<ScrapedItem[]> {
       const category = article.find("footer.entry-meta a[rel='category']").first().text().trim();
       const postedAt = article.find("footer.entry-meta time.entry-date").first().attr("datetime") ?? null;
 
-      const { date, eventType, dateText } = extractDateAndEventFromText(title);
+      // 年の解決は**記事の投稿日**を基準にする（「今日」基準だと過去の記事の日付が翌年に倒れる）
+      const { date, eventType, dateText } = extractDateAndEventFromText(title, postedAt);
 
       const idMatch = href.match(/p=(\d+)/);
       const sourceId = idMatch ? idMatch[1] : href;

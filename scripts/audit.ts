@@ -313,6 +313,28 @@ async function main() {
     report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
   }
 
+  // (9c) 年が推測で入った疑いのある遠い未来の日付。
+  //
+  // 年の無い「4月28日」を**今日**基準で解決していたため、数ヶ月前の記事に書かれた過去の日付が
+  // 「まだ来ていない日」と解釈されて翌年に倒れていた（実測: rarecheck の掲載9件中7件が
+  // 2027年4〜6月＝実際は2026年）。基準点を記事の投稿日に直したが、**収集元のフィードから
+  // 消えた古い行は通常のスクレイプで洗われない**（ミス13）ので、残骸を機械で見つける。
+  // 日付テキストに年が書かれていないのに1年以上先を指しているものだけを対象にする
+  // （元から「2027年」と書いてある正当な先行情報は鳴らさない）。
+  {
+    const oneYear = new Date(today);
+    oneYear.setUTCFullYear(oneYear.getUTCFullYear() + 1);
+    const bad: string[] = [];
+    for (const r of shown) {
+      if (!r.eventDate || new Date(r.eventDate) <= oneYear) continue;
+      if (/\d{4}\s*年|\d{4}[/-]/.test(r.eventDateText ?? "")) continue; // 元テキストに年がある＝推測でない
+      bad.push(
+        `[${r.source} #${r.id}] ${new Date(r.eventDate).toISOString().slice(0, 10)}（元テキスト「${r.eventDateText ?? "-"}」に年が無い）${cleanListTitle(r.source, r.title).slice(0, 34)}`
+      );
+    }
+    report("date_year_guessed", "年が書かれていないのに1年以上先の日付になっている", "error", bad, baseline);
+  }
+
   // (9b) 期限切れの約束ラベル。「予約受付中 / 2023年4月発送予定」のように、**今から行動できると
   //      読めるラベル**なのに予定日が過ぎている行。発売・開催・抽選は過去日でも事実として
   //      正しい（発売済みは相場の価値がある）ので対象にしない。

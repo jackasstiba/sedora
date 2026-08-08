@@ -13,6 +13,9 @@
  */
 import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
+import { resolveMonthDay } from "../src/scrapers/util";
+
+const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 // 巡回で取り直した prizes（相場なし）に、既存の相場が引き継がれるか。
 // 実測: これが無かったため、付与直後に別件で scrape を回しただけで 67件すべての
@@ -67,6 +70,14 @@ const cases: Case[] = [
   { name: "相場は引き継ぐが賞の内容は新しい方を採る", fn: () => merged?.find((p) => p.label === "A賞")?.image, want: "a2.jpg" },
   { name: "元々相場が無い賞には足さない", fn: () => merged?.find((p) => p.label === "B賞")?.resalePrice, want: undefined },
   { name: "賞の構成が変わったら相場を付け替えない", fn: () => relabeled?.find((p) => p.label === "C賞")?.resalePrice, want: undefined },
+
+  // ── 年の無い日付の解決（実測10件が嘘の未来日になっていた型） ──────────
+  // 基準日は 2026-08-08。「基準にいちばん近い年」を選ぶ。
+  { name: "2ヶ月前の日付を翌年に化けさせない", fn: () => ymd(resolveMonthDay(6, 2, today)), want: "2026-06-02" },
+  { name: "4ヶ月前の日付も今年のまま", fn: () => ymd(resolveMonthDay(4, 28, today)), want: "2026-04-28" },
+  { name: "近い未来はそのまま今年", fn: () => ymd(resolveMonthDay(9, 20, today)), want: "2026-09-20" },
+  { name: "年またぎの先行情報は翌年", fn: () => ymd(resolveMonthDay(1, 7, today)), want: "2027-01-07" },
+  { name: "基準を記事の投稿日にすると当時の年で読む", fn: () => ymd(resolveMonthDay(4, 28, new Date(Date.UTC(2026, 3, 20)))), want: "2026-04-28" },
 ];
 
 let ng = 0;

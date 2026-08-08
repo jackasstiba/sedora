@@ -36,7 +36,9 @@ export async function scrapeChanneltono(): Promise<ScrapedItem[]> {
       const categories = extractCategoryNames(rawCategories);
       const subGenre = categories[1] || categories[0] || null;
 
-      const { date: eventDate, eventType, dateText } = extractDateAndEventFromText(title);
+      // 年の解決は**記事の投稿日**を基準にする。「今日」基準だと、数ヶ月前の記事に書かれた
+      // 過去の日付が「まだ来ていない日」と解釈されて翌年に倒れる（rarecheck で実測7件）。
+      const { date: eventDate, eventType, dateText } = extractDateAndEventFromText(title, date);
 
       items.push({
         source: "channeltono",

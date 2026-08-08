@@ -1,6 +1,6 @@
 // サーバー(Prisma)とクライアント(ブラウザ内フィルタ)で共有する、絞り込みの純粋ロジック。
 // prisma を import しないこと（クライアントバンドルに載せるため）。
-import { isStalePlan, todayJst } from "./date";
+import { isStalePlan, plannedDateFromText, todayJst } from "./date";
 import { parseYen } from "./margin";
 import { cleanListTitle, hasProductSegment } from "./title";
 
@@ -378,16 +378,43 @@ function dropStalePlans<T extends DedupeItem & { eventDateText?: string | null }
   return items.filter((it) => !isStalePlan(it.eventDate ?? null, it.eventDateText ?? null, today));
 }
 
+/**
+ * Xミラー（実況投稿を拾うソース）は、**日付が取れているものだけ**掲載する。
+ *
+ * 全1440件を通読して分かったこと: 粗はサイト全体に散っているのではなく、ここに集中していた。
+ * channeltono は303件（全体の21%）あるが **93%が日付を持たない**。「いつ買えるか」を約束する
+ * サイトで、5行に1行が日付未定の実況ツイート（「バンダイスピリッツ各種」「事前エントリー
+ * お忘れなくどうぞ」）という状態で、これが「雑・AI臭い」という第一印象をほぼ単独で作っていた。
+ * 構造化されたソース（figisland/ichiban_kuji/pokemon_goods 等）は日付なし率 0〜2% できれい。
+ *
+ * タイトル整形をいくら強化しても、元が実況文である以上この比率は変わらない（節分割まで
+ * 作ってなお残った）。**整形で直す問題ではなく、載せる基準の問題**だった。
+ * スクレイプ自体は維持する（相場・注目度の情報源としては使う）。掲載だけを絞る。
+ *
+ * ※ 同一ソース内のタイトル一致による自動集約は採用しない。実況タイトルは先頭が揃いやすく、
+ *   実測で anemoi / ステラソラ / BanG Dream / Re:ゼロ という**別商品4件が1グループに誤集約**された。
+ */
+const MIRROR_SOURCES_REQUIRING_DATE = new Set(["channeltono", "rarecheck"]);
+
+function dropUndatedMirrorPosts<T extends DedupeItem & { eventDateText?: string | null }>(items: T[]): T[] {
+  return items.filter(
+    (it) =>
+      !MIRROR_SOURCES_REQUIRING_DATE.has(it.source) ||
+      it.eventDate != null ||
+      plannedDateFromText(it.eventDateText ?? null) != null
+  );
+}
+
 /** 一覧に出す前の整理をまとめて適用（重複解消4種＋商品として成立していない投稿の除外）。
  *  ページごとに呼び出しが分かれると必ず適用漏れが出るので、表示用の取得は全てここを通す。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
-  return dropStalePlans(dropNonProductPosts(
+  return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
     dedupeSneakerCrossSource(
       dedupeSameSourceExact(
         dedupeWordOrderCrossSource(dedupeCrossSource(dedupeIdenticalTitle(items)))
       )
     )
-  ));
+  )));
 }
 
 // ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────
