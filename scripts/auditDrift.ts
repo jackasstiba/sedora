@@ -45,7 +45,13 @@ type SourceProfile = {
   markRate: number; // 「！」「【」等、告知記号を含むタイトルの割合
   genres: Record<string, number>;
 };
-type Profile = { updatedAt: string; sources: Record<string, SourceProfile> };
+type Profile = {
+  updatedAt: string;
+  sources: Record<string, SourceProfile>;
+  // ページ別の掲載件数。**参照点を sources と分ける**（下の runDrift のコメント参照）。
+  pages?: Record<string, number>;
+  pagesRunAt?: string;
+};
 
 function mean(xs: number[]): number {
   return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
@@ -145,7 +151,43 @@ function seededPick<T>(arr: T[], n: number, seed: number): T[] {
     return idx.slice(0, n).map((i) => arr[i]);
 }
 
-export function runDrift(shown: Row[], today: Date, update: boolean): void {
+/**
+ * ページ別件数の**直前の実行との差分**。
+ *
+ * なぜ参照点を sources と分けるか: sources は「収集元の書き方が日々どう変わったか」を見たいので
+ * 最後に受け入れた状態（--update-baseline 時）と比べる。対して pages で見たいのは
+ * **自分のコード変更が表示範囲を削っていないか**で、これは同じデータに対する前後比較でしか出ない。
+ * 毎回書き出して直前の実行と比べれば、データが同じ（同一セッション内）なら差分＝自分の変更の効果になる。
+ *
+ * 実測でこれが必要だと分かった経緯: 期限切れラベルの修正で /premium を 63→36件（-43%）に
+ * 削ってしまったが、既存の急減検査は閾値が「前回の50%未満」だったため**鳴らなかった**。
+ * ソース別プロファイルはページを見ていないので、こちらも「目立った変化なし」と言っていた。
+ * 判定（閾値）を厳しくするだけでは足りず、**判定しない観測**にページを入れる必要があった。
+ */
+function pageDriftLines(now: Record<string, number>, prev: Record<string, number> | undefined): string[] {
+  if (!prev) return [];
+  const lines: string[] = [];
+  for (const [name, n] of Object.entries(now)) {
+    const p = prev[name];
+    if (p == null) {
+      lines.push(`${name}: 新しいページ（${n}件）`);
+      continue;
+    }
+    const d = n - p;
+    // 件数が少ないページは1件動くだけで割合が跳ねるので、割合と実数の両方を条件にする。
+    if (Math.abs(d) >= 3 && Math.abs(d) >= p * 0.05)
+      lines.push(`${name}: ${p} → ${n}件（${d > 0 ? "+" : ""}${d} / ${Math.round((d / p) * 100)}%）`);
+  }
+  for (const name of Object.keys(prev)) if (now[name] == null) lines.push(`${name}: ページが消えた（前回 ${prev[name]}件）`);
+  return lines;
+}
+
+export function runDrift(
+  shown: Row[],
+  today: Date,
+  update: boolean,
+  pageCounts: Record<string, number> = {}
+): void {
   const prev = loadProfile();
   const now = buildProfile(shown);
 
@@ -170,6 +212,17 @@ export function runDrift(shown: Row[], today: Date, update: boolean): void {
     console.log(`  （前回の観測: ${prev.updatedAt}）`);
   }
 
+  console.log("\n── ページ別件数の差分（直前の実行と比較＝自分のコード変更が削った分が出る） ──");
+  {
+    const pl = pageDriftLines(pageCounts, prev?.pages);
+    if (!prev?.pages) console.log("  直前の実行の記録がありません（次回から比較します）");
+    else if (pl.length === 0) console.log(`  変化なし（${Object.keys(pageCounts).length}ページ）`);
+    else {
+      for (const l of pl) console.log(`  ⚡ ${l}`);
+      console.log(`  （直前の実行: ${prev.pagesRunAt ?? "?"}）`);
+    }
+  }
+
   console.log("\n── 整形が捨てた断片の頻出（新しい実況表現はここに先に現れる） ──");
   const frags = droppedFragments(shown);
   if (frags.length === 0) console.log("  なし");
@@ -189,9 +242,14 @@ export function runDrift(shown: Row[], today: Date, update: boolean): void {
     console.log(`  [${r.genre}/${r.eventType}/${date}] ${cleanListTitle(r.source, r.title)}${r.price ? ` ${r.price}` : ""}${hl}`);
   }
 
-  if (update) {
-    const profile: Profile = { updatedAt: new Date().toISOString(), sources: now };
-    fs.writeFileSync(PROFILE_PATH, JSON.stringify(profile, null, 2) + "\n");
-    console.log(`\nプロファイルを更新: ${PROFILE_PATH}`);
-  }
+  // ページ件数は**毎回**書き出す（直前の実行と比べるため）。ソース別プロファイルは
+  // --update-baseline のときだけ進める（受け入れた状態と比べるため）。参照点が違う。
+  const profile: Profile = {
+    updatedAt: update ? new Date().toISOString() : prev?.updatedAt ?? new Date().toISOString(),
+    sources: update ? now : prev?.sources ?? now,
+    pages: pageCounts,
+    pagesRunAt: new Date().toISOString(),
+  };
+  fs.writeFileSync(PROFILE_PATH, JSON.stringify(profile, null, 2) + "\n");
+  if (update) console.log(`\nプロファイルを更新: ${PROFILE_PATH}`);
 }

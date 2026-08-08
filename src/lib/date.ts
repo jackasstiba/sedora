@@ -143,14 +143,23 @@ export function isStalePlan(
 }
 
 /**
- * 「今から申し込める」と読める状態ラベル。**受付中という状態の主張だけ**に限る。
+ * 期限が過ぎたときに、**過去形として何と書けばよいか分かっている**ラベルだけの対応表。
+ *
+ * 「知っているものだけ書き換える」ことが要点。パターン一致（`/受付中/` 等）で広く拾うと、
+ * 知らない種類のものにこちらが勝手な断定を足す（実測: 合成テストで「エントリー受付中」が
+ * 「予約終了」に書き換わった。予約ではないのに予約と言い切っている）。
+ * 表に無いものは書き換えず、下の invariant に出して人間が決める。
  *
  * ※「予約開始」は入れない。予約開始日が過ぎている＝**受付が始まった**という意味で、
  *   期限切れではない（実測7件を誤って巻き込んだ）。
  * ※ 月までしか分かっていない表記（「2026年8月発送予定」）は plannedDateFromText が
  *   **その月の末日**に倒すので、月内はまだ過ぎたと判定しない。
  */
-const PROMISE_EVENT_TYPES = /予約受付中|受付中|^予約$/;
+const PAST_TENSE_LABELS: Record<string, string> = {
+  予約受付中: "予約終了",
+  予約: "予約終了",
+  登場予定: "登場済み",
+};
 
 /**
  * バッジに出す種別ラベル。**期限が過ぎたものを「予定」「受付中」と書かない。**
@@ -177,9 +186,7 @@ export function displayEventType(
     return planned !== null && planned.getTime() < today.getTime();
   })();
   if (!past) return eventType;
-  if (eventType === "登場予定") return "登場済み";
-  if (PROMISE_EVENT_TYPES.test(eventType)) return "予約終了";
-  return eventType;
+  return PAST_TENSE_LABELS[eventType] ?? eventType;
 }
 
 export function isStalePromise(

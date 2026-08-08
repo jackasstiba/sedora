@@ -600,16 +600,32 @@ async function main() {
     console.log(`(参考) 画像なし ${noImg.length}/${shown.length}件（${Math.round(rate * 100)}%）`);
   }
 
-  // (14) ページ件数の急変（前回比。ページが空になった・半減したのは事故）
+  // (14) ページ件数の急変（基準値比。ページが空になった・半減したのは事故）
+  //
+  // 閾値が「50%未満」だけだったため、**/premium を 63→36件（-43%）に削った変更が素通りした**。
+  // 看板機能の4割を失っても静かに通る設定は、無いのとあまり変わらない。
+  // → 半減は ERROR のまま、**2割減は WARN** に落として必ず目に入れる（WARN はラチェットが
+  //   かかるので「増えたら ERROR」＝放置できない）。
+  //
+  // ただし **/release の月ページは日が進むほど自然に縮む**（過ぎた予定が抜ける）ので、
+  //   2割減で毎日鳴らすと誤報になり網の信用を削る。月ページは半減のみを見る。
+  //   正常を故障と誤報しないための、条件を明示した分離（[[System/rules]]）。
   {
     const bad: string[] = [];
+    const shrink: string[] = [];
     for (const p of pages) {
       const prev = baseline.pages?.[p.name];
       if (prev == null || prev < 10) continue;
-      if (p.rows.length === 0) bad.push(`${p.name} が0件（前回${prev}件）`);
+      const naturallyShrinks = p.name.startsWith("/release/");
+      if (p.rows.length === 0) bad.push(`${p.name} が0件（基準${prev}件）`);
       else if (p.rows.length < prev * 0.5) bad.push(`${p.name} が急減 ${prev}→${p.rows.length}件`);
+      else if (!naturallyShrinks && p.rows.length < prev * 0.8)
+        shrink.push(
+          `${p.name} が ${prev}→${p.rows.length}件（${Math.round((p.rows.length / prev - 1) * 100)}%）`
+        );
     }
     report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
+    report("page_count_shrink", "ページの掲載件数が2割以上減った", "warn", shrink, baseline);
   }
 
   // (15) リンク到達性（--links のときだけ。各ソース2件を抜き取り）
@@ -654,7 +670,7 @@ async function main() {
   // ── 未知の型のための観測（判定はしない。差分と標本を出して人間が読む） ──
   // 不変条件は「私が過去に見た型」しか捕まえられない。ここは型を定義せずに
   // 「前回と違うところ」と「生の標本」を毎回出す枠。判定しないので ERROR にはしない。
-  runDrift(shown, today, UPDATE_BASELINE);
+  runDrift(shown, today, UPDATE_BASELINE, Object.fromEntries(pages.map((p) => [p.name, p.rows.length])));
 
   // ── 出力 ──
   const errors = findings.filter((f) => f.level === "error");
@@ -676,8 +692,17 @@ async function main() {
   for (const [k, v] of Object.entries(counts)) {
     if (nextChecks[k] == null || v < nextChecks[k] || ACCEPT) nextChecks[k] = v;
   }
+  // ページ件数の基準は「**最後に受け入れた状態**」であって過去最大ではない。
+  //
+  // 以前は Math.max で過去最大を保持していたが、掲載件数は指摘件数と違って自然に増減する
+  // （月ページは日が進めば縮む／ソースの記事が入れ替わる）。過去最大と比べ続けると、
+  // 一度ピークを打ったページは **--update-baseline を回しても下がらず、警告が永久に居座る**
+  // （実測: /genre/フィギュア がピーク330に対し実際218件で、-34%が毎回鳴り続ける状態だった）。
+  // 消せない警告は誤報と同じで、いずれ誰も読まなくなる。
+  // 「受け入れて隠す」危険は、判定しない観測（drift のページ別差分＝直前の実行との比較）が
+  // コード変更由来の減少をその場で出すことで別に担保する。
   const nextPages: Record<string, number> = { ...(baseline.pages ?? {}) };
-  for (const p of pages) nextPages[p.name] = Math.max(nextPages[p.name] ?? 0, p.rows.length);
+  for (const p of pages) nextPages[p.name] = p.rows.length;
 
   if (UPDATE_BASELINE) {
     fs.writeFileSync(
