@@ -19,7 +19,14 @@ import { prisma } from "../src/lib/prisma";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { cleanListTitle } from "../src/lib/title";
 import { normalizeForSearch } from "../src/lib/itemFilter";
+import { franchiseAliases } from "../src/lib/franchise";
 import { parseYen } from "../src/lib/margin";
+
+// 本文の代わりにログイン壁・同意画面を返すホスト。文字数は十分あるので「本文が取れた」と
+// 誤認し、識別語が1つも出ない＝要確認、という**中身を見ていない誤報**になる（実測: x_watch の
+// item.url は投稿ではなくアカウントページで、そもそも画面にも出していないリンクだった）。
+// 判定材料にならないものは「判定不能」に数える。0件と誤報は違う。
+const WALLED_HOSTS = /(^|\.)(x\.com|twitter\.com)$/i;
 
 const args = process.argv.slice(2);
 const perIdx = args.indexOf("--per-source");
@@ -43,6 +50,7 @@ function identityTokens(title: string): string[] {
 
 async function pageText(url: string): Promise<string | null> {
   try {
+    if (WALLED_HOSTS.test(new URL(url).hostname)) return null;
     const res = await fetch(url, {
       headers: { "User-Agent": "Mozilla/5.0 (compatible; SedoriRadar-audit/1.0)" },
       signal: AbortSignal.timeout(15000),
@@ -88,7 +96,12 @@ async function main() {
       const toks = identityTokens(title);
 
       // (1) 同一性: 識別語が2つ以上あるのに1つも本文に出てこない＝別物か陳腐化。
-      if (toks.length >= 2 && !toks.some((k) => text.includes(k))) {
+      //     ただし作品名は日英・カナで表記が割れる（こちらが「ONE PIECE カードゲーム」、
+      //     一次情報は「ワンピースカードゲーム」＝正しいリンクなのに要確認になっていた）。
+      //     既にある作品エイリアス表を同一性の判定にも通す。
+      const aliases = franchiseAliases(title).map(normalizeForSearch);
+      const matched = toks.some((k) => text.includes(k)) || aliases.some((a) => text.includes(a));
+      if (toks.length >= 2 && !matched) {
         findings.push({
           kind: "リンク先に商品が見当たらない",
           detail: `[${source} #${r.id}] 識別語 ${toks.join(" / ")} がどれも本文に無い → ${r.url}`,

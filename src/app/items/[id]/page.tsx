@@ -8,7 +8,7 @@ import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } fr
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
-import { countdown, eventDateLabel, isMonthPrecision } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { groupStoresByLabel, parseStoresJson } from "@/lib/stores";
@@ -153,7 +153,7 @@ export default async function ItemPage({ params }: Props) {
         <div className="flex flex-col gap-3">
           <div className="flex flex-wrap gap-2 text-xs">
             <span className="rounded-full bg-rose-600 px-2 py-0.5 font-semibold text-white">
-              {item.eventType}
+              {displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst())}
             </span>
             <Link
               href={`/genre/${encodeURIComponent(item.genre)}`}

@@ -13,7 +13,31 @@ type PokecaProduct = {
   releaseDate: string; // "2026年 7月31日（金）"
   priceTxt: string;
   link_detailPage: string;
+  link_pokemonCenter: string; // ポケモンセンターオンラインの商品ページ（周辺グッズはこちらだけ）
 };
+
+/**
+ * その商品を実際に見られるページ。
+ *
+ * 周辺グッズ（デッキシールド・デッキケース）は公式サイト側に個別ページが存在せず
+ * link_detailPage が空で、従来は全件が一覧 `/products/` に落ちていた（＝別商品なのに
+ * 同じリンク先。実測3件）。公式APIが持つ link_pokemonCenter がポケモンセンター
+ * オンラインの個別商品ページ（JANコード）なので、それを次点で使う。
+ * utm は配信元の計測パラメータなので落とす（同じ商品ページのまま）。
+ */
+function productUrl(p: PokecaProduct): string {
+  if (p.link_detailPage) return `${ORIGIN}${p.link_detailPage}`;
+  if (p.link_pokemonCenter) {
+    try {
+      const u = new URL(p.link_pokemonCenter);
+      for (const k of [...u.searchParams.keys()]) if (k.startsWith("utm_")) u.searchParams.delete(k);
+      return u.toString();
+    } catch {
+      return p.link_pokemonCenter;
+    }
+  }
+  return `${ORIGIN}/products/`;
+}
 
 async function fetchJson(url: string): Promise<{ products?: PokecaProduct[] }> {
   const res = await fetch(url, {
@@ -51,7 +75,7 @@ export async function scrapePokemonCard(): Promise<ScrapedItem[]> {
       eventDate: parseJapaneseFullDate(p.releaseDate || ""),
       eventDateText: p.releaseDate || null,
       price: p.priceTxt || null,
-      url: p.link_detailPage ? `${ORIGIN}${p.link_detailPage}` : `${ORIGIN}/products/`,
+      url: productUrl(p),
       imageUrl: p.tumbsImg ? `${ORIGIN}${p.tumbsImg}` : null,
     });
   }

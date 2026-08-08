@@ -21,7 +21,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "../src/lib/prisma";
-import { displayEventDateText, eventDateLabel, isMonthPrecision, todayJst } from "../src/lib/date";
+import { displayEventDateText, eventDateLabel, isMonthPrecision, isStalePromise, todayJst } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
@@ -302,6 +302,23 @@ async function main() {
       if (/[ぁ-ん一-龥][でにをはがのへ]$/.test(c) && /\s/.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
     report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
+  }
+
+  // (9b) 期限切れの約束ラベル。「予約受付中 / 2023年4月発送予定」のように、**今から行動できると
+  //      読めるラベル**なのに予定日が過ぎている行。発売・開催・抽選は過去日でも事実として
+  //      正しい（発売済みは相場の価値がある）ので対象にしない。
+  //      実測: 「予約受付中 / 2023年4月発送予定」171件 + 「登場予定 / 2ヶ月前」45件。
+  //      収集元の記事が当時の表記で凍結し、こちらも一度取得した行は詳細を再取得しない
+  //      設計だったため、通常の更新では永久に直らない型だった。
+  //      **画面に出る文字列で判定する**（displayEventType 経由）。データ側の eventType で
+  //      鳴らすと、表示層で直しているものまで鳴り続けて決して0にならない検査になる。
+  {
+    const bad: string[] = [];
+    for (const r of shown) {
+      if (isStalePromise(r.eventType, r.eventDate, r.eventDateText, today))
+        bad.push(`[${r.source} #${r.id}] ${r.eventType} / ${r.eventDateText ?? "-"} ${cleanListTitle(r.source, r.title)}`);
+    }
+    report("stale_promise", "期限が過ぎているのに「受付中/登場予定」と表示している", "error", bad, baseline);
   }
 
   // (9a) 文字そのものの異常。**目視では見つけられない層**なので機械でしか守れない。

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { countdown, eventDateLabel, isMonthPrecision } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
 import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
@@ -46,6 +46,8 @@ const EVENT_COLORS: Record<string, string> = {
   // 発売・登場系＝青
   発売: BLUE,
   登場予定: BLUE,
+  // 予定日が過ぎたもの＝もう買える状態。急かす色にはしない。
+  登場済み: "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200",
   再販: BLUE,
   // 開催（コラボ等）＝アンバー
   開催: AMBER,
@@ -64,6 +66,8 @@ export function ItemCard({ item }: { item: Item }) {
   const margin = computeMargin(item.price, item.marketPrice);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
   const displayTitle = cleanListTitle(item.source, item.title);
+  // 予定日が過ぎたものを「予定」と書かない（登場予定 → 登場済み）。
+  const eventLabel = displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst());
 
   return (
     <Link
@@ -83,9 +87,9 @@ export function ItemCard({ item }: { item: Item }) {
           <NoImage genre={item.genre} title={displayTitle} />
         )}
         <span
-          className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(item.eventType)}`}
+          className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(eventLabel)}`}
         >
-          {item.eventType}
+          {eventLabel}
         </span>
         {cd && (
           <span

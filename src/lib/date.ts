@@ -143,6 +143,62 @@ export function isStalePlan(
 }
 
 /**
+ * 「今から申し込める」と読める状態ラベル。**受付中という状態の主張だけ**に限る。
+ *
+ * ※「予約開始」は入れない。予約開始日が過ぎている＝**受付が始まった**という意味で、
+ *   期限切れではない（実測7件を誤って巻き込んだ）。
+ * ※ 月までしか分かっていない表記（「2026年8月発送予定」）は plannedDateFromText が
+ *   **その月の末日**に倒すので、月内はまだ過ぎたと判定しない。
+ */
+const PROMISE_EVENT_TYPES = /予約受付中|受付中|^予約$/;
+
+/**
+ * バッジに出す種別ラベル。**期限が過ぎたものを「予定」「受付中」と書かない。**
+ *
+ * 実測2種:
+ *  ・「登場予定 / 6月3日」45件 … 2ヶ月前の日付で「予定」。プライズは既にゲームセンターに
+ *    登場済みで、商品としては有効（むしろ今買える）。予定という言葉だけが事実と合っていない。
+ *  ・「予約受付中 / 2023年4月発送予定」171件 … 収集元の記事が当時の表記で凍結しており、
+ *    こちらも一度取得した行は詳細を再取得しない設計なので**通常の更新では永久に直らない**。
+ *    プレミアムバンダイの受注は発送月より前に締め切られるので、発送月が過ぎていれば
+ *    受付は終わっている。
+ *
+ * どちらも**掲載可否ではなく表記の問題**。落とすと、もう買えないからこそ価値がある
+ * プレ値情報まで消える（実測: /premium が 63→36 件に激減した）。ここでラベルだけを直す。
+ */
+export function displayEventType(
+  eventType: string,
+  eventDate: Date | string | null,
+  eventDateText: string | null,
+  today: Date
+): string {
+  const past = (() => {
+    const planned = plannedDateFromText(eventDateText) ?? (eventDate ? new Date(eventDate) : null);
+    return planned !== null && planned.getTime() < today.getTime();
+  })();
+  if (!past) return eventType;
+  if (eventType === "登場予定") return "登場済み";
+  if (PROMISE_EVENT_TYPES.test(eventType)) return "予約終了";
+  return eventType;
+}
+
+export function isStalePromise(
+  eventType: string | null,
+  eventDate: Date | string | null,
+  eventDateText: string | null,
+  today: Date
+): boolean {
+  if (!eventType) return false;
+  // **表示層で判定する。** データ側の eventType で鳴らすと、表示層で直しているものまで
+  // 鳴り続けて「決して0にならない検査」になる（8/7に踏んだ型）。画面に出る文字列を見れば、
+  // 表示の直し忘れだけが残る。
+  const shown = displayEventType(eventType, eventDate, eventDateText, today);
+  if (!/受付中|予定/.test(shown)) return false;
+  const planned = plannedDateFromText(eventDateText) ?? (eventDate ? new Date(eventDate) : null);
+  return planned !== null && planned.getTime() < today.getTime();
+}
+
+/**
  * 元の情報が「月までしか分かっていない」か（＝日を特定できていない）。
  *
  * 実測: プレミアムバンダイの79件は元テキストが「2026年9月発送予定」なのに、
