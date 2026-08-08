@@ -42,9 +42,27 @@ type Finding = { key: string; title: string; level: Level; items: string[]; base
 const findings: Finding[] = [];
 const counts: Record<string, number> = {};
 
-/** 検査結果を記録する。level="warn" でも baseline を超えたら ERROR に昇格する。 */
-function report(key: string, title: string, level: Level, items: string[], baseline: Baseline) {
+// 検査ごとの「母数」＝その検査が実際に何件を見たか。
+// **0件という報告は、母数を出さないと意味がない。** 見た上での0なのか、対象が消えていて
+// 何も見ていない0なのかが区別できないため（実測: 実況タイトルの検査4種は対象が
+// channeltono/rarecheck/x_watch 固定で、掲載基準を変えてこの3ソースが303→27件になった
+// 瞬間に、検査は「きれいだから0」ではなく「ほとんど見ていないから0」に変わっていた）。
+const coverage: Record<string, number> = {};
+
+/**
+ * 検査結果を記録する。level="warn" でも baseline を超えたら ERROR に昇格する。
+ * @param examined この検査が見た件数。既定は表示全件。**対象を絞る検査は必ず実数を渡すこと。**
+ */
+function report(
+  key: string,
+  title: string,
+  level: Level,
+  items: string[],
+  baseline: Baseline,
+  examined?: number
+) {
   counts[key] = items.length;
+  if (examined !== undefined) coverage[key] = examined;
   const base = baseline.checks?.[key] ?? null;
   if (!items.length) return;
   const exceeded = base !== null && items.length > base;
@@ -58,6 +76,8 @@ type Baseline = {
   // 指摘の件数ではなく「機能が生きている量」。0 になったら機能の死なので、
   // 前提条件を必要とする存在検査とは別に、単純な減少で捕まえる。
   metrics?: Record<string, number>;
+  // 検査ごとの母数（＝その検査が見た件数）。0 になったら検査が空振りしている。
+  coverage?: Record<string, number>;
 };
 function loadBaseline(): Baseline {
   try {
@@ -113,14 +133,26 @@ async function main() {
   //     対象は実況本文をタイトルにしているXミラー系だけ。他ソースは公式・記事の正規タイトルで、
   //     「くじを手にする戦いなのです！」のような正当な商品名を実況と誤検知してしまう。
   const MIRROR_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
+  const mirrorRows = shown.filter((r) => MIRROR_SOURCES.has(r.source));
   for (const { key, re } of NOISE_CHECKS) {
     const bad: string[] = [];
-    for (const r of shown) {
-      if (!MIRROR_SOURCES.has(r.source)) continue;
+    for (const r of mirrorRows) {
       const c = cleanListTitle(r.source, r.title);
       if (re.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
-    report(`title_noise:${key}`, `タイトルに実況が残る（${key}）`, "error", bad, baseline);
+    report(`title_noise:${key}`, `タイトルに実況が残る（${key}）`, "error", bad, baseline, mirrorRows.length);
+  }
+
+  // (1a) 収集元の区切り記号がタイトルに残っている。**ソースを問わない客観的な粗**。
+  //      実況の検査（上）はXミラー限定で正しい（他ソースに広げると「くじを手にする戦いなのです！」
+  //      のような正当な商品名を誤検知する。実測で確認済み）。一方これは、商品名にパイプが
+  //      出てこない以上どのソースでも誤り＝全件を母数にできる。
+  //      実測: トレカ速報の8件が「【MTG】| ホビット コレクター・ブースター」だった。
+  {
+    const bad = shown
+      .filter((r) => /[|｜]/.test(cleanListTitle(r.source, r.title)))
+      .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title)}`);
+    report("title_pipe_residue", "タイトルに収集元の区切り記号が残っている", "error", bad, baseline, shown.length);
   }
 
   // (1b) 商品名が特定できない投稿（ニュース/速報の実況記事）。掲載自体を見直す対象。
@@ -529,8 +561,8 @@ async function main() {
           suspect.push(`#${r.id} 1回${face}円 → ${x.label} ${x.resalePrice.toLocaleString()}円（${Math.round(x.resalePrice / face)}倍）`);
       }
     }
-    report("prizes_broken", "一番くじの各賞データが壊れている", "error", broken, baseline);
-    report("prizes_resale_suspect", "各賞の二次相場が疑わしい", "error", suspect, baseline);
+    report("prizes_broken", "一番くじの各賞データが壊れている", "error", broken, baseline, prizeItems);
+    report("prizes_resale_suspect", "各賞の二次相場が疑わしい", "error", suspect, baseline, prizeRows);
     // 存在検査: 機能が静かに死んでいないか。
     // ※ 駿河屋の中古は発売済みにしか付かないので、未発売くじで0件なのは正常。
     //   「発売から十分に経った」くじだけを母数にしないと、正常を故障と誤報する。
@@ -542,7 +574,7 @@ async function main() {
       ripeKuji.length >= 5 && ripeWithResale.length === 0
         ? [`発売から14日以上経ったくじ ${ripeKuji.length}件のどれにも二次相場が付いていない（scrape:kuji:prices が機能していない疑い）`]
         : [];
-    report("prizes_resale_missing", "各賞の二次相場が1件も付かない（機能が死んでいる疑い）", "error", dead, baseline);
+    report("prizes_resale_missing", "各賞の二次相場が1件も付かない（機能が死んでいる疑い）", "error", dead, baseline, ripeKuji.length);
 
     // **上の検査は前提条件（発売から14日以上のくじが5件以上）が満たされないと発火できない。**
     // 実測でその状態のまま、付与済みの二次相場が再スクレイプに潰されて 1件→0件 になったのを
@@ -564,8 +596,10 @@ async function main() {
   // (11) 受付中ストア（stores JSON）の構造
   {
     const bad: string[] = [];
+    let storeItems = 0;
     for (const r of all) {
       if (!r.stores) continue;
+      storeItems++;
       try {
         const arr = JSON.parse(r.stores);
         if (!Array.isArray(arr) || !arr.length) {
@@ -580,7 +614,7 @@ async function main() {
         bad.push(`#${r.id} stores の JSON が壊れている`);
       }
     }
-    report("stores_broken", "受付中ストアのデータが壊れている", "error", bad, baseline);
+    report("stores_broken", "受付中ストアのデータが壊れている", "error", bad, baseline, storeItems);
 
     // 表示上まったく同じ文字列が並ぶと、読む側には区別がつかない（人間なら一瞬で気付く）。
     // データが正しくても「表示が同じ」なら粗。カードの要約文と詳細のラベルの両方を見る。
@@ -713,6 +747,38 @@ async function main() {
   // ── 未知の型のための観測（判定はしない。差分と標本を出して人間が読む） ──
   // 不変条件は「私が過去に見た型」しか捕まえられない。ここは型を定義せずに
   // 「前回と違うところ」と「生の標本」を毎回出す枠。判定しないので ERROR にはしない。
+  // ── 検査自身の検査: 「見た上での0」か「何も見ていない0」かを区別する ──────────
+  //
+  // 検査は本番を壊さないので、対象が消えて空振りになっても誰も気付かない。実測でこれが起きた:
+  // 実況タイトルの検査4種は対象が channeltono/rarecheck/x_watch 固定だったので、掲載基準を
+  // 変えてこの3ソースが 303→27件 になった瞬間、「きれいだから0」ではなく
+  // 「ほとんど見ていないから0」に変わっていた。件数は同じ0なので出力からは区別できない。
+  // → 検査ごとの母数を記録し、**0になった／半分以下に減った**ものを落とす。
+  {
+    const declared = Object.keys(coverage);
+    const lost: string[] = [];
+    const shrunk: string[] = [];
+    for (const key of declared) {
+      const now = coverage[key];
+      const prev = baseline.coverage?.[key];
+      if (now === 0 && (prev ?? 0) > 0) lost.push(`${key}: 母数 ${prev} → 0件（検査が空振りしている）`);
+      else if (prev != null && prev >= 20 && now < prev * 0.5)
+        shrunk.push(`${key}: 母数 ${prev} → ${now}件（${Math.round((now / prev - 1) * 100)}%）`);
+    }
+    report("check_coverage_lost", "検査の母数が0になった（空振りしている）", "error", lost, baseline);
+    report("check_coverage_shrunk", "検査の母数が半分以下に減った", "warn", shrunk, baseline);
+    // 母数0の検査は「検査を持っている」だけで、実際には何も守っていない。
+    // 前回との比較（上）とは別に、**今この瞬間に空振りしているもの**を毎回名指しする。
+    // ラチェットで件数を固定するので、新しく空振りが増えたら ERROR になる。
+    const idle = declared.filter((k) => coverage[k] === 0).map((k) => `${k}: 母数0（この検査は今なにも守っていない）`);
+    report("check_idle", "母数0の検査がある（持っているだけで機能していない）", "warn", idle, baseline);
+    for (const key of declared) metrics[`coverage:${key}`] = coverage[key];
+    console.log(
+      `(参考) 母数を申告している検査 ${declared.length}種: ` +
+        declared.map((k) => `${k}=${coverage[k]}`).join("  ")
+    );
+  }
+
   runDrift(shown, today, UPDATE_BASELINE, Object.fromEntries(pages.map((p) => [p.name, p.rows.length])));
 
   // ── 出力 ──
@@ -756,6 +822,7 @@ async function main() {
           checks: nextChecks,
           pages: nextPages,
           metrics: { ...(baseline.metrics ?? {}), ...metrics },
+          coverage: { ...(baseline.coverage ?? {}), ...coverage },
         },
         null,
         2

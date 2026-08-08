@@ -16,6 +16,11 @@ const SOURCE_LABEL_TAIL = /\s*[｜|]\s*(?:抽選|販売|定価|情報)[^｜|]*$/
 // 先頭の「最新リーク｜」「リーク｜」等のラベル（snkrdunkのリーク記事）。
 const SOURCE_LABEL_HEAD = /^(?:最新)?リーク\s*[｜|]\s*/;
 
+// 収集元が使っている区切り記号の残骸。実測: トレカ速報の8件が
+// 「【MTG】| ホビット コレクター・ブースター 日本語版」と、タグ直後にパイプが残っていた。
+// 商品名にパイプは出てこないので、タグ直後のものだけ落とす（本文中のパイプは触らない）。
+const TAG_PIPE = /^(【[^】]{1,12}】)\s*[|｜]\s*/;
+
 // 開き括弧だけが余っているタイトル（実測: トレカ速報の12件が
 // 「『【MTG】プレイヤーズカードスリーブ … 《調和した大合唱》(80枚入り)」と、
 // 閉じない『で始まっていた）。文の始まりに閉じない括弧があるのは、人間なら一瞬で気付く粗。
@@ -62,7 +67,12 @@ const INVISIBLE = /[​-‍﻿⁠­]/g;
 /** 情報元由来の定型ラベル（末尾「｜抽選/販売/定価情報」・先頭「最新リーク｜」等）を表示用に除去する。全ソース対象。 */
 export function stripSourceLabel(title: string): string {
   const t = dropUnmatchedBrackets(
-    title.replace(INVISIBLE, "").replace(SOURCE_LABEL_TAIL, "").replace(SOURCE_LABEL_HEAD, "").trim()
+    title
+      .replace(INVISIBLE, "")
+      .replace(SOURCE_LABEL_TAIL, "")
+      .replace(SOURCE_LABEL_HEAD, "")
+      .replace(TAG_PIPE, "$1 ")
+      .trim()
   );
   return t.length >= 4 ? t : title.trim();
 }

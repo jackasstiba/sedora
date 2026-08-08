@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-08T10:49:35.842Z",
+  "updatedAt": "2026-08-08T11:44:56.046Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -27,7 +27,7 @@
     "source_stale_by_design": 2,
     "image_bad_url": 0,
     "image_missing_rate": 0,
-    "page_count_drop": 4,
+    "page_count_drop": 0,
     "stores_indistinguishable": 0,
     "unbalanced_bracket": 0,
     "date_text_not_event": 0,
@@ -39,20 +39,24 @@
     "date_fabricated_precision": 0,
     "shared_url": 0,
     "stale_promise": 0,
-    "page_count_shrink": 6,
+    "page_count_shrink": 0,
     "prizes_resale_lost": 0,
-    "date_year_guessed": 0
+    "date_year_guessed": 0,
+    "title_pipe_residue": 0,
+    "check_coverage_lost": 0,
+    "check_coverage_shrunk": 0,
+    "check_idle": 1
   },
   "pages": {
-    "/": 838,
-    "/premium": 63,
+    "/": 839,
+    "/premium": 92,
     "/lottery": 169,
     "/genre/フィギュア": 143,
     "/genre/トレカ": 139,
     "/genre/スニーカー": 25,
     "/genre/プラモ": 39,
     "/genre/一番くじ": 59,
-    "/genre/コラボ": 205,
+    "/genre/コラボ": 206,
     "/genre/ポケモン": 93,
     "/genre/ソフビ・アートトイ": 1,
     "/genre/家電・ゲーム機": 5,
@@ -80,6 +84,26 @@
     "/tcg/デジモンカード": 2
   },
   "metrics": {
-    "prizes_resale": 1
+    "prizes_resale": 1,
+    "coverage:title_noise:相場・在庫の実況": 25,
+    "coverage:title_noise:呼びかけ・感想の残り": 25,
+    "coverage:title_noise:店舗＋受付の告知": 25,
+    "coverage:title_noise:値引き・ポイント告知": 25,
+    "coverage:title_pipe_residue": 1162,
+    "coverage:prizes_broken": 67,
+    "coverage:prizes_resale_suspect": 438,
+    "coverage:prizes_resale_missing": 0,
+    "coverage:stores_broken": 14
+  },
+  "coverage": {
+    "title_noise:相場・在庫の実況": 25,
+    "title_noise:呼びかけ・感想の残り": 25,
+    "title_noise:店舗＋受付の告知": 25,
+    "title_noise:値引き・ポイント告知": 25,
+    "title_pipe_residue": 1162,
+    "prizes_broken": 67,
+    "prizes_resale_suspect": 438,
+    "prizes_resale_missing": 0,
+    "stores_broken": 14
   }
 }
