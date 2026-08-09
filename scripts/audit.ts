@@ -27,7 +27,8 @@ import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSear
 import { parseYen } from "../src/lib/margin";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
-import { runDrift } from "./auditDrift";
+import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
+import { readPreviousPageIds, runDrift } from "./auditDrift";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -71,6 +72,8 @@ function report(
 
 type Baseline = {
   updatedAt?: string;
+  // audit:facts のラチェット（このスクリプトは読まないが、書き戻しで消してはいけない）。
+  facts?: { checked: number; findings: number };
   checks?: Record<string, number>;
   pages?: Record<string, number>;
   // 指摘の件数ではなく「機能が生きている量」。0 になったら機能の死なので、
@@ -109,12 +112,17 @@ async function main() {
   const today = todayJst();
   const curYear = today.getUTCFullYear();
 
+  // 直前の実行のページ別 id は、runDrift がプロファイルを上書きする前に読む必要がある。
+  const prevPageIds = readPreviousPageIds();
+
   const pages = await loadDisplayedPages();
   // 全ページの和集合＝「サイトが今見せている全件」。個別の検査はこれに対して回す。
   const byId = new Map<number, Row>();
   for (const p of pages) for (const r of p.rows) byId.set(r.id, r);
   const shown = [...byId.values()];
   const all = await prisma.item.findMany({ take: 100000 });
+  // データの状態。同じデータのまま audit を回し直しても、ページ比較の参照点を進めないための鍵。
+  const dataFingerprint = `${all.length}:${Math.max(...all.map((r) => new Date(r.scrapedAt).getTime()), 0)}`;
 
   console.log("== ハツコレ データ監査 ==");
   console.log(`ページ ${pages.length}種 / 表示される実体 ${shown.length}件 / DB全体 ${all.length}件 / 基準日 ${today.toISOString().slice(0, 10)}`);
@@ -678,31 +686,74 @@ async function main() {
   }
 
   // (14) ページ件数の急変（基準値比。ページが空になった・半減したのは事故）
-  //
-  // 閾値が「50%未満」だけだったため、**/premium を 63→36件（-43%）に削った変更が素通りした**。
-  // 看板機能の4割を失っても静かに通る設定は、無いのとあまり変わらない。
-  // → 半減は ERROR のまま、**2割減は WARN** に落として必ず目に入れる（WARN はラチェットが
-  //   かかるので「増えたら ERROR」＝放置できない）。
-  //
-  // ただし **/release の月ページは日が進むほど自然に縮む**（過ぎた予定が抜ける）ので、
-  //   2割減で毎日鳴らすと誤報になり網の信用を削る。月ページは半減のみを見る。
-  //   正常を故障と誤報しないための、条件を明示した分離（[[System/rules]]）。
   {
     const bad: string[] = [];
-    const shrink: string[] = [];
     for (const p of pages) {
       const prev = baseline.pages?.[p.name];
       if (prev == null || prev < 10) continue;
-      const naturallyShrinks = p.name.startsWith("/release/");
       if (p.rows.length === 0) bad.push(`${p.name} が0件（基準${prev}件）`);
       else if (p.rows.length < prev * 0.5) bad.push(`${p.name} が急減 ${prev}→${p.rows.length}件`);
-      else if (!naturallyShrinks && p.rows.length < prev * 0.8)
-        shrink.push(
-          `${p.name} が ${prev}→${p.rows.length}件（${Math.round((p.rows.length / prev - 1) * 100)}%）`
-        );
     }
     report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
-    report("page_count_shrink", "ページの掲載件数が2割以上減った", "warn", shrink, baseline);
+  }
+
+  // (14b) **説明のつかない掲載減**。件数の割合ではなく、消えた行を1件ずつ理由に分ける。
+  //
+  // 経緯: ここは元々「基準値から2割以上減ったら WARN」という閾値だった。それが本日
+  // `/genre/スニーカー` 25→18件（-28%）で ERROR を出したが、中身は **8/7・8/8 発売の
+  // スニーカー10件が今日になって過去日になっただけ**＝暦が進んだ結果で、何も壊れていない。
+  // スニーカーは発売日当日に消える商品なので、この面では毎日鳴り続ける誤報になる。
+  //
+  // かといって閾値を緩めると、この検査が生まれた事件（自分のコード変更で /premium を
+  // 63→36件に削ったのに素通りした）を取り逃がす。**要るのは閾値の調整ではなく、
+  // 「暦のせいで減った分」と「説明のつかない減り方」を分けること**（src/lib/pageLoss.ts）。
+  //
+  // 参照点は **直前の実行**（audit-profile.json）。この検査が見たいのは収集元の日々の変化
+  // ではなく **自分のコード変更が表示範囲を削っていないか** なので、同じデータに対する
+  // 前後比較でしか出ない（[[System/rules]]「参照点も分ける」）。
+  {
+    const inDb = new Map(all.map((r) => [r.id, r]));
+    const bad: string[] = [];
+    let comparedPages = 0;
+    const explained: string[] = [];
+    for (const p of pages) {
+      const prevIds = prevPageIds.ids[p.name];
+      if (!prevIds || prevIds.length < 10) continue;
+      comparedPages++;
+      const nowIds = new Set(p.rows.map((r) => r.id));
+      const removed = prevIds
+        .filter((id) => !nowIds.has(id))
+        .map((id) => ({ id, inDb: inDb.has(id), eventDate: inDb.get(id)?.eventDate ?? null }));
+      if (!removed.length) continue;
+      const loss = classifyPageLoss(p.name, removed, today);
+      const n = isReportableLoss(prevIds.length, p.rows.length, loss.unexplained.length);
+      if (n > 0) {
+        bad.push(
+          `${p.name} が ${prevIds.length}→${p.rows.length}件。うち **説明のつかない消失 ${loss.unexplained.length}件**` +
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}）例: ${loss.unexplained
+              .slice(0, 5)
+              .map((id) => `#${id}`)
+              .join(" ")}`
+        );
+      } else if (loss.expired || loss.gone || loss.unexplained.length) {
+        explained.push(
+          `${p.name}: -${removed.length}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 説明なし ${loss.unexplained.length}）`
+        );
+      }
+    }
+    report("page_rows_unexplained_loss", "掲載が減ったが、暦でも収集元でも説明がつかない", "warn", bad, baseline, comparedPages);
+    console.log(
+      `(参考) 掲載減の内訳（直前の実行 ${prevPageIds.runAt ?? "記録なし"} と比較・${comparedPages}ページ）: ` +
+        (explained.length ? explained.join("  /  ") : "減少なし")
+    );
+    // 比較対象そのものが無い状態（初回・audit-profile.json を消した後）は、母数0＝この検査が
+    // 何も守っていないので下の check_idle で落ちる。それ自体は正しいが、原因が分からないと
+    // 「監査が壊れた」に見えるので、直し方をその場で書く。
+    if (comparedPages === 0)
+      console.log(
+        "         ↑ 比較する記録がありません（初回、または audit-profile.json を消した後）。" +
+          "もう一度 `npm run audit` を回すと、この検査は次回から有効になります。"
+      );
   }
 
   // (15) リンク到達性（--links のときだけ。各ソース2件を抜き取り）
@@ -779,7 +830,14 @@ async function main() {
     );
   }
 
-  runDrift(shown, today, UPDATE_BASELINE, Object.fromEntries(pages.map((p) => [p.name, p.rows.length])));
+  runDrift(
+    shown,
+    today,
+    UPDATE_BASELINE,
+    Object.fromEntries(pages.map((p) => [p.name, p.rows.length])),
+    Object.fromEntries(pages.map((p) => [p.name, p.rows.map((r) => r.id)])),
+    dataFingerprint
+  );
 
   // ── 出力 ──
   const errors = findings.filter((f) => f.level === "error");
@@ -818,6 +876,10 @@ async function main() {
       BASELINE_PATH,
       JSON.stringify(
         {
+          // ※ 既存キーを残す。このファイルは audit.ts だけの持ち物ではなく、
+          //   audit:facts もラチェット（facts.checked / facts.findings）を置く。
+          //   丸ごと組み立て直すと、もう一方の基準を黙って消してしまう。
+          ...baseline,
           updatedAt: new Date().toISOString(),
           checks: nextChecks,
           pages: nextPages,

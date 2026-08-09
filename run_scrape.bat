@@ -28,12 +28,15 @@ rem 壊れていても咎められずに残る＝空振りしたまま「0件」
 call :step "audit selftest"    "npm run audit:selftest"    || exit /b 1
 rem 表示品質の常設監査。ERROR があれば「きれい」と言えない。
 call :step "audit"             "npm run audit"             || exit /b 1
-rem 一次情報との突合（リンク先の本文と識別語・価格を照合）。要確認は WARN 相当。
+rem 一次情報との突合（リンク先の本文と識別語・価格を照合）。
+rem 2026-08-09まで、このステップは **1件も突合できなくても exit 0** だったので関門として
+rem 機能していなかった（`--source zzz` で再現）。空振り・母数の半減・要確認の増加で落ちる。
 call :step "audit facts"       "npm run audit:facts"       || exit /b 1
 
-echo [%date% %time%] 定例更新 正常終了 >> %LOG%
-echo 定例更新とチェックが正常に終わりました。
-echo 残り: npm run audit:page（描画監査。dev サーバか本番URLが要るので手動）
+echo [%date% %time%] データ更新と機械チェックは正常終了（描画監査は未実行） >> %LOG%
+echo データ更新と機械チェックは通りました。
+echo ただし **描画監査 npm run audit:page はまだ回していません**（dev サーバか本番URLが要るため）。
+echo 画面に出た文字列の検査はこれをやるまで済んでいません。「全部チェックした」と言わないこと。
 exit /b 0
 
 :step

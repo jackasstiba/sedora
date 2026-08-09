@@ -14,6 +14,8 @@
  *
  * 使い方: npm run audit:facts [-- --per-source 3] [-- --source figisland]
  */
+import fs from "node:fs";
+import path from "node:path";
 import * as cheerio from "cheerio";
 import { prisma } from "../src/lib/prisma";
 import { loadDisplayedItems } from "../src/lib/pages";
@@ -33,6 +35,30 @@ const perIdx = args.indexOf("--per-source");
 const PER_SOURCE = perIdx >= 0 ? Number(args[perIdx + 1]) || 3 : 3;
 const srcIdx = args.indexOf("--source");
 const ONLY_SOURCE = srcIdx >= 0 ? args[srcIdx + 1] : null;
+const UPDATE_BASELINE = args.includes("--update-baseline");
+
+// ── この検査自身が空振り・後退していないか ─────────────────────────────────
+// 2026-08-09 実測: このスクリプトは **1件も突合できなくても「要確認 0件」と出して exit 0**
+// だった（`--source zzz` で再現）。run_scrape.bat はこれを関門として呼んでいるので、
+// 構造上ぜったいに失敗しない関門＝無いのと同じだった。昨日 audit.ts で潰した
+// 「見た上での0か、何も見ていない0か」がここだけ手つかずで残っていた（[[System/rules]]）。
+// さらに指摘件数のラチェットも無く、要確認が 0→15 に増えても誰も止めない（WARN放置の再来）。
+// ラチェットの保管先は audit-baseline.json に揃える（監査の基準はこのファイル、という約束）。
+const BASELINE_PATH = path.join(process.cwd(), "audit-baseline.json");
+type FactsBaseline = { checked: number; findings: number };
+function loadFactsBaseline(): FactsBaseline | null {
+  try {
+    return (JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8")).facts as FactsBaseline) ?? null;
+  } catch {
+    return null;
+  }
+}
+function saveFactsBaseline(next: FactsBaseline) {
+  const cur = JSON.parse(fs.readFileSync(BASELINE_PATH, "utf8"));
+  cur.facts = next;
+  fs.writeFileSync(BASELINE_PATH, JSON.stringify(cur, null, 2) + "\n");
+  console.log(`\nbaseline(facts) を更新: ${BASELINE_PATH}`);
+}
 
 // 商品名に頻出する一般語。識別語から外さないと「フィギュア」だけで一致してしまう。
 const GENERIC =
@@ -139,11 +165,6 @@ async function main() {
       `日付が本文に見つかった割合 ${dateTotal ? Math.round((dateHit / dateTotal) * 100) : 0}%（参考・判定には使わない）`
   );
 
-  if (findings.length === 0) {
-    console.log("\n==== 一次情報の突合: 要確認 0件 ====");
-    await prisma.$disconnect();
-    return;
-  }
   const byKind = new Map<string, Finding[]>();
   for (const f of findings) (byKind.get(f.kind) ?? byKind.set(f.kind, []).get(f.kind)!).push(f);
   for (const [kind, arr] of byKind) {
@@ -151,8 +172,33 @@ async function main() {
     for (const f of arr.slice(0, 10)) console.log(`   - ${f.detail}`);
     if (arr.length > 10) console.log(`   … 他 ${arr.length - 10}件`);
   }
-  console.log(`\n==== 一次情報の突合: 要確認 ${findings.length}件（抜き取り ${checked}件中） ====`);
+  console.log(
+    findings.length === 0
+      ? `\n==== 一次情報の突合: 要確認 0件（${checked}件を突合した上での0件） ====`
+      : `\n==== 一次情報の突合: 要確認 ${findings.length}件（抜き取り ${checked}件中） ====`
+  );
+
+  // ── 検査自身の健全性（0件が「見た上での0」かを言えるようにする） ──
+  const base = loadFactsBaseline();
+  const problems: string[] = [];
+  if (rows.length > 0 && checked === 0)
+    problems.push(`突合対象 ${rows.length}件あるのに1件も本文を取れていない＝この検査は空振り（要確認0件に意味が無い）`);
+  else if (base && base.checked >= 10 && checked < base.checked * 0.5)
+    problems.push(`突合できた件数が ${base.checked} → ${checked}件に半減（収集元がブロックし始めた疑い。0件と同じで検査が痩せている）`);
+  if (base && findings.length > base.findings)
+    problems.push(`要確認が ${base.findings} → ${findings.length}件に増えた（増加は放置しない＝ラチェット）`);
+
+  if (problems.length) {
+    console.log("");
+    for (const p of problems) console.log(`【❌ERROR】${p}`);
+    console.log(
+      `\n（中身を1件ずつ確認した上で正当だと判断したときだけ \`npm run audit:facts -- --update-baseline\` で受け入れる）`
+    );
+  }
+  if (UPDATE_BASELINE) saveFactsBaseline({ checked, findings: findings.length });
+
   await prisma.$disconnect();
+  if (problems.length) process.exitCode = 1;
 }
 
 main();

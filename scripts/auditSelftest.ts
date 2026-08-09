@@ -13,6 +13,7 @@
  */
 import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
+import { classifyPageLoss, isReportableLoss, pageExcludesPast } from "../src/lib/pageLoss";
 import { resolveMonthDay } from "../src/scrapers/util";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
@@ -78,6 +79,52 @@ const cases: Case[] = [
   { name: "近い未来はそのまま今年", fn: () => ymd(resolveMonthDay(9, 20, today)), want: "2026-09-20" },
   { name: "年またぎの先行情報は翌年", fn: () => ymd(resolveMonthDay(1, 7, today)), want: "2027-01-07" },
   { name: "基準を記事の投稿日にすると当時の年で読む", fn: () => ymd(resolveMonthDay(4, 28, new Date(Date.UTC(2026, 3, 20)))), want: "2026-04-28" },
+
+  // ── 掲載減の理由分け（実測: 閾値だけの検査がスニーカーで毎日誤報していた型） ──────
+  // 「暦のせいで減った」を故障と鳴らさない／「コード変更で削った」を見逃さない、の両方を固定する。
+  {
+    // 過去日を載せないページ（/genre/*）で、発売日が昨日になった行が抜けた＝正常
+    name: "日付が過ぎて抜けた分は『説明済み』",
+    fn: () =>
+      classifyPageLoss("/genre/スニーカー", [{ id: 1, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 7)) }], today)
+        .expired,
+    want: 1,
+  },
+  {
+    name: "日付が過ぎて抜けた分は指摘に数えない",
+    fn: () =>
+      classifyPageLoss("/genre/スニーカー", [{ id: 1, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 7)) }], today)
+        .unexplained.length,
+    want: 0,
+  },
+  {
+    // /premium は**過去も意図して載せる**。ここで「日付が過ぎたから」を言い訳にすると、
+    // この検査が生まれた事件（/premium 63→36件）をまさに見逃す。
+    name: "/premium では過去日は消える理由にならない",
+    fn: () =>
+      classifyPageLoss("/premium", [{ id: 1, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 7)) }], today)
+        .unexplained.length,
+    want: 1,
+  },
+  { name: "/premium は過去日を載せるページ", fn: () => pageExcludesPast("/premium"), want: false },
+  { name: "/release/* も過去日を載せるページ", fn: () => pageExcludesPast("/release/2026-08"), want: false },
+  { name: "/genre/* は過去日を載せないページ", fn: () => pageExcludesPast("/genre/トレカ"), want: true },
+  {
+    name: "収集元から消えた行は『説明済み』",
+    fn: () => classifyPageLoss("/genre/トレカ", [{ id: 1, inDb: false, eventDate: null }], today).gone,
+    want: 1,
+  },
+  {
+    name: "日付未定のまま消えた行は説明がつかない",
+    fn: () => classifyPageLoss("/genre/トレカ", [{ id: 1, inDb: true, eventDate: null }], today).unexplained.length,
+    want: 1,
+  },
+  // 閾値: /premium 事件（63→36・説明なし27件）は鳴る／代表入れ替えの1〜2件は鳴らない
+  { name: "/premium 63→36件・説明なし27件は鳴る", fn: () => isReportableLoss(63, 36, 27), want: 27 },
+  { name: "総数が減っていなければ鳴らない（代表の入れ替え）", fn: () => isReportableLoss(63, 63, 2), want: 0 },
+  { name: "説明なしが2件だけなら鳴らない", fn: () => isReportableLoss(100, 98, 2), want: 0 },
+  // 「消えた行」には代表の入れ替えで入れ替わった分も混じるので、**実際に減った数**を上限にする
+  { name: "説明なしは実際に減った数を上限にする", fn: () => isReportableLoss(100, 90, 30), want: 10 },
 ];
 
 let ng = 0;

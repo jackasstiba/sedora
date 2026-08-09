@@ -50,7 +50,21 @@ type Profile = {
   sources: Record<string, SourceProfile>;
   // ページ別の掲載件数。**参照点を sources と分ける**（下の runDrift のコメント参照）。
   pages?: Record<string, number>;
+  // ページ別の掲載 id。件数だけでは「何件減ったか」しか分からず、**減った理由**が出ない。
+  // id を持っておくと、消えた行を1件ずつ DB に照会して「日付が過ぎた／収集元から消えた／
+  // 説明がつかない」に分けられる（src/lib/pageLoss.ts）。閾値を調整するのではなく、
+  // 暦のせいの減少を検査から外すために要る。
+  pageIds?: Record<string, number[]>;
   pagesRunAt?: string;
+  // 記録した時点の**データの状態**（件数＋最終取得時刻）。
+  //
+  // これが無かったせいで、2026-08-09 に実際に基準が汚れた: 検証のため /premium を
+  // わざと 105→85件に削って audit を回したところ、**その壊れた85件が「直前の実行」として
+  // 記録され**、次の実行は 85→105 の増加としか見えなくなった。つまり
+  // 「自分のコード変更の影響を見る」ための参照点を、**その実行自身が壊していた**。
+  // → データが変わっていないのに基準を進めない。同じデータのまま何度回しても、
+  //   比較の相手は「最後にデータが変わったときの状態」のまま固定される。
+  pagesFingerprint?: string;
 };
 
 function mean(xs: number[]): number {
@@ -84,6 +98,19 @@ function loadProfile(): Profile | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * 直前の実行のページ別 id を読む。**runDrift がファイルを上書きする前に呼ぶこと**
+ * （audit.ts は runDrift を最後に呼ぶので、それより前に読む）。
+ */
+export function readPreviousPageIds(): {
+  ids: Record<string, number[]>;
+  runAt: string | null;
+  fingerprint: string | null;
+} {
+  const p = loadProfile();
+  return { ids: p?.pageIds ?? {}, runAt: p?.pagesRunAt ?? null, fingerprint: p?.pagesFingerprint ?? null };
 }
 
 /** 比率の変化がしきい値を超えたものを文章にする。 */
@@ -186,7 +213,10 @@ export function runDrift(
   shown: Row[],
   today: Date,
   update: boolean,
-  pageCounts: Record<string, number> = {}
+  pageCounts: Record<string, number> = {},
+  pageIds: Record<string, number[]> = {},
+  /** データの状態（件数＋最終取得時刻）。同じなら基準を進めない。 */
+  fingerprint = ""
 ): void {
   const prev = loadProfile();
   const now = buildProfile(shown);
@@ -246,13 +276,26 @@ export function runDrift(
     console.log(`  [${r.genre}/${type}/${date}] ${cleanListTitle(r.source, r.title)}${r.price ? ` ${r.price}` : ""}${hl}`);
   }
 
-  // ページ件数は**毎回**書き出す（直前の実行と比べるため）。ソース別プロファイルは
-  // --update-baseline のときだけ進める（受け入れた状態と比べるため）。参照点が違う。
+  // ソース別プロファイルは --update-baseline のときだけ進める（受け入れた状態と比べるため）。
+  //
+  // ページ側は「直前の実行」と比べたいが、**毎回無条件に書き出してはいけない**。
+  // 同じデータのまま audit を2回回すと、2回目は自分自身と比べることになり差分が消える。
+  // さらに悪いことに、壊れた版で1回回すとその壊れた状態が基準になってしまう（実測）。
+  // → **データが変わったとき**（＝新しいスクレイプの後）か、明示的に受け入れたときだけ進める。
+  const dataChanged = prev?.pagesFingerprint !== fingerprint;
+  const advancePages = update || dataChanged || !prev?.pageIds;
+  if (!advancePages)
+    console.log(
+      `\n（ページ比較の基準は据え置き: データが前回の観測から変わっていないため、` +
+        `比較の相手は ${prev?.pagesRunAt ?? "?"} 時点のまま）`
+    );
   const profile: Profile = {
     updatedAt: update ? new Date().toISOString() : prev?.updatedAt ?? new Date().toISOString(),
     sources: update ? now : prev?.sources ?? now,
-    pages: pageCounts,
-    pagesRunAt: new Date().toISOString(),
+    pages: advancePages ? pageCounts : prev?.pages,
+    pageIds: advancePages ? pageIds : prev?.pageIds,
+    pagesRunAt: advancePages ? new Date().toISOString() : prev?.pagesRunAt,
+    pagesFingerprint: advancePages ? fingerprint : prev?.pagesFingerprint,
   };
   fs.writeFileSync(PROFILE_PATH, JSON.stringify(profile, null, 2) + "\n");
   if (update) console.log(`\nプロファイルを更新: ${PROFILE_PATH}`);
