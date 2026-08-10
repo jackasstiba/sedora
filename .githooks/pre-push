@@ -1,0 +1,16 @@
+#!/bin/sh
+# push する差分そのもので lint / 型 / build が通ることを確かめる。
+#
+# 由来 = ミス8（2026-08-03）: build を通したあとにファイルを1つ追加して push し、
+# そのファイルの型エラーで Vercel の build が失敗（本番は旧版を配信し続けた）。
+# 「前に通した」ではなく「いまの全差分で通る」を、記憶ではなく仕組みで担保する。
+#
+# 一時的に飛ばしたいときだけ: git push --no-verify
+echo "[pre-push] npm run verify (lint + typecheck + build)"
+npm run verify || {
+  echo ""
+  echo "[pre-push] 失敗したので push を中止しました。"
+  echo "  直してから push し直してください（どうしても飛ばすなら git push --no-verify）。"
+  exit 1
+}
+echo "[pre-push] OK"

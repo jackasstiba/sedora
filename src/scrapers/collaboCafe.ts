@@ -1,6 +1,9 @@
 import { ScrapedItem } from "./types";
 import {
   analyzeCollab,
+  extractMapUrl,
+  extractVenues,
+  formatVenueStores,
   extractArticleBody,
   extractOfficialItems,
   extractOfficialSale,
@@ -160,6 +163,10 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
         }
         await sleep(300);
       }
+
+      // 「どこへ行けば買えるか」＝開催店舗＋地図。コラボ/ポップアップ/カフェは会場限定なので、
+      // 会場が分からないと行きようがない（監査 no_purchase_route が拾っていた最大の塊）。
+      item.stores = formatVenueStores(extractVenues(html), extractMapUrl(html));
 
       // 「何が売られるか」＝賞品名（記事）＋価格帯（公式）を合成して highlights に。
       const parts = [enr.highlights, saleText].filter(Boolean);

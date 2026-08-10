@@ -24,12 +24,15 @@
     "migrate:stores": "node --env-file-if-exists=.env --import tsx scripts/migrateStores.ts",
     "ingest:x": "node --env-file-if-exists=.env --import tsx scripts/ingestXWatch.ts",
     "x:audit": "node --env-file-if-exists=.env --import tsx scripts/x_watch/audit.ts",
-  "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
+    "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "migrate:events": "node --env-file-if-exists=.env --import tsx scripts/migrateEvents.ts",
     "migrate:genre": "node --env-file-if-exists=.env --import tsx scripts/migrateGenreVocab.ts",
     "db:alter": "node --env-file-if-exists=.env --import tsx scripts/applyAlter.ts",
-    "db:deploy": "prisma migrate deploy"
+    "db:deploy": "prisma migrate deploy",
+    "verify": "npm run lint && tsc --noEmit && npm run build",
+    "hooks:install": "git config core.hooksPath .githooks",
+    "deploy:check": "node --env-file-if-exists=.env --import tsx scripts/deployCheck.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

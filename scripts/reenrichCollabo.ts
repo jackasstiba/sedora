@@ -15,6 +15,9 @@ import {
   extractOfficialItems,
   extractOfficialSale,
   extractOfficialUrl,
+  extractMapUrl,
+  extractVenues,
+  formatVenueStores,
   formatOfficialItems,
   formatSale,
   pickVerifiedEventDate,
@@ -79,11 +82,14 @@ async function main() {
         await sleep(250);
       }
       const highlights = [enr.highlights, saleText].filter(Boolean).join(" ｜ ") || null;
+      // 開催店舗＋地図。スクレイパー本体は収集元の一覧に今出ている記事しか回らないので、
+      // 既に載っている（＝表示中の）過去記事は**ここでしか埋まらない**。
+      const stores = formatVenueStores(extractVenues(html), extractMapUrl(html));
 
-      if (highlights !== it.highlights || enr.hasLottery !== it.hasLottery) {
+      if (highlights !== it.highlights || enr.hasLottery !== it.hasLottery || stores !== it.stores) {
         await prisma.item.update({
           where: { id: it.id },
-          data: { highlights, hasLottery: enr.hasLottery },
+          data: { highlights, hasLottery: enr.hasLottery, stores },
         });
         changed++;
         console.log(`  #${it.id}: hasLottery ${it.hasLottery}→${enr.hasLottery} | ${highlights ?? "(null)"}`);

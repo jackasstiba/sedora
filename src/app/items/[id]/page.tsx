@@ -11,7 +11,7 @@ import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
-import { groupStoresByLabel, parseStoresJson } from "@/lib/stores";
+import { groupStoresByLabel, parseStoresJson, storeSectionCopy } from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -77,6 +77,8 @@ export default async function ItemPage({ params }: Props) {
   const storeList = parseStoresJson(item.stores);
   // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
   const storeGroups = storeList ? groupStoresByLabel(storeList) : [];
+  // 節の見出し・説明・ボタン文言は中身に合わせる（コラボに「応募ページ」と書かない）。
+  const storeCopy = storeSectionCopy(item.source);
 
   // Product構造化データの必須要件はoffers/review/aggregateRatingのいずれかをGoogleが要求する。
   // レビュー・評価は実データが無いので付けない（推測値は約束しない方針）。定価(price)は裏取り済みの
@@ -315,20 +317,20 @@ export default async function ItemPage({ params }: Props) {
         </div>
       </div>
 
-      {/* 家電・ゲーム機の「今まさに受付中の各小売（公式）」一覧。抽選/予約応募の一次ソースへ直リンク。 */}
+      {/* 「どこへ行けば/どこで応募すれば買えるか」。家電・ゲーム機は各小売の応募ページ、
+          コラボ/ポップアップ/カフェは開催店舗（会場限定なのでここが買える唯一の場所）。 */}
       {storeList && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-            🎯 抽選・予約 受付中ストア（公式 {storeGroups.length}店・応募ページ {storeList.length}件）
+            {storeCopy.heading}（{storeGroups.length}
+            {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${storeList.length}件`}）
           </h2>
-          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
-            現在応募・予約を受付中のストアです。応募条件（購入履歴・会員登録など）・在庫・締切は各公式ページでご確認ください。
-          </p>
+          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">{storeCopy.note}</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {storeGroups.flatMap((g) =>
               g.entries.map((s, i) => (
               <li
-                key={s.name + s.url}
+                key={s.name + (s.url ?? "")}
                 className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
               >
                 <div className="min-w-0">
@@ -336,7 +338,7 @@ export default async function ItemPage({ params }: Props) {
                     {s.name}
                     {/* 同じ店が別の応募ページを複数開くことがある。同じ行が2つ並ぶと区別が
                         つかないので、何口目かを事実として添える（推測は足さない）。 */}
-                    {g.entries.length > 1 && (
+                    {g.entries.length > 1 && item.source !== "collabo_cafe" && (
                       <span className="ml-1 text-xs font-normal text-neutral-500 dark:text-neutral-400">
                         応募ページ {i + 1}/{g.entries.length}
                       </span>
@@ -358,15 +360,19 @@ export default async function ItemPage({ params }: Props) {
                     </p>
                   )}
                 </div>
-                <OutboundLink
-                  href={s.url}
-                  kind="official"
-                  source={item.source}
-                  itemId={item.id}
-                  className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
-                >
-                  応募ページ →
-                </OutboundLink>
+                {/* URLを持たない行がある（複数店舗開催では、記事の地図リンクがどの店の
+                    ものか特定できないので紐づけない）。無い時はボタンを出さない。 */}
+                {s.url && (
+                  <OutboundLink
+                    href={s.url}
+                    kind="official"
+                    source={item.source}
+                    itemId={item.id}
+                    className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
+                  >
+                    {storeCopy.button}
+                  </OutboundLink>
+                )}
               </li>
               ))
             )}

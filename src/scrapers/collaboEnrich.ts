@@ -293,3 +293,84 @@ export function formatOfficialItems(items: { name: string; price: number }[]): s
     .map(([k, b]) => `${k}${b.min === b.max ? yen(b.min) : `${yen(b.min)}〜${yen(b.max)}`}`);
   return `公式販売: ${parts.join(" / ")}`;
 }
+
+// ── 開催店舗・地図（「どこへ行けば買えるか」） ────────────────────────────────
+//
+// コラボ/ポップアップ/カフェは、通販の商品と違って**行くべき場所**が本体。
+// 監査(no_purchase_route)で「購入導線が1本も無い」102件のうち大半がこれだった。
+// 楽天検索を出しても意味が無い（会場限定なので買えない）のに、会場名も地図も出していなかった。
+//
+// 収集元の記事は末尾に構造化テーブルを持っている:
+//   <table class="cc-table">
+//     <tr><th>開催場所</th><td>DECOTTO by animate cafe</td></tr>
+//     <tr><th>開催場所</th><td>【東京/原宿】原宿店<br />【大阪/梅田】大阪梅田店…</td></tr>
+//     <tr><th>アクセス・地図</th><td><a href="https://maps.app.goo.gl/…">Googleマップ</a>で見る</td></tr>
+//   </table>
+// ここは記事本文の散文ではなく**編集部が入れた項目**なので、推測なしにそのまま読める。
+//
+// ※ 郵便番号つきの「住所」は収集元にもGoogleマップのHTML（JS描画）にも無い。
+//   持っていないものを書かない代わりに、**会場名と地図リンク**（＝場所を特定できる事実）を出す。
+
+/** cc-table から <th>ラベル</th><td>…</td> の td 部分（生HTML）を取り出す。 */
+function ccTableCell(html: string, label: string): string | null {
+  // String.raw で組む。通常のテンプレートリテラルだと `\s` が JS のエスケープとして
+  // 潰れて（"s" になって）**別物の正規表現が黙って出来上がる**。実際これで最初の実装は
+  // 全482件から1件も取れず、エラーも出なかった（0件という結果だけが残る型）。
+  const re = new RegExp(
+    String.raw`<th[^>]*>\s*` + label + String.raw`\s*</th>\s*<td[^>]*>([\s\S]*?)</td>`,
+    "i"
+  );
+  return html.match(re)?.[1] ?? null;
+}
+
+const decodeEnt = (s: string): string =>
+  s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#0?39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+
+/** 「アクセス・地図」の地図URL（Googleマップ）。無ければ null。 */
+export function extractMapUrl(html: string): string | null {
+  const cell = ccTableCell(html, "アクセス・地図");
+  if (!cell) return null;
+  const href = cell.match(/href="(https?:\/\/[^"]+)"/)?.[1];
+  if (!href) return null;
+  return /(?:maps\.app\.goo\.gl|google\.[a-z.]+\/maps|goo\.gl\/maps)/.test(href) ? href : null;
+}
+
+/** 「開催場所」の会場名。<br> 区切りの複数店舗にも対応する。取れなければ空配列。 */
+export function extractVenues(html: string): string[] {
+  const cell = ccTableCell(html, "開催場所");
+  if (!cell) return [];
+  return cell
+    .split(/<br\s*\/?>/i)
+    .map((s) => decodeEnt(s.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim())
+    .filter((s) => s.length >= 2 && s.length <= 80);
+}
+
+/**
+ * 会場名の先頭 `【東京/原宿】` から都道府県を読む。**書いてある時だけ**返す
+ * （店名から所在地を推測しない。「新宿店」が新宿にあるとは限らないため）。
+ */
+export function venuePrefecture(name: string): string | null {
+  return name.match(/^【\s*([^/／\]】]+)\s*[/／]/)?.[1]?.trim() ?? null;
+}
+
+/** 開催店舗を stores 列（JSON）の形に整える。地図URLは会場が1つのときだけ紐づける
+ *  （複数店舗のとき記事の地図リンクは1つしか無く、どの店のものか特定できないため）。 */
+export function formatVenueStores(venues: string[], mapUrl: string | null): string | null {
+  if (!venues.length) return null;
+  const single = venues.length === 1;
+  return JSON.stringify(
+    venues.map((name) => ({
+      name,
+      url: single ? mapUrl : null,
+      form: venuePrefecture(name),
+      when: null,
+      note: null,
+    }))
+  );
+}

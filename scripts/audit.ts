@@ -27,6 +27,7 @@ import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSear
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
+import { parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
@@ -616,8 +617,13 @@ async function main() {
           continue;
         }
         for (const s of arr) {
-          if (!s?.name || !s?.url) bad.push(`#${r.id} ストアの name/url 欠落`);
-          else if (!/^https?:\/\//.test(s.url)) bad.push(`#${r.id} 不正なストアURL ${s.url}`);
+          // url は任意（2026-08-10〜）。複数店舗開催のコラボは、収集元の地図リンクが1つしか
+          // 無くどの店のものか特定できないので**あえて紐づけない**。名前が無い行だけが壊れ。
+          // ※ ここを直さないまま stores を拡張したら、この検査が260件を「壊れている」と
+          //   誤報した（直した層＝表示、検査した層＝データ、のズレ。ミス14と同型）。
+          if (!s?.name) bad.push(`#${r.id} ストアの name 欠落`);
+          else if (s.url != null && !/^https?:\/\//.test(s.url))
+            bad.push(`#${r.id} 不正なストアURL ${s.url}`);
         }
       } catch {
         bad.push(`#${r.id} stores の JSON が壊れている`);
@@ -834,8 +840,14 @@ async function main() {
   // 掲載の目的は「いつ買えるか」を伝えることなので、**どこで買えるかが1本も無い行は機能不全**。
   // 判定は詳細ページのボタン生成と同じ条件（src/lib/outbound.ts）で行う＝画面に出る事実を見る。
   {
+    // 「開催店舗」を持つコラボ/ポップアップは行き止まりではない（会場限定なので、
+    // 通販リンクではなく**行く場所**が導線）。stores を導線として数える。
     const deadEnd = shown.filter(
-      (r) => !isOfficialUrl(r.source) && !r.officialUrl && !hasSearchableTitle(r.source)
+      (r) =>
+        !isOfficialUrl(r.source) &&
+        !r.officialUrl &&
+        !hasSearchableTitle(r.source) &&
+        !parseStoresJson(r.stores)
     );
     const rate = shown.length ? deadEnd.length / shown.length : 0;
     report(
@@ -852,7 +864,7 @@ async function main() {
     for (const r of shown) {
       const e = bySrc.get(r.source) ?? { n: 0, withOfficial: 0 };
       e.n++;
-      if (isOfficialUrl(r.source) || r.officialUrl) e.withOfficial++;
+      if (isOfficialUrl(r.source) || r.officialUrl || parseStoresJson(r.stores)) e.withOfficial++;
       bySrc.set(r.source, e);
     }
     const lostRoute: string[] = [];
