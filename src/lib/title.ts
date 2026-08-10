@@ -326,7 +326,9 @@ export function hasProductSegment(source: string, title: string): boolean {
   if (NON_PRODUCT_POST.test(title)) return false;
   const base = stripDateNoticeTail(stripSourceLabel(title));
   if (source === "rarecheck" && firstBracketed(base)) return true;
-  return pickProductBlock(base) !== null;
+  const block = pickProductBlock(base);
+  // 生タイトルだけでなく、**画面に出る文字列**でも判定する（カード名が呼びかけになる型）。
+  return block !== null && !NON_PRODUCT_POST.test(block);
 }
 
 /** 開発用: 節分解と判定結果を可視化する（表示には使わない）。 */
@@ -396,8 +398,12 @@ function firstBracketed(title: string): string | null {
 // 読み手への呼びかけだけで、商品を1つも名指ししていない投稿。
 // 「事前エントリー」はカタカナを含むので looksProduct を通ってしまうが、商品名ではない
 // （実測: 「事前エントリーお忘れなくどうぞ」が1件そのまま掲載されていた）。
-// 先頭がこれで始まる＝投稿全体が呼びかけ、とみなす。
-const NON_PRODUCT_POST = /復活更新|^\s*事前エントリー/;
+//
+// 2026-08-10: この判定は**投稿の先頭**にしか当てておらず、「もうすぐ8月10日0時より楽天カード
+// 4倍デーが開催！…　事前エントリーお忘れなくどうぞ」が**トップの1画面目**にカード名
+// 「事前エントリーお忘れなくどうぞ」で出ていた。前回の直しが、その時たまたま見た1件の
+// 形（先頭にある）に合わせて狭すぎた。位置に依らず見る＋**表示に選ばれた節**にも当てる。
+const NON_PRODUCT_POST = /復活更新|事前エントリー|お忘れなく/;
 
 // 明確に実況コメントと断定できる節の兆候。これに該当する節は、カタカナを含んで
 // looksProduct が真になっても（例:「ヤフオクめちゃ高騰の復刻です」の"ヤフオク"）実況と見なして剥がす。

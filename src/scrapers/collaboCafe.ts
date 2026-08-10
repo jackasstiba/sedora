@@ -148,7 +148,9 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
       // 一次情報（公式）へ飛んで販売商品を取る（best-effort・12秒でアボート）。
       // 対応ドメイン（rakuspa等）は商品名＋個別価格をカテゴリ正規化して要約、
       // 未対応ドメインは価格帯のみにフォールバック。
-      const official = extractOfficialUrl(html);
+      // 「開催」＝カフェ/ポップアップ/展示のイベント記事。公式は会場・キャンペーンのページで
+      // あって1点の商品ページではないので、個別商品ページは候補から外す（extractOfficialUrl）。
+      const official = extractOfficialUrl(html, { allowSingleProduct: item.eventType !== "開催" });
       item.officialUrl = official;
       let saleText: string | null = null;
       if (official) {

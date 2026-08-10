@@ -19,6 +19,16 @@ import { computeMargin, isPerDrawFee } from "../src/lib/margin";
 import { eventDateHeading } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
+import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import { cleanListTitle, hasProductSegment } from "../src/lib/title";
+
+// 実物と同じ並び（記事末尾に通販の商品リンクが来る）を再現した最小の記事HTML。
+const EVENT_ARTICLE_HTML =
+  '<div id="single__container">' +
+  '<p>ウマ娘 × KFC コラボ開催!</p>' +
+  '<a href="https://www.kfc.co.jp/campaign/umamusume">公式サイト</a>' +
+  '<a href="https://anime-store.jp/products/4934054076093">関連グッズ</a>' +
+  "</div>";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -175,6 +185,76 @@ const cases: Case[] = [
     want: "ファミリーマート、書店、ホビーショップ",
   },
   { name: "取扱店が無ければ捏造しない", fn: () => extractKujiStores('<div class="detail glBox"><ul><li>■発売日：8月29日</li></ul></div>'), want: null },
+
+  // (f) 公式リンクの選び方（2026-08-10 実測の誤誘導）。
+  //     イベント記事の本文末尾には無関係な通販商品リンクが並ぶので、URL の見た目だけで
+  //     選ぶと「ウマ娘 × KFC」→ ¥23,100 のフィギュア商品ページ、が起きる。
+  {
+    name: "イベント記事では個別商品ページを公式にしない（次点の会場ページを選ぶ）",
+    fn: () =>
+      extractOfficialUrl(EVENT_ARTICLE_HTML, { allowSingleProduct: false }),
+    want: "https://www.kfc.co.jp/campaign/umamusume",
+  },
+  {
+    name: "グッズ発売記事では個別商品ページを公式にしてよい",
+    fn: () =>
+      extractOfficialUrl('<div id="single__container"><a href="https://anime-store.jp/products/4934054076093">商品</a></div>', {
+        allowSingleProduct: true,
+      }),
+    want: "https://anime-store.jp/products/4934054076093",
+  },
+  {
+    name: "イベント記事で個別商品ページしか無ければ公式リンクを出さない",
+    fn: () =>
+      extractOfficialUrl('<div id="single__container"><a href="https://anime-store.jp/products/4934054076093">商品</a></div>', {
+        allowSingleProduct: false,
+      }),
+    want: null,
+  },
+  // SNS除外の正規表現に境界が無く、末尾が x.com のドメインを丸ごと捨てていた（実測）。
+  {
+    name: "末尾が x.com のドメインはSNS扱いしない",
+    fn: () => extractOfficialUrl('<div id="single__container"><a href="https://sqex.com/campaign/y">公式</a></div>'),
+    want: "https://sqex.com/campaign/y",
+  },
+  { name: "本物の x.com は除外する", fn: () => extractOfficialUrl('<div id="single__container"><a href="https://x.com/foo/status/1">投稿</a></div>'), want: null },
+
+  // (g) 商品を1つも名指ししていない投稿は掲載しない。判定は**位置に依らず**、かつ
+  //     表示に選ばれた節に対しても行う（実測: 「…お買い物マラソン開催中です　事前エントリー
+  //     お忘れなくどうぞ」がトップの1画面目にカード名「事前エントリーお忘れなくどうぞ」で出ていた）。
+  {
+    name: "呼びかけだけの投稿は掲載しない（先頭でなくても）",
+    fn: () =>
+      hasProductSegment(
+        "channeltono",
+        "もうすぐ8月10日0時より楽天カード4倍デーが開催！さらに楽天お買い物マラソン開催中です　事前エントリーお忘れなくどうぞ"
+      ),
+    want: false,
+  },
+  {
+    name: "商品名がある投稿は掲載する（巻き添えにしない）",
+    fn: () => hasProductSegment("channeltono", "8月4日0時よりレゴ楽天で販売開始！楽天1位へ！限定販売　 LEGO レゴ アイデア The X-Files"),
+    want: true,
+  },
+  {
+    name: "商品名がある投稿の表示は商品名だけになる",
+    fn: () => cleanListTitle("channeltono", "8月4日0時よりレゴ楽天で販売開始！楽天1位へ！限定販売　 LEGO レゴ アイデア The X-Files"),
+    want: "LEGO レゴ アイデア The X-Files",
+  },
+  {
+    name: "公式URLの &amp; をデコードして保存する",
+    fn: () =>
+      extractOfficialUrl(
+        '<div id="single__container"><a href="https://ex.com/campaign/x?a=1&amp;b=2">公式</a></div>'
+      ),
+    want: "https://ex.com/campaign/x?a=1&b=2",
+  },
+  { name: "個別商品ページの判定（/products/JAN）", fn: () => isSingleProductUrl("https://anime-store.jp/products/4934054076093"), want: true },
+  { name: "個別商品ページの判定（/item/12345）", fn: () => isSingleProductUrl("https://bsp-prize.jp/item/2785343/"), want: true },
+  // お知らせ配下の新商品紹介は商品ページではない（実測: これを商品ページ扱いすると
+  // サンリオ公式のニュースまで落ちる＝正しいリンクの巻き添え）。
+  { name: "お知らせ配下は個別商品ページではない", fn: () => isSingleProductUrl("https://www.sanrio.co.jp/news/goods/mx-donki-photo-badge-20260806/"), want: false },
+  { name: "キャンペーンページは個別商品ページではない", fn: () => isSingleProductUrl("https://www.kfc.co.jp/campaign/umamusume"), want: false },
 ];
 
 let ng = 0;

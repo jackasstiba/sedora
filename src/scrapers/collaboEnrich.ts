@@ -1,3 +1,6 @@
+import { matchFranchises } from "../lib/franchise";
+import { normalizeForSearch } from "../lib/itemFilter";
+
 // コラボイベント記事の「本文」から、せどらーが最も欲しい情報＝抽選/ランダム/数量限定の
 // 有無と、注目賞品（タオル・アクスタ等）を抽出する純関数。
 //
@@ -105,17 +108,31 @@ export function pickVerifiedEventDate(
 // t.co 等の短縮リンクや valuecommerce 等の転送は、飛んだ先が販売ページでも中間URLが露出し、
 // また転送切れ・無関係先の危険があるため候補にしない（＝販売内容ページとして提示しない）。
 const SOCIAL_RE =
-  /youtube\.com|youtu\.be|twitter\.com|x\.com|facebook\.com|instagram\.com|line\.me|tiktok\.com|pinterest\.|t\.co\/|bit\.ly|tinyurl|ow\.ly|goo\.gl|lnky|linksynergy|valuecommerce|a8\.net|\.a8\.|accesstrade|felmat|dpbolvw|anrdoezrs|jdoqocy|tkqlhce|hb\.afl\.rakuten|a\.r10\.to|moshimo|af\.moshimo/i;
+  // ※ `x\.com` は**必ず境界付き**で書く。境界が無いと "ex.com" "sqex.com" 等、末尾が
+  //   x.com になるだけの正当なドメインを丸ごとSNS扱いで捨てる（自己テストで発覚）。
+  /youtube\.com|youtu\.be|twitter\.com|(^|[./])x\.com|facebook\.com|instagram\.com|line\.me|tiktok\.com|pinterest\.|t\.co\/|bit\.ly|tinyurl|ow\.ly|goo\.gl|lnky|linksynergy|valuecommerce|a8\.net|\.a8\.|accesstrade|felmat|dpbolvw|anrdoezrs|jdoqocy|tkqlhce|hb\.afl\.rakuten|a\.r10\.to|moshimo|af\.moshimo/i;
 
 /**
  * 記事本文から一次情報（公式キャンペーン/公式ストア）候補URLを1つ選ぶ。
  * collabo-cafe 自身とSNSを除外し、ルートだけのドメインより「具体的なパスを持つページ」や
  * store/shop/goods 系を優先する（例: rakuspa.com/hololive_yumeguritabi/ を選ぶ）。
  */
-export function extractOfficialUrl(html: string): string | null {
+export function extractOfficialUrl(
+  html: string,
+  opts: { allowSingleProduct?: boolean } = {}
+): string | null {
+  const allowSingleProduct = opts.allowSingleProduct ?? true;
   const region = articleBodyHtml(html) || html;
   const urls = [...region.matchAll(/href="(https?:\/\/[^"]+)"/g)].map((m) => m[1]);
-  const cand = urls.filter((u) => !u.includes("collabo-cafe.com") && !SOCIAL_RE.test(u));
+  let cand = urls.filter((u) => !u.includes("collabo-cafe.com") && !SOCIAL_RE.test(u));
+  // イベント記事（カフェ/ポップアップ/展示＝eventType「開催」）の公式は**会場・キャンペーンの
+  // ページ**であって、1点の商品ページではない。記事本文の末尾には無関係な通販商品リンクが
+  // 並ぶので、URL の見た目だけで選ぶと必ずそちらが勝つ。
+  //   実測(2026-08-10): 「ウマ娘 × KFC」→ ¥23,100 のコトブキヤ製フィギュア商品ページ、
+  //   「入間くん 最新刊 第51巻」→ 別キャラのアクリルスタンド ¥1,210。どちらも
+  //   「公式ページを見る →」の下に置かれていた。
+  // 候補から除外して**次点を選び直す**（後から null にすると、正しい会場ページまで消える）。
+  if (!allowSingleProduct) cand = cand.filter((u) => !isSingleProductUrl(decodeEntities(u)));
   if (!cand.length) return null;
   const score = (u: string): number => {
     let s = 0;
@@ -128,7 +145,69 @@ export function extractOfficialUrl(html: string): string | null {
     return s;
   };
   const best = [...new Set(cand)].sort((a, b) => score(b) - score(a))[0];
-  return score(best) > 0 ? best : null;
+  // href の値は HTML なのでエンティティのまま（`&amp;`）。デコードせずに保存すると
+  // クエリ名が `amp;utm_source` になった URL を「公式ページ」として提示することになる
+  // （実測: 表示中 335件のうち 119件が `&amp;` を含んでいた）。
+  return score(best) > 0 ? decodeEntities(best) : null;
+}
+
+/**
+ * officialUrl が「個別商品ページ」を指しているか。
+ *
+ * 個別商品ページは *その1点の商品* という強い同一性を主張する。イベント/キャンペーンの
+ * 公式トップ（`/campaign/umamusume` 等）は「このコラボの公式」としか主張しないので、
+ * 記事との照合が要るのは前者だけ。ここを分けないと、照合に失敗した正当なリンクまで落ちる。
+ */
+export function isSingleProductUrl(url: string): boolean {
+  try {
+    const seg = new URL(url).pathname.split("/").filter(Boolean);
+    // 「/products/4934054076093」「/item/2785343」の形＝サイト直下の商品ページ。
+    // 「/news/goods/mx-donki-…」のような**お知らせ配下**は商品ページではなく告知なので含めない
+    // （実測: サンリオ公式の新商品ニュースを商品ページと誤判定して落としかけた）。
+    return seg.length === 2 && /^(products?|item|items|goods)$/i.test(seg[0]);
+  } catch {
+    return false;
+  }
+}
+
+// 商品名として意味を持たない語。これしか共通しない場合に「同じ商品」と言わせない。
+const GENERIC_WORDS =
+  /^(公式|オンライン|ショップ|ストア|通販|グッズ|商品|一覧|特集|フィギュア|ぬいぐるみ|アクリル|スタンド|キーホルダー|セット|限定|予約|販売|株式会社|anime|store|shop|online|official|goods|item)$/i;
+
+/** ページの <title> / og:title を取り出す（取れなければ null） */
+export function extractPageTitle(html: string): string | null {
+  const og = html.match(/<meta[^>]+property=["']og:title["'][^>]+content=["']([^"']+)["']/i);
+  const t = og?.[1] ?? html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1];
+  if (!t) return null;
+  const s = decodeEntities(t.replace(/<[^>]+>/g, " ")).replace(/\s+/g, " ").trim();
+  return s || null;
+}
+
+/**
+ * 記事のタイトルと、リンク先の個別商品ページのタイトルが**同じ作品を指しているか**。
+ *
+ * 背景（2026-08-10 実測）: collabo_cafe の officialUrl は「本文中の最良の外部リンク1つ」を
+ * URL の見た目だけで選んでいるため、記事末尾の関連グッズリンクが選ばれる。
+ *   ・ウマ娘 × KFC       → anime-store の ¥23,100 コトブキヤ製フィギュア商品ページ
+ *   ・入間くん 最新刊51巻 → 別キャラのアクリルスタンド ¥1,210
+ * どちらも「公式ページを見る」の下に置かれていた＝ユーザーが誤解して損する。
+ *
+ * 判定は**作品名の共有**のみで行い、商品名の細部は見ない（細部で照合すると、正当な
+ * コラボグッズページまで落ちる）。取得できなかった・タイトルが読めない場合は true を返す
+ * ＝分からないものを罰しない（[[System/mistakes]] ミス16「直し方の強さ」）。
+ */
+export function officialPageMatchesItem(itemTitle: string, pageTitle: string | null): boolean {
+  if (!pageTitle) return true;
+  const a = normalizeForSearch(itemTitle);
+  const b = normalizeForSearch(pageTitle);
+  const fa = matchFranchises(itemTitle);
+  const fb = matchFranchises(pageTitle);
+  if (fa.length && fb.length) return fa.some((g) => fb.includes(g));
+  // 作品表が知らない作品同士は、3文字以上の非一般語を共有していれば同じとみなす。
+  const tokens = a
+    .split(/[\s　・/｜|【】「」『』()（）,、.。!！?？:：~〜\-–—+&"'’]+/)
+    .filter((t) => t.length >= 3 && !GENERIC_WORDS.test(t));
+  return tokens.some((t) => b.includes(t));
 }
 
 /**

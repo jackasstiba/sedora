@@ -67,7 +67,7 @@ async function main() {
         );
       }
 
-      const official = extractOfficialUrl(html);
+      const official = extractOfficialUrl(html, { allowSingleProduct: it.eventType !== "開催" });
       let saleText: string | null = null;
       if (official) {
         const oh = await fetchOfficial(official);
@@ -86,13 +86,23 @@ async function main() {
       // 既に載っている（＝表示中の）過去記事は**ここでしか埋まらない**。
       const stores = formatVenueStores(extractVenues(html), extractMapUrl(html));
 
-      if (highlights !== it.highlights || enr.hasLottery !== it.hasLottery || stores !== it.stores) {
+      // officialUrl もここで作り直す。以前は highlights/hasLottery/stores だけを更新していたため、
+      // 「リンクの選び方を直しても、既に載っている記事のリンクは古い誤ったまま」だった
+      // （通常の scrape は収集元の一覧に今出ている記事しか回らない＝直らない経路が残る）。
+      // 記事HTMLの取得に成功した回だけ書くので、取得失敗で既存値を潰すことはない。
+      if (
+        highlights !== it.highlights ||
+        enr.hasLottery !== it.hasLottery ||
+        stores !== it.stores ||
+        official !== it.officialUrl
+      ) {
         await prisma.item.update({
           where: { id: it.id },
-          data: { highlights, hasLottery: enr.hasLottery, stores },
+          data: { highlights, hasLottery: enr.hasLottery, stores, officialUrl: official },
         });
         changed++;
-        console.log(`  #${it.id}: hasLottery ${it.hasLottery}→${enr.hasLottery} | ${highlights ?? "(null)"}`);
+        const link = official !== it.officialUrl ? ` | 公式 ${it.officialUrl ?? "(なし)"} → ${official ?? "(なし)"}` : "";
+        console.log(`  #${it.id}: hasLottery ${it.hasLottery}→${enr.hasLottery} | ${highlights ?? "(null)"}${link}`);
       }
     } catch (e) {
       console.log(`  #${it.id}: 取得失敗 ${(e as Error).message}`);

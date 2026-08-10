@@ -31,6 +31,7 @@ import { parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
+import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -877,6 +878,37 @@ async function main() {
         lostRoute.push(`${src}: 公式リンクを持つ率 ${Math.round(prev * 100)}%→${Math.round(now * 100)}%（${e.withOfficial}/${e.n}件）`);
     }
     report("official_route_lost", "ソース単位で公式リンクが失われた", "error", lostRoute, baseline, bySrc.size);
+  }
+
+  // (16b) **公式リンクが「別の商品」を指している**（2026-08-10 の外部突合で発覚）。
+  //
+  // 導線が1本あることは見ていたが、**その1本が正しい先か**は誰も見ていなかった。実測:
+  //   ・「ウマ娘 × KFC」の公式ページを見る → ¥23,100 のコトブキヤ製フィギュア商品ページ
+  //   ・「入間くん 最新刊 第51巻」の公式 → 別キャラのアクリルスタンド ¥1,210
+  // 記事本文の末尾に並ぶ通販リンクが、URLの見た目の点数で勝っていた（collaboEnrich）。
+  // イベント（開催）の公式は会場・キャンペーンのページなので、**個別商品ページを
+  // 公式として出していたら誤り**と機械的に言える。ここは「導線の有無」ではなく
+  // 「導線の指す先の型」を見る検査。
+  //
+  // あわせて、HTMLエンティティが残ったURL（`?a=1&amp;b=2`）も落とす。クエリ名が
+  // `amp;utm_source` になった壊れたURLを公式として提示していた（実測119件）。
+  {
+    const entity = shown
+      .filter((r) => r.officialUrl && /&(amp|lt|gt|quot|#0?39);/.test(r.officialUrl))
+      .map((r) => `[${r.source} #${r.id}] ${r.officialUrl!.slice(0, 90)}`);
+    report("official_url_entity", "公式URLにHTMLエンティティが残っている", "error", entity, baseline, shown.length);
+
+    const eventProduct = shown
+      .filter((r) => r.eventType === "開催" && r.officialUrl && isSingleProductUrl(r.officialUrl))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 34)} → ${r.officialUrl!.slice(0, 60)}`);
+    report(
+      "event_official_is_product",
+      "イベント（開催）の公式リンクが個別商品ページを指している",
+      "error",
+      eventProduct,
+      baseline,
+      shown.filter((r) => r.eventType === "開催").length
+    );
   }
 
   // (17) **仕組みそのものの検査**（データではなく、更新を回している足回りを見る）。
