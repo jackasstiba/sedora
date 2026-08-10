@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-10T10:16:31.174Z",
+  "updatedAt": "2026-08-10T10:34:09.584Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -47,16 +47,18 @@
     "check_idle": 1,
     "page_rows_unexplained_loss": 0,
     "site_update_stalled": 0,
-    "no_purchase_route": 10,
+    "no_purchase_route": 32,
     "official_route_lost": 0,
     "runner_bat_not_ascii": 0,
     "schema_drift": 0,
     "official_url_entity": 0,
-    "event_official_is_product": 0
+    "event_official_is_product": 0,
+    "page_vanished": 0,
+    "sitemap_scope_drift": 0,
+    "report_items_truncated": 0
   },
   "pages": {
     "/": 868,
-    "/premium": 105,
     "/lottery": 164,
     "/genre/フィギュア": 130,
     "/genre/トレカ": 138,
@@ -70,10 +72,6 @@
     "/genre/酒・ウイスキー": 5,
     "/genre/映像・音楽": 1,
     "/genre/その他": 128,
-    "/release/2027-06": 3,
-    "/release/2027-05": 4,
-    "/release/2027-04": 1,
-    "/release/2027-03": 1,
     "/release/2027-01": 3,
     "/release/2026-12": 7,
     "/release/2026-11": 15,
@@ -119,7 +117,10 @@
     "coverage:schema_drift": 24,
     "official_rate:snkrdunk": 0,
     "coverage:official_url_entity": 1128,
-    "coverage:event_official_is_product": 231
+    "coverage:event_official_is_product": 231,
+    "coverage:page_vanished": 29,
+    "coverage:sitemap_scope_drift": 1663,
+    "coverage:report_items_truncated": 1
   },
   "coverage": {
     "title_noise:相場・在庫の実況": 24,
@@ -138,7 +139,10 @@
     "runner_bat_not_ascii": 1,
     "schema_drift": 24,
     "official_url_entity": 1128,
-    "event_official_is_product": 231
+    "event_official_is_product": 231,
+    "page_vanished": 29,
+    "sitemap_scope_drift": 1663,
+    "report_items_truncated": 1
   },
   "facts": {
     "checked": 45,

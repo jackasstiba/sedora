@@ -243,8 +243,25 @@ export async function getSitemapItemRefs() {
   const today = todayJst();
   const grace = new Date(today);
   grace.setUTCDate(grace.getUTCDate() - 60); // 直近60日で終了した分は残す
-  return prisma.item.findMany({
+  const rows = await prisma.item.findMany({
     where: { OR: [{ eventDate: { gte: grace } }, { eventDate: null }] },
-    select: { id: true, scrapedAt: true },
+    select: {
+      id: true,
+      scrapedAt: true,
+      source: true,
+      title: true,
+      genre: true,
+      eventDate: true,
+      eventDateText: true,
+      url: true,
+      price: true,
+      imageUrl: true,
+    },
   });
+  // **掲載基準を通す**。ここが自前の where だけで完結していたため、サイトが「載せない」と
+  // 決めた行まで Google に申告していた（実測 2026-08-10: 商品URL 2526件のうち **781件**が
+  // 掲載基準で落ちる行＝日付なしのXミラー投稿 515件、クロスソース重複の負け側 229件ほか）。
+  // 重複ページと実況投稿を自分から大量申告している状態で、クロール割当を薄める。
+  // 表示範囲の定義は1か所（dedupeItems／src/lib/pages.ts）に揃える。
+  return dedupeItems(rows).map((r) => ({ id: r.id, scrapedAt: r.scrapedAt }));
 }

@@ -32,6 +32,7 @@ import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import { getSitemapItemRefs } from "../src/lib/seo";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -733,6 +734,30 @@ async function main() {
     report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
   }
 
+  // (14a) **ページが丸ごと消えた**。
+  //
+  // (14) も (14b) も `for (const p of pages)`＝**今あるページ**しか回らないので、ページが
+  // 一覧から消えると比較相手が存在せず、どの検査も沈黙する（母数0で空振りする型と同じ）。
+  // 実測 2026-08-10: baseline に 34ページ・現在 29ページで、5ページが消えていたのに
+  // 監査は一言も触れなかった。
+  //
+  // `/release/*` は暦で自然に増減する（その月に商品が無ければページ自体が無い）ので対象外。
+  // 意図して消したページ（例: /premium）は `--update-baseline` で受け入れる＝基準から消える。
+  {
+    const now = new Set(pages.map((p) => p.name));
+    const vanished = Object.keys(baseline.pages ?? {})
+      .filter((name) => !now.has(name) && !name.startsWith("/release/"))
+      .map((name) => `${name} が存在しない（基準では ${baseline.pages?.[name]}件あった）`);
+    report(
+      "page_vanished",
+      "基準にあったページが丸ごと無くなっている",
+      "error",
+      vanished,
+      baseline,
+      Object.keys(baseline.pages ?? {}).length
+    );
+  }
+
   // (14b) **説明のつかない掲載減**。件数の割合ではなく、消えた行を1件ずつ理由に分ける。
   //
   // 経緯: ここは元々「基準値から2割以上減ったら WARN」という閾値だった。それが本日
@@ -855,7 +880,12 @@ async function main() {
       "no_purchase_route",
       `購入導線が1本も無い商品がある（${Math.round(rate * 100)}%）`,
       "warn",
-      deadEnd.slice(0, 10).map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`),
+      // ⚠️ ここで `.slice(0, 10)` してはいけない。report() は渡された配列の長さを
+      // そのまま件数＝ラチェットの基準にするので、切り詰めると **常に10件** になり、
+      // 102件でも32件でも「10件」と報告される＝この検査は増加を検出できなくなる
+      // （実測 2026-08-10: 実数102→32件の間ずっと「10件（前回10→今回10）」と表示されていた）。
+      // 表示の切り詰めは出力側が「… 他N件」でやる。
+      deadEnd.map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`),
       baseline,
       shown.length
     );
@@ -911,6 +941,40 @@ async function main() {
     );
   }
 
+  // (16c) **sitemap が表示範囲とズレていないか**（＝検索エンジンにだけ見せている裏の顔）。
+  //
+  // 監査はずっと「ページに出ている物」だけを見てきたので、**サイトが載せないと決めた行を
+  // sitemap では申告している**ことに誰も気付けなかった。実測 2026-08-10: 商品URL 2526件の
+  // うち 781件が掲載基準で落ちる行（日付なしのXミラー投稿 515件、クロスソース重複の
+  // 負け側 229件ほか）。重複ページを自分から大量申告している状態だった。
+  {
+    const refs = await getSitemapItemRefs();
+    // ⚠️ ここは **表示中の集合(shown)** と比べる。`all`（DB全件）と比べると、sitemap の中身は
+    // 必ず DB の部分集合なので leaked が常に0＝**検査が存在しないのと同じ**になる
+    // （書いた直後に一度そう書いていた。母数のある0件か、空振りの0件かを必ず区別する）。
+    const allowed = new Set(shown.map((r) => r.id));
+    // `shown` は表示スコープ（今後＋日付未定）。sitemap は直近60日で終了した分も含める設計なので、
+    // 「終了済み」は正当。ここで見たいのは **掲載基準（重複・非商品・日付なしXミラー）で
+    // 落としたはずの行が混ざっていないか**。
+    const rows = await prisma.item.findMany({
+      where: { id: { in: refs.map((r) => r.id).filter((id) => !allowed.has(id)) } },
+      select: { id: true, source: true, title: true, eventDate: true },
+    });
+    const today = todayJst();
+    const leaked = rows
+      .filter((r) => !(r.eventDate && r.eventDate < today))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`);
+    report(
+      "sitemap_scope_drift",
+      "sitemap に、掲載基準で落とした行が混ざっている",
+      "error",
+      leaked,
+      baseline,
+      refs.length
+    );
+    console.log(`(参考) sitemap の商品URL ${refs.length}件（表示中 ${allowed.size}件＋直近に終了した分）`);
+  }
+
   // (17) **仕組みそのものの検査**（データではなく、更新を回している足回りを見る）。
   //
   // 2026-08-10 に判明した2件は、どちらも「データを見ていれば分かる」類ではなかった:
@@ -933,6 +997,18 @@ async function main() {
       bad.push("run_scrape.bat が見つからない（定例更新の入口が消えている）");
     }
     report("runner_bat_not_ascii", "定例更新の bat が壊れる書き方になっている", "error", bad, baseline, 1);
+  }
+  {
+    // **この監査スクリプト自身の書き方**を検査する。report() は渡された配列の長さを
+    // そのまま件数＝ラチェットの基準にするので、呼び出し側で `.slice(0, N)` して
+    // 「例だけ」を渡すと、件数が N に張り付いて**増加を永久に検出できなくなる**
+    // （実測 2026-08-10: no_purchase_route が実数102→32件の間ずっと「10件」だった）。
+    // データを何時間眺めても分からないが、ファイルを1回読めば分かる型。
+    const src = fs.readFileSync(path.join(process.cwd(), "scripts", "audit.ts"), "utf8");
+    const bad = [...src.matchAll(/\.slice\(\s*0\s*,\s*\d+\s*\)\s*\.map\([\s\S]{0,300}?\n\s*baseline\s*[,)]/g)].map(
+      (m) => `report() に切り詰めた配列を渡している: ${m[0].slice(0, 60).replace(/\s+/g, " ")}…`
+    );
+    report("report_items_truncated", "監査の件数が切り詰めた配列で数えられている", "error", bad, baseline, 1);
   }
   {
     // schema.prisma の Item の列が、いま繋がっているDBに全部あるか（＝適用漏れ）。
@@ -1029,7 +1105,10 @@ async function main() {
   // 消せない警告は誤報と同じで、いずれ誰も読まなくなる。
   // 「受け入れて隠す」危険は、判定しない観測（drift のページ別差分＝直前の実行との比較）が
   // コード変更由来の減少をその場で出すことで別に担保する。
-  const nextPages: Record<string, number> = { ...(baseline.pages ?? {}) };
+  // 基準は「今あるページ」だけにする（消えたページのキーは残さない）。残すと、意図して
+  // 消したページ（/premium）が `page_vanished` で永久に鳴り続け、消せない警告になる。
+  // 逆に言うと、**--update-baseline を回した時点で「そのページが無いこと」を受け入れている**。
+  const nextPages: Record<string, number> = {};
   for (const p of pages) nextPages[p.name] = p.rows.length;
 
   if (UPDATE_BASELINE) {
