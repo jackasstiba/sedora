@@ -15,6 +15,10 @@ import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } fr
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import { classifyPageLoss, isReportableLoss, pageExcludesPast } from "../src/lib/pageLoss";
 import { resolveMonthDay } from "../src/scrapers/util";
+import { computeMargin, isPerDrawFee } from "../src/lib/margin";
+import { eventDateHeading } from "../src/lib/itemFilter";
+import { officialUrlLabel } from "../src/lib/outbound";
+import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
@@ -125,6 +129,52 @@ const cases: Case[] = [
   { name: "説明なしが2件だけなら鳴らない", fn: () => isReportableLoss(100, 98, 2), want: 0 },
   // 「消えた行」には代表の入れ替えで入れ替わった分も混じるので、**実際に減った数**を上限にする
   { name: "説明なしは実際に減った数を上限にする", fn: () => isReportableLoss(100, 90, 30), want: 10 },
+
+  // ── 2026-08-10 の実地検証（せどらーとして仕入れようとして詰まった型）の固定 ──────
+  //
+  // ここから下は「直したこと」ではなく「二度と壊れないこと」を押さえる。どれも純関数なので
+  // 本番データに依らず、リグレッションをその場で落とせる。
+
+  // (a) くじの「1回いくら」は定価ではない。相場と割ると「引けば必ず儲かる」に読める数字が出る。
+  //     実測: 一番くじの参加費850円 と 賞1点の中古¥7,650 で「+800%」。
+  { name: "『1回 850円（税込）』は参加費と判定", fn: () => isPerDrawFee("1回 850円（税込）"), want: true },
+  { name: "『1回660円』も参加費と判定", fn: () => isPerDrawFee("1回660円"), want: true },
+  { name: "通常の定価は参加費ではない", fn: () => isPerDrawFee("2,090円（税込）"), want: false },
+  { name: "参加費では定価比を出さない", fn: () => computeMargin("1回 850円（税込）", 7650), want: null },
+  { name: "通常の定価では定価比を出す", fn: () => computeMargin("2,090円（税込）", 3700)?.pct, want: 77 },
+
+  // (b) 日付の見出しを eventType から機械的に作らない。プレバンの「2026年10月」は
+  //     予約日でも発売日でもなく発送月（「予約日 2026年10月」だと10月に予約が始まると読める）。
+  {
+    name: "発送予定の日付は見出しも『発送予定』",
+    fn: () => eventDateHeading("予約", "プレミアムバンダイ 予約受付中 2026年10月発送予定"),
+    want: "発送予定",
+  },
+  { name: "発送予定でなければ従来どおり", fn: () => eventDateHeading("抽選", "抽選 8/15"), want: "抽選日" },
+
+  // (c) プレバンの発送月が過ぎたら「予約」→「予約終了」（受付中と断定しない新ラベルでも効く）
+  { name: "予約・過去 → 表示が予約終了", fn: () => displayEventType("予約", null, PAST, today), want: "予約終了" },
+  { name: "予約・未来 → そのまま", fn: () => displayEventType("予約", null, FUTURE, today), want: "予約" },
+  { name: "予約・過去 → 検査は鳴らない（表示層で直しているため）", fn: () => isStalePromise("予約", null, PAST, today), want: false },
+
+  // (d) 買いに行ける場所のラベル。販売店名は裏取り済みの事実なので約束してよいが、
+  //     受付中かどうかは確認できていないので「予約する」とは書かない。
+  { name: "プレバンは店名を出す", fn: () => officialUrlLabel(null, "figisland_pb"), want: "プレミアムバンダイで見る →" },
+  { name: "受付状況は約束しない（『予約する』と書かない）", fn: () => /予約する/.test(officialUrlLabel(null, "figisland_pb")), want: false },
+  { name: "販売内容が裏取りできない時は公式ページ止まり", fn: () => officialUrlLabel(null), want: "公式ページを見る →" },
+
+  // (e) 一番くじの「1回いくら／どこで引けるか」。これが無いとロットの採算計算ができない。
+  {
+    name: "一番くじの1回価格を読む",
+    fn: () => extractKujiFee('<div class="detail glBox"><ul><li>■メーカー希望小売価格：1回850円(税10％込)</li></ul></div>'),
+    want: "1回 850円（税込）",
+  },
+  {
+    name: "一番くじの取扱店を読む",
+    fn: () => extractKujiStores('<div class="detail glBox"><ul><li>■取扱店：ファミリーマート、書店、ホビーショップ</li></ul></div>'),
+    want: "ファミリーマート、書店、ホビーショップ",
+  },
+  { name: "取扱店が無ければ捏造しない", fn: () => extractKujiStores('<div class="detail glBox"><ul><li>■発売日：8月29日</li></ul></div>'), want: null },
 ];
 
 let ng = 0;

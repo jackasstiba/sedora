@@ -35,6 +35,11 @@ model Item {
   marketSource    String?   // "surugaya" など
   marketCheckedAt DateTime? // 相場を取得した時刻
 
+  // 「どこで買えるか（取扱店）」の平文。一番くじの「ファミリーマート、書店、ホビーショップ…」等。
+  // stores（JSON・公式応募ページ付き）と違い、URLの無い店名リストをそのまま出すための列。
+  // せどらーは賞品より先に「自分の行ける店に入るか」を見るので、これが無いと動けない。
+  salesChannel String?
+
   // コラボ記事本文から抽出した“深い”情報。イベント1行では拾えない賞品ラインナップの要約。
   // 例: ホロライブ×極楽湯 → highlights="抽選・ランダム賞品：マフラータオル / …", hasLottery=true。
   highlights  String?  // カード/詳細に出す注目賞品の要約（抽選/ランダム/数量限定を含む）

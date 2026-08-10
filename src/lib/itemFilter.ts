@@ -30,7 +30,9 @@ export const GENRE_ORDER = [
 
 // バラバラな eventType 文字列を、せどり視点の3グループに正規化する。
 export const STATUS_EVENT_TYPES: Record<Exclude<ItemStatus, "now">, string[]> = {
-  reserve: ["予約開始", "予約受付中", "受付開始"],
+  // 「予約」＝受付中と裏取りできないもの（プレミアムバンダイ。収集元の記事が更新されず
+  // 受付状況を確認できないため「受付中」と断定しない）。予約タブには載せる＝買いに行ける。
+  reserve: ["予約", "予約開始", "予約受付中", "受付開始"],
   lottery: ["抽選"],
   release: ["発売", "販売開始", "登場予定", "開催", "再販"],
 };
@@ -68,7 +70,11 @@ export function sourceLabel(source: string): string {
  * 日本語にならない見出しが出る（実測・詳細ページで表示されていた）。
  * 「〜中」「〜予定」で終わる種別には「日」を付けない。
  */
-export function eventDateHeading(eventType: string): string {
+export function eventDateHeading(eventType: string, eventDateText?: string | null): string {
+  // その日付が何の日なのかは、まず**収集元の文言**で決まる。プレミアムバンダイの
+  // 「2026年10月発送予定」は予約日でも発売日でもなく発送月なので、eventType から
+  // 「予約日」と機械的に作ると、10月に予約が始まるように読める（実測でそう出ていた）。
+  if (eventDateText && /発送予定/.test(eventDateText)) return "発送予定";
   return /(?:中|予定)$/.test(eventType) ? eventType : `${eventType}日`;
 }
 

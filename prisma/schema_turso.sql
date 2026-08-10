@@ -20,7 +20,12 @@ CREATE TABLE "Item" (
     "marketCheckedAt" DATETIME,
     "highlights" TEXT,
     "hasLottery" BOOLEAN,
-    "officialUrl" TEXT
+    "officialUrl" TEXT,
+    -- 以下は後から足した列。既存DBには npm run db:alter（冪等）で入る。
+    -- ここが schema.prisma と食い違うと、新規に作ったDBだけ列が足りない状態になる。
+    "prizes" TEXT,
+    "stores" TEXT,
+    "salesChannel" TEXT
 );
 
 -- CreateIndex

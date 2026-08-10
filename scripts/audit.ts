@@ -25,6 +25,7 @@ import { displayEventDateText, eventDateLabel, isMonthPrecision, isStalePromise,
 import { cleanListTitle } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
+import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
@@ -652,8 +653,11 @@ async function main() {
     }
     // 毎回の scrape で全件を取り直さない設計のソースは、scrapedAt が古いのが正常。
     // ただし「古いデータが表示され続けている」事実は変わらないので、黙らせずWARNで数える。
+    // ※ figisland_pb をここから外した（2026-08-10）。「価格取得済みは再取得しない」設計を
+    //   やめ、最終取得が古い順にローテーションで一巡させるようにしたので、**古いまま残るのは
+    //   もはや正常ではなくバグ**（実測: この免除があったせいで、250件が20日間凍結し発送月が
+    //   2ヶ月ずれていたのを、監査は「設計上そういうもの」と説明して通していた）。
     const BY_DESIGN: Record<string, string> = {
-      figisland_pb: "差分取得（価格まで取得済みは再取得しない）ため0件が正常",
       x_watch: "手動のX巡回で取り込むため自動更新されない",
     };
     const stale: string[] = [];
@@ -667,6 +671,31 @@ async function main() {
     }
     report("source_stale", "更新が止まっているソースがある", "error", stale, baseline);
     report("source_stale_by_design", "設計上更新されないソースの鮮度", "warn", staleByDesign, baseline);
+
+    // (12b) **サイト全体の最終更新**。1ソースずつ見る (12) は「全部まとめて止まった」を
+    // 取り逃がす（全ソースが同じ日に止まれば、どれも“相対的には”おかしくない）。
+    //
+    // これが無かったせいで起きたこと（2026-08-10 に判明）:
+    // 定例更新 run_scrape.bat は **2026-07-21 以降ずっと1度も動いていなかった**。
+    // タスクスケジューラに登録が無く（setup bat が未実行）、しかも bat 自体が日本語 rem 行で
+    // 起動即死していた。公開サイトの「最終更新」が丸1日以上前という形で表に出ていたのに、
+    // 誰も（何も）それを見張っていなかった。**定期実行を前提にする機能は、その定期実行が
+    // 生きていること自体を検査する。**
+    const newest = Math.max(...all.map((r) => new Date(r.scrapedAt).getTime()), 0);
+    const hours = newest ? (Date.now() - newest) / 3_600_000 : Infinity;
+    // 巡回は1日2回（8:00/20:00）。1回飛ぶのは在席状況で起こりうるので、2回連続で
+    // 飛んだ相当（>30時間）を異常とする。
+    report(
+      "site_update_stalled",
+      "サイト全体の更新が止まっている（定例巡回が動いていない疑い）",
+      "error",
+      hours > 30
+        ? [`最終更新が ${Math.round(hours)}時間前（最新の scrapedAt = ${new Date(newest).toISOString()}）。run_scrape.bat とタスク HatsukoreScrape_AM/PM の稼働を確認すること`]
+        : [],
+      baseline,
+      all.length
+    );
+    console.log(`(参考) 最終更新は ${Math.round(hours)}時間前`);
   }
 
   // (13) 画像の付与状況（無い＝カードが灰色になる。率で見張る）
@@ -793,6 +822,94 @@ async function main() {
     );
     report("link_dead", "リンク先が404等を返している（抜き取り）", "warn", bad, baseline);
     console.log(`(参考) リンク到達性: ${targets.length}件を抜き取り検査（GET・失敗は再確認）`);
+  }
+
+  // (16) **買いに行けない商品**（行き止まり）。
+  //
+  // 2026-08-10 の実地検証（自分でせどらーとして仕入れようとした）で最初に詰まった型。
+  // プレミアムバンダイの250件は、収集元を非公開にした際に item.url を出さなくなった一方で、
+  // 収集元の記事が持っていた **p-bandai の商品URLを拾っていなかった**ため、詳細ページに
+  // 「駿河屋で見る（＝売り先）」と「楽天で探す（＝検索窓）」しか無く、**予約しに行けなかった**。
+  //
+  // 掲載の目的は「いつ買えるか」を伝えることなので、**どこで買えるかが1本も無い行は機能不全**。
+  // 判定は詳細ページのボタン生成と同じ条件（src/lib/outbound.ts）で行う＝画面に出る事実を見る。
+  {
+    const deadEnd = shown.filter(
+      (r) => !isOfficialUrl(r.source) && !r.officialUrl && !hasSearchableTitle(r.source)
+    );
+    const rate = shown.length ? deadEnd.length / shown.length : 0;
+    report(
+      "no_purchase_route",
+      `購入導線が1本も無い商品がある（${Math.round(rate * 100)}%）`,
+      "warn",
+      deadEnd.slice(0, 10).map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`),
+      baseline,
+      shown.length
+    );
+    // ソース単位でも見る。1ソース丸ごと導線を失う（＝今回のプレバンの型）を、全体の率では
+    // 薄まって見逃すため。表示20件以上のソースで「公式URLを持つ率0%」なら鳴らす。
+    const bySrc = new Map<string, { n: number; withOfficial: number }>();
+    for (const r of shown) {
+      const e = bySrc.get(r.source) ?? { n: 0, withOfficial: 0 };
+      e.n++;
+      if (isOfficialUrl(r.source) || r.officialUrl) e.withOfficial++;
+      bySrc.set(r.source, e);
+    }
+    const lostRoute: string[] = [];
+    for (const [src, e] of bySrc) {
+      if (e.n < 20) continue;
+      const prev = baseline.metrics?.[`official_rate:${src}`];
+      const now = e.withOfficial / e.n;
+      metrics[`official_rate:${src}`] = Math.round(now * 100) / 100;
+      if (prev != null && prev >= 0.5 && now < prev * 0.5)
+        lostRoute.push(`${src}: 公式リンクを持つ率 ${Math.round(prev * 100)}%→${Math.round(now * 100)}%（${e.withOfficial}/${e.n}件）`);
+    }
+    report("official_route_lost", "ソース単位で公式リンクが失われた", "error", lostRoute, baseline, bySrc.size);
+  }
+
+  // (17) **仕組みそのものの検査**（データではなく、更新を回している足回りを見る）。
+  //
+  // 2026-08-10 に判明した2件は、どちらも「データを見ていれば分かる」類ではなかった:
+  //  ・run_scrape.bat が日本語の rem 行で壊れていた。cmd.exe は .bat をバイト位置で読み直す
+  //    ため、マルチバイト文字があると解析位置がずれ、コメントの途中からコマンドとして走る。
+  //    起動即死するので**ログが1行も残らず**、失敗にすら見えなかった。
+  //  ・列追加が手作業SQLで、ローカルと本番のスキーマがズレても誰も気付けなかった。
+  // どちらも機械で1行チェックできるので、毎回見る。
+  {
+    const bad: string[] = [];
+    const batPath = path.join(process.cwd(), "run_scrape.bat");
+    try {
+      const buf = fs.readFileSync(batPath);
+      const nonAscii = [...buf].filter((b) => b > 0x7f).length;
+      if (nonAscii > 0)
+        bad.push(
+          `run_scrape.bat に非ASCIIバイトが ${nonAscii}個ある。cmd.exe の解析位置がずれて起動即死する（実測 2026-08-10）。日本語の説明は run_scrape.md に書くこと`
+        );
+    } catch {
+      bad.push("run_scrape.bat が見つからない（定例更新の入口が消えている）");
+    }
+    report("runner_bat_not_ascii", "定例更新の bat が壊れる書き方になっている", "error", bad, baseline, 1);
+  }
+  {
+    // schema.prisma の Item の列が、いま繋がっているDBに全部あるか（＝適用漏れ）。
+    const declared = [
+      ...fs
+        .readFileSync(path.join(process.cwd(), "prisma", "schema.prisma"), "utf8")
+        .split("model Item {")[1]
+        .split("\n}")[0]
+        .matchAll(/^\s{2}(\w+)\s+\S/gm),
+    ].map((m) => m[1]);
+    const info = (await prisma.$queryRawUnsafe(`PRAGMA table_info("Item")`)) as { name: string }[];
+    const actual = new Set(info.map((r) => r.name));
+    const missing = declared.filter((c) => !actual.has(c));
+    report(
+      "schema_drift",
+      "schema.prisma にある列がDBに無い（マイグレーション適用漏れ）",
+      "error",
+      missing.map((c) => `Item.${c} がDBに無い。\`npm run db:alter\` を流すこと`),
+      baseline,
+      declared.length
+    );
   }
 
   // ── 未知の型のための観測（判定はしない。差分と標本を出して人間が読む） ──

@@ -19,7 +19,6 @@ import {
   getItemsByMonth,
   getLotteryItems,
   getMonthsWithItems,
-  getPremiumItems,
 } from "./seo";
 import { getItemsByTcgTitle, getTcgTitleCounts } from "./tcg";
 import { GENRE_ORDER } from "./itemFilter";
@@ -30,7 +29,8 @@ export type DisplayedPage = { name: string; rows: Awaited<ReturnType<typeof getI
 export async function loadDisplayedPages(): Promise<DisplayedPage[]> {
   const pages: DisplayedPage[] = [];
   pages.push({ name: "/", rows: await getItems({}) });
-  pages.push({ name: "/premium", rows: await getPremiumItems() });
+  // /premium（相場・プレ値ランキング）は 2026-08-10 に表示を取り下げた（getPremiumItems の
+  // コメント参照）。ページが無い＝表示範囲にも無い。復活させるならここに1行戻す。
   pages.push({ name: "/lottery", rows: await getLotteryItems() });
   for (const g of GENRE_ORDER) {
     const rows = await getItemsByGenre(g);

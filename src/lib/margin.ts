@@ -28,11 +28,23 @@ export type Margin = {
 const MAX_RATIO = 10; // 相場が定価の10倍超 → 単位ズレ/異常とみなす
 const MIN_RATIO = 0.05; // 相場が定価の1/20未満 → 同上
 
+/**
+ * price が「1回いくら」＝**くじ1回の参加費**か（"1回 850円（税込）"）。
+ *
+ * これは商品の定価ではない。850円払って当たるのは全13賞のどれか1つで、相場が付いているのは
+ * その中の特定の1賞。両者を割ると「+800%」のような、引けば必ず儲かるように読める数字が出る。
+ * 期待値は賞ごとの本数が分からないと出せない（こちらは持っていない）ので、**出さない**。
+ */
+export function isPerDrawFee(price: string): boolean {
+  return /\d\s*回\s*[¥￥]?\s*[\d，,]+\s*円/.test(price) || /^\s*1\s*回/.test(price);
+}
+
 /** 差益を計算。定価が読めない/相場が無い/比が安全域外なら null（＝差益は表示しない）。 */
 export function computeMargin(
   price: string | null | undefined,
   marketPrice: number | null | undefined
 ): Margin | null {
+  if (price && isPerDrawFee(price)) return null;
   const teika = parseYen(price);
   if (!teika || !marketPrice || marketPrice <= 0) return null;
   const ratio = marketPrice / teika;

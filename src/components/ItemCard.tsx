@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
-import { computeMargin, formatPct, formatPriceDisplay } from "@/lib/margin";
+import { formatPriceDisplay } from "@/lib/margin";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
 
@@ -37,6 +37,7 @@ const COUNTDOWN_TONE: Record<"urgent" | "soon" | "week", string> = {
 
 const EVENT_COLORS: Record<string, string> = {
   // 予約系＝緑
+  予約: GREEN,
   予約開始: GREEN,
   予約受付中: GREEN,
   受付開始: GREEN,
@@ -63,7 +64,6 @@ export function ItemCard({ item }: { item: Item }) {
   const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "short");
   // 月精度のものに「🔥 本日/明日」を出すと、合成した月初へのカウントダウンになってしまう。
   const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
-  const margin = computeMargin(item.price, item.marketPrice);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
   const displayTitle = cleanListTitle(item.source, item.title);
   // 予定日が過ぎたものを「予定」と書かない（登場予定 → 登場済み）。
@@ -140,25 +140,9 @@ export function ItemCard({ item }: { item: Item }) {
           </div>
         )}
 
-        {item.marketPriceText && (
-          <div className="-mt-1 flex flex-wrap items-center gap-1 text-xs">
-            <span className="rounded bg-amber-100 px-1.5 py-0.5 font-medium text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-              相場 {item.marketPriceText}
-            </span>
-            {margin && (
-              <span
-                className={`rounded px-1.5 py-0.5 font-semibold ${
-                  margin.isPremium
-                    ? "bg-rose-600 text-white"
-                    : "bg-neutral-200 text-neutral-700 dark:bg-neutral-700 dark:text-neutral-200"
-                }`}
-                title={`定価 ¥${margin.teika.toLocaleString("ja-JP")} → 相場 ¥${margin.market.toLocaleString("ja-JP")}`}
-              >
-                定価比 {formatPct(margin.pct)}
-              </span>
-            )}
-          </div>
-        )}
+        {/* ※「相場 ¥…／定価比 +…%」バッジは 2026-08-10 に撤去（相場の出どころが実態と
+            食い違っていたため保留）。理由は lib/seo.ts の getPremiumItems のコメント。
+            marketPrice* は型・DBには残っているが、**表示してはいけない**。 */}
       </div>
     </Link>
   );

@@ -35,8 +35,22 @@ export function hasVerifiedSaleContent(highlights: string | null | undefined): b
   return !!highlights && /公式販売|価格帯/.test(highlights);
 }
 
+/**
+ * officialUrl が指す先が「その商品を売っている公式ストア」だと分かっているソースの、店名ラベル。
+ * リンク先が販売サイトだと分かっているならそう書いた方が押される（「公式ページ」では
+ * 何が待っているか分からない）。**販売店名までは裏取り済みの事実**なので約束してよいが、
+ * 受付中かどうかは別問題なので「予約する」とは書かない（受付状況は確認できていない）。
+ */
+const OFFICIAL_STORE_LABELS: Record<string, string> = {
+  figisland_pb: "プレミアムバンダイで見る →",
+};
+
 /** officialUrl ボタンの表示ラベル（実売内容を確認できた時だけ「販売内容」を約束する） */
-export function officialUrlLabel(highlights: string | null | undefined): string {
+export function officialUrlLabel(
+  highlights: string | null | undefined,
+  source?: string
+): string {
+  if (source && OFFICIAL_STORE_LABELS[source]) return OFFICIAL_STORE_LABELS[source];
   return hasVerifiedSaleContent(highlights)
     ? "公式で販売内容を見る →"
     : "公式ページを見る →";

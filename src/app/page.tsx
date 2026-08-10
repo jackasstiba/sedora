@@ -105,17 +105,9 @@ export default async function Home() {
         </p>
       </header>
 
-      <Link
-        href="/premium"
-        className="mb-5 flex items-center justify-between gap-2 rounded-xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm transition hover:border-rose-300 hover:bg-rose-100 dark:border-rose-900/50 dark:bg-rose-950/30 dark:hover:bg-rose-950/50"
-      >
-        <span className="font-semibold text-rose-700 dark:text-rose-300">
-          💹 相場・プレ値ランキング
-        </span>
-        <span className="text-neutral-600 dark:text-neutral-300">
-          実際の取引価格が確認できたレア品を相場順に見る →
-        </span>
-      </Link>
+      {/* ※「💹 相場・プレ値ランキング」バナー（/premium）は 2026-08-10 に撤去。
+          理由は lib/seo.ts の getPremiumItems のコメント（相場の出どころが実態と
+          食い違っていたため保留）。 */}
 
       <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} />
 

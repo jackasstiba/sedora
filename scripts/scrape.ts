@@ -1,5 +1,6 @@
 import { prisma } from "../src/lib/prisma";
 import { runAllScrapers } from "../src/scrapers";
+import type { ScrapeContext } from "../src/scrapers/types";
 import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 import { mergePrizeEnrichment } from "../src/lib/prizes";
@@ -8,12 +9,15 @@ import { mergePrizeEnrichment } from "../src/lib/prizes";
 const RECONCILE_SOURCES = new Set(["nyuka_now"]);
 
 async function main() {
-  // figisland_pb は詳細ページ取得型。既に価格まで取れているものは再取得しない。
-  const pricedPb = await prisma.item.findMany({
-    where: { source: "figisland_pb", price: { not: null } },
-    select: { sourceId: true },
+  // figisland_pb は詳細ページ取得型。「最後に詳細を取り直した時刻」を渡して古い順に一巡させる。
+  // （scrapedAt は upsert のたびに更新されるので、詳細を取った回だけ進む＝そのまま最終取得時刻になる）
+  const pbRows = await prisma.item.findMany({
+    where: { source: "figisland_pb" },
+    select: { sourceId: true, scrapedAt: true },
   });
-  const ctx = { skipDetailIds: new Set(pricedPb.map((p) => p.sourceId)) };
+  const ctx: ScrapeContext = {
+    detailFetchedAt: new Map(pbRows.map((r) => [r.sourceId, r.scrapedAt.getTime()])),
+  };
 
   const results = await runAllScrapers(ctx);
   let total = 0;
@@ -56,6 +60,7 @@ async function main() {
           highlights: item.highlights ?? null,
           hasLottery: item.hasLottery ?? null,
           officialUrl: item.officialUrl ?? null,
+          salesChannel: item.salesChannel ?? null,
           prizes,
           stores: item.stores ?? null,
           scrapedAt: new Date(),

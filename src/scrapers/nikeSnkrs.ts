@@ -104,7 +104,7 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
   // 過去に落ちた抽選は載せない（サイト側でも過去は除外されるが二重防御）。
   const cutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
 
-  // launchViews に載る＝抽選/LAUNCH（応募制）の商品だけを対象にする（通常先着販売は除外）。
+  // launchViews に載る＝LAUNCH商品（抽選 DRAW / 先着 LINE）。通常の常時販売品は除外される。
   for (const [productId, entry] of Object.entries(launchViews)) {
     const p = products[productId];
     if (!p) continue;
@@ -116,15 +116,26 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
     const eventDate = calDateUtc(c.y, c.mo, c.d);
     if (eventDate.getTime() < cutoff) continue;
 
-    // 応募締切(stopEntryDate)がある抽選(LEO/DAN型)はそれを、無い場合(LINE型=発売時抽選)は発売日時を見せる。
+    // launchViews に載る＝応募制、ではない。SNKRS の launch には2方式あり、
+    // `method` がそれを持っている:
+    //   DRAW … 抽選（応募期間があり、当選者だけが買える）
+    //   LINE … 先着（発売時刻に並ぶ＝早い者勝ち。抽選ではない）
+    // 実測: 「ナイキ リジュビネイト ラン」は method=LINE（SNKRSの表示も「8/10 0:00 より販売開始」）
+    // なのにハツコレは「抽選」と出し、/lottery にも載せていた。先着を抽選と書くと、
+    // せどらーは「応募すれば当たるかも」と読んで実際には売り切れに間に合わない。
+    const isDraw = entry?.method === "DRAW";
+    const eventType = isDraw ? "抽選" : "発売";
+
+    // 抽選は「いつまでに応募するか」、先着は「いつ売り出すか」が勝負どころ。
+    // 時刻は実在するときだけ出す（Nikeの日付のみの値は UTC 0時＝偽の時刻になる）。
     let eventDateText: string;
-    if (entry?.stopEntryDate) {
+    if (isDraw && entry?.stopEntryDate) {
       const s = jstParts(entry.stopEntryDate);
       const time = hasRealTime(entry.stopEntryDate) ? ` ${s.h}:${pad2(s.mi)}` : "";
       eventDateText = `抽選応募締切 ${s.mo}/${s.d}${time}`;
     } else {
       const time = hasRealTime(commerce) ? ` ${c.h}:${pad2(c.mi)}` : "";
-      eventDateText = `抽選 ${c.mo}/${c.d}${time}`;
+      eventDateText = `${isDraw ? "抽選" : "先着販売"} ${c.mo}/${c.d}${time}`;
     }
 
     const title: string = (p.title ?? "").trim();
@@ -139,7 +150,7 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
       title,
       genre: "スニーカー",
       subGenre: null,
-      eventType: "抽選",
+      eventType,
       eventDate,
       eventDateText,
       price: formatYen(p.currentPrice, p.currency),

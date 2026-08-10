@@ -4,7 +4,7 @@ import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
-import { computeMargin, formatDiff, formatPct, formatPriceDisplay, parseYen } from "@/lib/margin";
+import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
@@ -32,7 +32,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const description = [
-    dateStr ? `${eventDateHeading(item.eventType)}: ${dateStr}` : null,
+    dateStr ? `${eventDateHeading(item.eventType, item.eventDateText)}: ${dateStr}` : null,
     item.price ? `価格: ${item.price}` : null,
     `ジャンル: ${item.genre}`,
   ]
@@ -62,7 +62,6 @@ export default async function ItemPage({ params }: Props) {
   const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "long");
   // 月精度のものは合成した月初へのカウントダウンになるので出さない。
   const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
-  const margin = computeMargin(item.price, item.marketPrice);
   // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。
   // ※ 楽天検索へのリンクだけは生タイトルを使う経路が別にある（検索語は情報量が多い方が当たる）。
   const displayTitle = cleanListTitle(item.source, item.title);
@@ -74,7 +73,6 @@ export default async function ItemPage({ params }: Props) {
   // 一番くじ＝等級賞(A賞/ラストワン賞)＝labelが「賞」で終わる。raffle-kuji＝等級なしで
   // labelは当選確率(例「0.5%」)＝先頭ほど低確率＝高額の本命。二次相場(resale)は付く賞のみ。
   const prizesGraded = prizeGallery?.some((p) => /賞$/.test(p.label)) ?? false;
-  const prizesHaveResale = prizeGallery?.some((p) => !!p.resaleText) ?? false;
   // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
   const storeList = parseStoresJson(item.stores);
   // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
@@ -83,7 +81,9 @@ export default async function ItemPage({ params }: Props) {
   // Product構造化データの必須要件はoffers/review/aggregateRatingのいずれかをGoogleが要求する。
   // レビュー・評価は実データが無いので付けない（推測値は約束しない方針）。定価(price)は裏取り済みの
   // 事実なので、読めた場合のみOfferを付ける。availabilityは抽選/予約/発売予定で確定できないため省略。
-  const teika = parseYen(item.price);
+  // くじの「1回850円」は参加費であって商品の価格ではないので Offer には出さない
+  // （検索結果に「¥850」と出ると、当たる賞品がその値段で買えるように読める）。
+  const teika = item.price && isPerDrawFee(item.price) ? null : parseYen(item.price);
   const productNode = teika
     ? {
         "@type": "Product",
@@ -175,7 +175,7 @@ export default async function ItemPage({ params }: Props) {
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
             {dateLabel && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">{eventDateHeading(item.eventType)}</dt>
+                <dt className="text-neutral-500 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText)}</dt>
                 <dd className="font-semibold text-rose-600 dark:text-rose-400">
                   {dateLabel}
                   {cd && (
@@ -201,50 +201,17 @@ export default async function ItemPage({ params }: Props) {
                 <dd className="text-neutral-800 dark:text-neutral-100">{formatPriceDisplay(item.price)}</dd>
               </>
             )}
-            {item.marketPriceText && (
+            {/* 取扱店。一番くじは「賞品が何か」より先に「自分の行ける店に入るか」で動くので、
+                1回いくら（価格）とセットで出す。収集元の平文をそのまま出す＝推測を足さない。 */}
+            {item.salesChannel && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">相場</dt>
-                <dd className="text-neutral-800 dark:text-neutral-100">
-                  <span className="font-semibold text-amber-700 dark:text-amber-400">
-                    {item.marketPriceText}
-                  </span>
-                  {item.marketUrl && (
-                    <OutboundLink
-                      href={item.marketUrl}
-                      kind="market"
-                      source={item.source}
-                      itemId={item.id}
-                      className="ml-2 text-xs text-neutral-500 underline hover:text-rose-600 dark:text-neutral-400"
-                    >
-                      駿河屋で見る
-                    </OutboundLink>
-                  )}
-                </dd>
+                <dt className="text-neutral-500 dark:text-neutral-400">取扱店</dt>
+                <dd className="text-neutral-800 dark:text-neutral-100">{item.salesChannel}</dd>
               </>
             )}
-            {margin && (
-              <>
-                <dt className="text-neutral-500 dark:text-neutral-400">定価比</dt>
-                <dd>
-                  <span
-                    className={`font-semibold ${
-                      margin.isPremium
-                        ? "text-rose-600 dark:text-rose-400"
-                        : "text-neutral-700 dark:text-neutral-200"
-                    }`}
-                  >
-                    {formatPct(margin.pct)}（{formatDiff(margin.diff)}）
-                  </span>
-                  <span className="ml-2 text-xs text-neutral-500 dark:text-neutral-400">
-                    定価 ¥{margin.teika.toLocaleString("ja-JP")} → 相場 ¥
-                    {margin.market.toLocaleString("ja-JP")}
-                  </span>
-                  {margin.isPremium && (
-                    <span className="ml-1 text-xs text-rose-500">（プレ値）</span>
-                  )}
-                </dd>
-              </>
-            )}
+            {/* ※「相場 ¥…（駿河屋で見る）」と「定価比 +…%」の2行は 2026-08-10 に撤去。
+                相場の出どころが実態と食い違っていたため保留（lib/seo.ts の getPremiumItems
+                のコメント参照）。marketPrice* は DB に残るが表示してはいけない。 */}
           </dl>
 
           {/* 構造化された各賞ギャラリー（画像＋相場）はグリッド下の専用セクションで表示する。
@@ -325,7 +292,7 @@ export default async function ItemPage({ params }: Props) {
                 itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
-                {officialUrlLabel(item.highlights)}
+                {officialUrlLabel(item.highlights, item.source)}
               </OutboundLink>
             )}
             {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。
@@ -416,10 +383,8 @@ export default async function ItemPage({ params }: Props) {
           <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
             くじ（抽選）で当たる賞品です。
             {prizesGraded
-              ? "A賞・ラストワン賞は二次相場が付きやすい本命。"
+              ? "A賞・ラストワン賞が本命（本数が最も少ない）。"
               : "当選確率が低い賞（左上のバッジ）ほど本数が少なく高額の本命。"}
-            {prizesHaveResale &&
-              "相場は駿河屋（中古バラ売り）の参考値で、発売済みの賞にのみ表示されます（メルカリはこれより高い傾向）。"}
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {prizeGallery.map((p, i) => {
@@ -462,22 +427,7 @@ export default async function ItemPage({ params }: Props) {
                   <p className="line-clamp-3 flex-1 text-sm leading-snug text-neutral-800 dark:text-neutral-100">
                     {p.name}
                   </p>
-                  {p.resaleText &&
-                    (p.resaleUrl ? (
-                      <OutboundLink
-                        href={p.resaleUrl}
-                        kind="market"
-                        source={item.source}
-                        itemId={item.id}
-                        className="inline-flex w-fit items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 hover:bg-amber-200 dark:bg-amber-900/40 dark:text-amber-300"
-                      >
-                        相場 {p.resaleText} →
-                      </OutboundLink>
-                    ) : (
-                      <span className="inline-flex w-fit items-center rounded bg-amber-100 px-1.5 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/40 dark:text-amber-300">
-                        相場 {p.resaleText}
-                      </span>
-                    ))}
+                  {/* ※ 賞ごとの「相場 ¥…」バッジも同じ理由で撤去（2026-08-10）。 */}
                 </div>
               </div>
               );

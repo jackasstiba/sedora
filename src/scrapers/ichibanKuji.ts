@@ -1,5 +1,5 @@
 import { ScrapedItem } from "./types";
-import { extractKujiPrizes, formatKujiHighlights } from "./ichibanKujiEnrich";
+import { extractKujiFee, extractKujiPrizes, extractKujiStores, formatKujiHighlights } from "./ichibanKujiEnrich";
 import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 
 // 一番くじ倶楽部（BANDAI SPIRITS公式）のラインナップ。フィギュア景品・ラストワン賞は
@@ -66,6 +66,9 @@ export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
   for (const item of items) {
     try {
       const html = await fetchHtml(item.url);
+      // 採算計算の前提＝1回いくら／どこで引けるか。読めた時だけ入れる（推測はしない）。
+      item.price = extractKujiFee(html);
+      item.salesChannel = extractKujiStores(html);
       const prizes = extractKujiPrizes(html);
       if (prizes.length) {
         item.highlights = formatKujiHighlights(prizes);

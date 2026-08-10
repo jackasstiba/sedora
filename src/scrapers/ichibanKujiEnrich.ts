@@ -75,3 +75,42 @@ export function formatKujiHighlights(prizes: KujiPrize[]): string | null {
   const parts = prizes.map((p) => (p.name ? `${p.label} ${p.name}` : p.label));
   return `各賞ラインナップ：${parts.join(" ／ ")}（全${prizes.length}種）`;
 }
+
+// ── 商品概要（1回いくら／どこで引けるか） ─────────────────────────────────
+// 詳細ページの <div class="detail glBox"><ul> に、せどりの採算計算に必須の2つが入っている:
+//   <li>■メーカー希望小売価格：1回850円(税10％込)</li>
+//   <li>■取扱店：ファミリーマート、書店、ホビーショップ、一番くじ公式ショップなど</li>
+// これまでどちらも取っておらず、一番くじは **1回いくらかも、どこで引けるかも分からない**まま
+// 賞品ラインナップだけが並んでいた（ロット単価が出せない＝期待値を計算できない）。
+// オンラインくじ(raffle_kuji)は「1回 770円（税込）」を出せていたので、同じ土俵に揃える。
+
+function detailListItems(html: string): string[] {
+  const s = html.indexOf('class="detail glBox"');
+  if (s < 0) return [];
+  const e = html.indexOf("</div>", s);
+  const sec = e > s ? html.slice(s, e) : html.slice(s, s + 4000);
+  return [...sec.matchAll(/<li>([\s\S]*?)<\/li>/g)].map((m) =>
+    decodeEntities(m[1].replace(/<[^>]+>/g, " ").replace(/\s+/g, " "))
+  );
+}
+
+/** 「■メーカー希望小売価格：1回850円(税10％込)」→ "1回 850円（税込）"。読めなければ null。 */
+export function extractKujiFee(html: string): string | null {
+  for (const li of detailListItems(html)) {
+    if (!/希望小売価格|価格/.test(li)) continue;
+    const m = li.match(/1\s*回\s*([0-9,]+)\s*円/);
+    if (m) return `1回 ${m[1]}円（税込）`;
+  }
+  return null;
+}
+
+/** 「■取扱店：ファミリーマート、書店、…」→ "ファミリーマート、書店、…"。読めなければ null。 */
+export function extractKujiStores(html: string): string | null {
+  for (const li of detailListItems(html)) {
+    const m = li.match(/■?\s*取扱店\s*[:：]\s*(.+)$/);
+    if (!m) continue;
+    const v = m[1].trim();
+    if (v) return v;
+  }
+  return null;
+}

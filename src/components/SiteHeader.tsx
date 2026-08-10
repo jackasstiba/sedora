@@ -24,13 +24,8 @@ export async function SiteHeader() {
           </span>
         </Link>
 
-        {/* 相場・プレ値ビューへの固定導線（発売済みの高プレ値＝せどりの本命）。 */}
-        <Link
-          href="/premium"
-          className="shrink-0 rounded-full bg-rose-600 px-2.5 py-1 text-sm font-semibold text-white transition hover:bg-rose-700"
-        >
-          相場
-        </Link>
+        {/* ※「相場」ピル（/premium への導線）は 2026-08-10 に撤去。理由は lib/seo.ts の
+            getPremiumItems のコメント（相場の出どころが実態と食い違っていたため保留）。 */}
 
         {/* 抽選まとめビューへの固定導線（当選＝定価入手＝せどりの本命。抽選色＝紫）。 */}
         <Link
