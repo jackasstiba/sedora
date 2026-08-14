@@ -51,7 +51,10 @@ export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
         source: "pokemon_goods",
         sourceId: String(r.id),
         title: r.title,
-        genre: "ポケモン",
+        // 一番くじはポケモン題材でも独立ジャンル（classifyGenre・ichiban_kuji と揃える）。
+        // ジャンルが割れると別ジャンルページに分かれ、ページ単位の重複解消が届かずに
+        // 同じくじのカードが2枚出る（実測: ポケモンマスターズ EX 7th が #7566/#58799 で二重）。
+        genre: /一番くじ/.test(r.title) ? "一番くじ" : "ポケモン",
         subGenre: r.pokecen === 1 ? "ポケセン限定" : "グッズ",
         eventType: "発売",
         eventDate: null,

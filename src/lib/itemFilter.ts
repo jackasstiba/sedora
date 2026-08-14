@@ -140,7 +140,11 @@ function inheritEnrichment(keep: DedupeItem, from: DedupeItem): void {
     keep.marketUrl = keep.marketUrl ?? from.marketUrl;
     keep.marketSource = keep.marketSource ?? from.marketSource;
   }
-  if (!keep.hasLottery && from.hasLottery) keep.hasLottery = from.hasLottery;
+  // 根拠(highlights)を伴わない hasLottery は引き継がない。フラグだけ渡ると「抽選と
+  // 表示しているのに根拠が無い」行が生まれる（実測: tenbaiquest #23089 → channeltono
+  // #57088。tenbaiquest 自身は検査対象外だが、引き継ぎ先は対象なので audit が鳴る）。
+  // 残す側のタイトル/eventType が抽選なら抽選タブには元々入る＝表示上の損失は無い。
+  if (!keep.hasLottery && from.hasLottery && from.highlights) keep.hasLottery = from.hasLottery;
   if (!keep.highlights && from.highlights) keep.highlights = from.highlights;
 }
 

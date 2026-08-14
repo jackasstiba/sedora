@@ -31,6 +31,12 @@ rem --- 2. checks ---
 call :step "audit selftest"    "npm run audit:selftest"     || exit /b 1
 call :step "audit"             "npm run audit"              || exit /b 1
 call :step "audit facts"       "npm run audit:facts"        || exit /b 1
+rem "audit tomorrow" replays today's data with the calendar moved forward (+1 / +7 days)
+rem and fails if a check starts firing purely because dates passed. Added 2026-08-11
+rem after page_vanished, added the day before, stopped this run at 11:39 with a false
+rem ERROR: a genre page whose only item was dated 8/10 disappeared overnight. Catching
+rem that kind the same day it is written is the whole point. It writes nothing.
+call :step "audit tomorrow"    "npm run audit:tomorrow"     || exit /b 1
 
 echo [%date% %time%] data update and machine checks OK (rendered-page audit NOT run) >> %LOG%
 echo Data update and machine checks passed.

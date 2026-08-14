@@ -23,6 +23,8 @@
  *   「暦のせい」と誤って説明して見逃すことになる。
  */
 
+import { isStalePlan } from "./date";
+
 /** そのページが「過去日の商品を載せない」設計か。 */
 export function pageExcludesPast(name: string): boolean {
   return name !== "/premium" && !name.startsWith("/release/");
@@ -33,6 +35,14 @@ export type LostRow = {
   /** DBに今も存在するか（収集元から消えた行は false）。 */
   inDb: boolean;
   eventDate: Date | string | null;
+  /**
+   * 「2026年06月04週登場予定」のような**日付未確定のまま書かれた予定**。
+   *
+   * これを見ないと、`dropStalePlans`（掲載基準）が過ぎた予定を外した行が、eventDate=null の
+   * ため一律「説明がつかない」に入る。実測 2026-08-11: `audit:tomorrow` で暦を+30日進めたら
+   * `/genre/フィギュア` の43件がこの型で「説明のつかない消失」に化けた（暦が進んだだけ）。
+   */
+  eventDateText?: string | null;
 };
 
 export type PageLoss = {
@@ -56,6 +66,12 @@ export function classifyPageLoss(page: string, removed: LostRow[], today: Date):
       out.expired++;
       continue;
     }
+    // 日付未確定でも、本文の予定日が過ぎていれば掲載基準（dropStalePlans）が外す。
+    // 判定は掲載基準と同じ関数を使う＝**外す側と説明する側で別の物差しを持たない**。
+    if (excludesPast && isStalePlan(r.eventDate ?? null, r.eventDateText ?? null, today)) {
+      out.expired++;
+      continue;
+    }
     out.unexplained.push(r.id);
   }
   return out;
@@ -74,4 +90,42 @@ export function isReportableLoss(prevCount: number, nowCount: number, unexplaine
   const effective = Math.min(unexplained, net);
   if (effective < 3 || effective < prevCount * 0.05) return 0;
   return effective;
+}
+
+/**
+ * **ページが丸ごと消えた**ことを指摘するか（audit.ts (14a)）。
+ *
+ * 減少（isReportableLoss）と違って件数の下限を置かない。ページが消えるのは全滅であり、
+ * 「小さすぎる変動」は無いから。分けるのは理由だけ:
+ *
+ * ・在籍1件のジャンルは、その1件が過去日になれば必ずページごと消える（実測 2026-08-11:
+ *   `/genre/ソフビ・アートトイ` が #23086 の8/10開催で消えた）。暦が進んだだけなので鳴らさない。
+ * ・まだ未来／日付未定の行が残っているのにページが消えたなら、削ったのは掲載基準かコード。
+ *   これは /premium の事件と同じ型なので鳴らす。
+ * ・直前の実行の記録が無ければ理由を出せない。**説明できないものは通さない**ので鳴らす。
+ */
+/**
+ * ページ別「説明のつかない消失」の累計を進める（audit-profile.json に持つ値）。
+ *
+ * なぜ累計が要るか: 基準比の急減を見る検査 (14) は数日〜数週間前の基準と比べるので、
+ * 1回の実行の内訳だけでは「暦で減ったのか、こちらが削ったのか」を言えない。**説明のつかない
+ * 分だけ**を足し続ければ、毎日少しずつ削る型（1日ごとの閾値の下をすり抜ける）も残る。
+ *
+ * `accepted`（--update-baseline＝今の状態を受け入れた）で0に戻す。基準が変わったのに累計だけ
+ * 残ると、受け入れたはずの減少で永久に鳴り続ける＝消せない警告になる。
+ */
+export function accumulateUnexplained(
+  prev: Record<string, number>,
+  today: Record<string, number>,
+  accepted: boolean
+): Record<string, number> {
+  if (accepted) return {};
+  const out = { ...prev };
+  for (const [name, n] of Object.entries(today)) out[name] = (out[name] ?? 0) + n;
+  return out;
+}
+
+export function isReportableVanish(hasPrevRecord: boolean, unexplained: number): boolean {
+  if (!hasPrevRecord) return true;
+  return unexplained > 0;
 }

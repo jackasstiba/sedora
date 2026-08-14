@@ -14,8 +14,28 @@ export function calendarDate(year: number, month1: number, day: number): Date {
   return new Date(Date.UTC(year, month1 - 1, day));
 }
 
-/** 日本時間での「今日」を暦日（UTC 0時）で返す。過去判定の基準に使う。 */
+/**
+ * 日本時間での「今日」を暦日（UTC 0時）で返す。過去判定の基準に使う。
+ *
+ * `HATSUKORE_SIMULATE_TODAY=YYYY-MM-DD` を渡すと、その日を「今日」として扱う。
+ * **`npm run audit:tomorrow`（明日を先取りする自己テスト）専用**で、サイトの表示・掲載基準・
+ * 監査が「同じ今日」を見ている性質をそのまま利用するために、ここ1か所だけで受ける。
+ *
+ * なぜ要るか（2026-08-11 実測）: 前日に足した `page_vanished` が、翌朝いちばんに在籍1件の
+ * ジャンルが過去日で消えただけで ERROR を出し、**更新の関門を誤報で止めた**。データは1バイトも
+ * 変わっていないのに暦が進むだけで鳴る検査は、こうして翌朝まで分からない。先に日付だけ進めて
+ * 回せば、その日のうちに分かる。
+ *
+ * 本番では絶対に効かせない: `NODE_ENV=production`（Vercel のビルド・実行）では無視する。
+ * サイトの「今日」が環境変数で動くと、日付の間違いを環境変数のせいで作り込めてしまうため。
+ */
 export function todayJst(): Date {
+  const sim = process.env.HATSUKORE_SIMULATE_TODAY;
+  if (sim && process.env.NODE_ENV !== "production") {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(sim.trim());
+    if (!m) throw new Error(`HATSUKORE_SIMULATE_TODAY は YYYY-MM-DD で指定する: ${sim}`);
+    return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  }
   const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
   return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()));
 }

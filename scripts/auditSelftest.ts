@@ -13,8 +13,14 @@
  */
 import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
-import { classifyPageLoss, isReportableLoss, pageExcludesPast } from "../src/lib/pageLoss";
-import { resolveMonthDay } from "../src/scrapers/util";
+import {
+  accumulateUnexplained,
+  classifyPageLoss,
+  isReportableLoss,
+  isReportableVanish,
+  pageExcludesPast,
+} from "../src/lib/pageLoss";
+import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee } from "../src/lib/margin";
 import { eventDateHeading } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
@@ -140,6 +146,75 @@ const cases: Case[] = [
   // 「消えた行」には代表の入れ替えで入れ替わった分も混じるので、**実際に減った数**を上限にする
   { name: "説明なしは実際に減った数を上限にする", fn: () => isReportableLoss(100, 90, 30), want: 10 },
 
+  // ── ページが丸ごと消えたとき（実測 2026-08-11: /genre/ソフビ・アートトイ が在籍1件の
+  //    日付切れで消え、ERROR になった）。減少と同じく**理由で分ける**ことを固定する。
+  {
+    // 在籍1件のジャンルは、その1件が過去日になれば必ず消える。毎日鳴る誤報にしない。
+    name: "全部が日付切れで消えたページは鳴らない",
+    fn: () => isReportableVanish(true, 0),
+    want: false,
+  },
+  {
+    // まだ未来の行が残っているのに消えた＝掲載基準かコードが削った（/premium の型）。
+    name: "説明のつかない消失があるページは鳴る",
+    fn: () => isReportableVanish(true, 1),
+    want: true,
+  },
+  {
+    // 理由を出せないものを黙って通すと、この検査が生まれた事件を取り逃がす。
+    name: "直前の実行の記録が無ければ鳴る",
+    fn: () => isReportableVanish(false, 0),
+    want: true,
+  },
+  // 累計（基準を受け入れてから、説明のつかない形で何件減ったか）
+  {
+    name: "説明のつかない消失は日をまたいで足し上がる",
+    fn: () => accumulateUnexplained({ "/genre/フィギュア": 2 }, { "/genre/フィギュア": 3 }, false)["/genre/フィギュア"],
+    want: 5,
+  },
+  {
+    // 基準を受け入れたのに累計だけ残ると、受け入れたはずの減少で永久に鳴る＝消せない警告。
+    name: "基準を受け入れたら累計は0に戻る",
+    fn: () => Object.keys(accumulateUnexplained({ "/genre/フィギュア": 9 }, {}, true)).length,
+    want: 0,
+  },
+  {
+    // 日付未確定でも本文の予定日が過ぎれば掲載基準(dropStalePlans)が外す。**外す側と説明する側で
+    // 別の物差しを持つと、暦のせいの消失が「説明なし」に化ける**（実測: audit:tomorrow +30日で
+    // /genre/フィギュア の43件がこれだった）。
+    name: "過ぎた予定（日付未確定）で外れた行は日付切れ扱い",
+    fn: () =>
+      classifyPageLoss(
+        "/genre/フィギュア",
+        [{ id: 1, inDb: true, eventDate: null, eventDateText: "2026年07月04週登場予定" }],
+        today
+      ).expired,
+    want: 1,
+  },
+  {
+    // まだ来ていない予定は外れる理由にならない（外れていたらこちらの都合で削っている）。
+    name: "まだ来ていない予定で消えた行は説明がつかない",
+    fn: () =>
+      classifyPageLoss(
+        "/genre/フィギュア",
+        [{ id: 1, inDb: true, eventDate: null, eventDateText: "2026年12月04週登場予定" }],
+        today
+      ).unexplained.length,
+    want: 1,
+  },
+  {
+    // 在籍1件のジャンルが開催日を過ぎて消えた実データの再現（#23086・8/10開催が 8/11 に抜けた）。
+    // 日付はこのテストの固定日 2026-08-08 に合わせた過去日。expired と分かるから鳴らない。
+    name: "在籍1件・開催日が過ぎたジャンルは日付切れで説明がつく",
+    fn: () =>
+      classifyPageLoss(
+        "/genre/ソフビ・アートトイ",
+        [{ id: 23086, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 7)) }],
+        today
+      ).unexplained.length,
+    want: 0,
+  },
+
   // ── 2026-08-10 の実地検証（せどらーとして仕入れようとして詰まった型）の固定 ──────
   //
   // ここから下は「直したこと」ではなく「二度と壊れないこと」を押さえる。どれも純関数なので
@@ -255,6 +330,62 @@ const cases: Case[] = [
   // サンリオ公式のニュースまで落ちる＝正しいリンクの巻き添え）。
   { name: "お知らせ配下は個別商品ページではない", fn: () => isSingleProductUrl("https://www.sanrio.co.jp/news/goods/mx-donki-photo-badge-20260806/"), want: false },
   { name: "キャンペーンページは個別商品ページではない", fn: () => isSingleProductUrl("https://www.kfc.co.jp/campaign/umamusume"), want: false },
+
+  // ── 2026-08-15 追加: 開催告知除去の宙ぶらりん・告知ラッパー・値引き告知 ──
+  // 鳴った側: TRAILING_DATE が日付だけ削り「〜東京・大阪で」と地名＋助詞が残った（実測2件）
+  {
+    name: "日付告知の手前の地名＋で も一緒に落とす",
+    fn: () => cleanTitle("『約束のネバーランド』10周年記念 × プリンセスカフェ、東京・大阪で8月25日より開催!"),
+    want: "『約束のネバーランド』10周年記念 × プリンセスカフェ",
+  },
+  {
+    name: "既に切り詰められて保存済みの「〜東京で」も再クリーンで直る",
+    fn: () => cleanTitle("『「アオハル・ワンスモア」Drink Stand Fair』東京で"),
+    want: "『「アオハル・ワンスモア」Drink Stand Fair』",
+  },
+  // 鳴らない側: 文中の地名や、末尾が「で」でないタイトルは触らない
+  {
+    name: "文中の地名は巻き添えにしない",
+    fn: () => cleanTitle("仮面ライダーストア東京で販売するグッズ"),
+    want: "仮面ライダーストア東京で販売するグッズ",
+  },
+  {
+    name: "「!」で終わる商品名は触らない",
+    fn: () => cleanTitle("この素晴らしい世界に祝福を! コラボカフェ"),
+    want: "この素晴らしい世界に祝福を! コラボカフェ",
+  },
+  // 「◯◯」が登場！ ラッパー（実測: pokemon_goods が ichiban_kuji と同じくじを別タイトルで
+  // 載せ、同じ 1kuji.com URL のカードが2枚並んだ）
+  {
+    name: "「◯◯」が登場！は中身の商品名だけにする",
+    fn: () => cleanTitle("「一番くじ ポケモンマスターズ EX 7th Anniversary」が登場！"),
+    want: "一番くじ ポケモンマスターズ EX 7th Anniversary",
+  },
+  // 値引き告知だけの断片が商品名として採用されていた（実測: 「最大96％オフ」が一覧に）
+  {
+    name: "セール告知ツイート（商品名なし）は掲載しない",
+    fn: () =>
+      hasProductSegment(
+        "channeltono",
+        "もうすぐ8月14日12時より　駿河屋決算セール第3弾が開催です　最大96％オフ　タイムセールも同時開催です"
+      ),
+    want: false,
+  },
+  {
+    name: "割引語があっても商品名がある投稿は掲載する",
+    fn: () => hasProductSegment("channeltono", "あみあみで30％オフ　METAL STRUCTURE 解体匠機 RX-93 νガンダム"),
+    want: true,
+  },
+  // 節末に残る接続副詞（「〜再販さらに」）は落とす
+  {
+    name: "節末の「さらに」を落として商品名だけにする",
+    fn: () =>
+      cleanListTitle(
+        "channeltono",
+        "もうすぐ8月3日16時よりS.H.Figuarts 呪術廻戦 脹相や伏黒甚爾 再販さらに　五条悟-呪術高専- 再販や夏油傑-呪術高専- 再販が予約開始！即完売注意！ショップまとめ"
+      ),
+    want: "S.H.Figuarts 呪術廻戦 脹相や伏黒甚爾",
+  },
 ];
 
 let ng = 0;

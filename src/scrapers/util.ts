@@ -117,6 +117,13 @@ const NOISE_TAGS =
 const LEADING_DATE = /^\d{1,2}\/\d{1,2}(?:・\d{1,2}\/\d{1,2})*\s*(?:発売|抽選|予約)?\s*[｜|]\s*/;
 const TRAILING_DATE =
   /\s*\d{1,2}月\d{1,2}日(?:から|より)?\s*(?:順次)?\s*(?:発売|開催|登場|開始|実施|販売|予約開始|受付開始)(?:決定|予定|中)?\s*[!！]*\s*$/;
+// TRAILING_DATE が「東京・大阪で8月25日より開催!」の日付部分だけを削ると、
+// 「〜プリンセスカフェ、東京・大阪で」と地名＋助詞が宙ぶらりんに残る（実測2件）。
+// 地名は語彙を固定し、末尾の「(、)地名(・地名)*(ほか)で/にて」だけを落とす。
+const LOC = "東京|大阪|京都|名古屋|福岡|札幌|仙台|広島|横浜|池袋|秋葉原|渋谷|新宿|原宿|梅田|難波|天神|沖縄|全国|各地";
+const TRAILING_LOCATION = new RegExp(
+  `\\s*、?\\s*(?:${LOC})(?:・(?:${LOC}))*(?:ほか|など)?(?:で|にて)$`
+);
 
 /** タイトルから日付告知・編集タグを取り除いて商品名として読みやすくする */
 export function cleanTitle(raw: string): string {
@@ -124,6 +131,13 @@ export function cleanTitle(raw: string): string {
   t = t.replace(NOISE_TAGS, "");
   t = t.replace(LEADING_DATE, "");
   t = t.replace(TRAILING_DATE, "");
+  t = t.replace(TRAILING_LOCATION, "");
+  // 「◯◯」が登場！ 型の告知ラッパー。外側の「」ごと剥がして商品名だけにする。
+  // 実測: pokemon_goods「「一番くじ ポケモンマスターズ EX 7th Anniversary」が登場！」が
+  // ichiban_kuji の同一くじとタイトル不一致になり、同じ1kuji.comのURLを指す2枚が並んだ。
+  t = t.replace(/\s*(?:が|も)\s*(?:新?登場|お目見え)\s*[!！]*\s*$/, "");
+  const wrapped = t.match(/^「(.{4,})」$/);
+  if (wrapped) t = wrapped[1].trim();
   t = t.trim();
   // 削りすぎて短くなった場合は元に戻す（安全側）
   return t.length >= 4 ? t : raw.trim();

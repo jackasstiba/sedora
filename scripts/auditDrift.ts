@@ -19,6 +19,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { cleanListTitle, __debugSegments } from "../src/lib/title";
 import { displayEventType, eventDateLabel } from "../src/lib/date";
+import { accumulateUnexplained } from "../src/lib/pageLoss";
 
 const PROFILE_PATH = path.join(process.cwd(), "audit-profile.json");
 const MIRROR_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
@@ -65,6 +66,13 @@ type Profile = {
   // → データが変わっていないのに基準を進めない。同じデータのまま何度回しても、
   //   比較の相手は「最後にデータが変わったときの状態」のまま固定される。
   pagesFingerprint?: string;
+  // ページ別「説明のつかない消失」の**累計**（audit-baseline を受け入れてから今日まで）。
+  //
+  // 1回の実行の内訳（pageIds の差分）は (14b) が見るが、**基準比の急減**を見る (14) は数日〜
+  // 数週間前の基準と比べるので、1日分の内訳では足りない。毎日少しずつ削られる型は
+  // 1日ごとの閾値の下をすり抜けるため、**説明のつかない分だけを足し続ける**。
+  // `--update-baseline`（＝今の状態を受け入れる）で0に戻す。
+  unexplainedSince?: Record<string, number>;
 };
 
 function mean(xs: number[]): number {
@@ -108,9 +116,15 @@ export function readPreviousPageIds(): {
   ids: Record<string, number[]>;
   runAt: string | null;
   fingerprint: string | null;
+  unexplainedSince: Record<string, number>;
 } {
   const p = loadProfile();
-  return { ids: p?.pageIds ?? {}, runAt: p?.pagesRunAt ?? null, fingerprint: p?.pagesFingerprint ?? null };
+  return {
+    ids: p?.pageIds ?? {},
+    runAt: p?.pagesRunAt ?? null,
+    fingerprint: p?.pagesFingerprint ?? null,
+    unexplainedSince: p?.unexplainedSince ?? {},
+  };
 }
 
 /** 比率の変化がしきい値を超えたものを文章にする。 */
@@ -216,7 +230,9 @@ export function runDrift(
   pageCounts: Record<string, number> = {},
   pageIds: Record<string, number[]> = {},
   /** データの状態（件数＋最終取得時刻）。同じなら基準を進めない。 */
-  fingerprint = ""
+  fingerprint = "",
+  /** この実行で出た「説明のつかない消失」（ページ別）。累計に足す。 */
+  unexplainedToday: Record<string, number> = {}
 ): void {
   const prev = loadProfile();
   const now = buildProfile(shown);
@@ -289,11 +305,34 @@ export function runDrift(
       `\n（ページ比較の基準は据え置き: データが前回の観測から変わっていないため、` +
         `比較の相手は ${prev?.pagesRunAt ?? "?"} 時点のまま）`
     );
+  // 消えたページの **最後に載っていた id** は捨てずに持ち越す。
+  //
+  // 実測 2026-08-11: `/genre/ソフビ・アートトイ` が在籍1件の日付切れで消えた回に、この記録も
+  // 一緒に消えた。すると次回以降は「消えた理由を確かめる相手」が存在せず、audit (14a) は
+  // 暦のせいだと分かっているものを永久に ERROR と言い続ける（説明できないものは通さない設計
+  // なので、記録が無ければ鳴るのが正しい＝**記録の方を残す**のが直し方）。
+  //
+  // 件数（pages）は持ち越さない。あちらは「前回と比べて何が変わったか」の観測で、持ち越すと
+  // 「ページが消えた」を毎回言い続けることになるため。役割が違うので揃えない。
+  const carriedPageIds = advancePages
+    ? { ...Object.fromEntries(Object.entries(prev?.pageIds ?? {}).filter(([name]) => !(name in pageIds))), ...pageIds }
+    : prev?.pageIds;
+  // 説明のつかない消失の累計。基準を受け入れた時（--update-baseline）に0へ戻す＝
+  // 「最後に受け入れてから、暦でも収集元でも説明のつかない形で何件減ったか」を持つ。
+  // 基準を進めない実行（同じデータで2回目）では二重に足さない。
+  const nextUnexplained = accumulateUnexplained(
+    prev?.unexplainedSince ?? {},
+    // 基準を進めない実行（同じデータで2回目）では二重に足さない。
+    advancePages ? unexplainedToday : {},
+    update
+  );
+
   const profile: Profile = {
     updatedAt: update ? new Date().toISOString() : prev?.updatedAt ?? new Date().toISOString(),
     sources: update ? now : prev?.sources ?? now,
     pages: advancePages ? pageCounts : prev?.pages,
-    pageIds: advancePages ? pageIds : prev?.pageIds,
+    pageIds: carriedPageIds,
+    unexplainedSince: nextUnexplained,
     pagesRunAt: advancePages ? new Date().toISOString() : prev?.pagesRunAt,
     pagesFingerprint: advancePages ? fingerprint : prev?.pagesFingerprint,
   };

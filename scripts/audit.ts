@@ -29,7 +29,7 @@ import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
-import { classifyPageLoss, isReportableLoss } from "../src/lib/pageLoss";
+import { classifyPageLoss, isReportableLoss, isReportableVanish } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { getSitemapItemRefs } from "../src/lib/seo";
@@ -40,6 +40,11 @@ const BASELINE_PATH = path.join(process.cwd(), "audit-baseline.json");
 const args = process.argv.slice(2);
 const UPDATE_BASELINE = args.includes("--update-baseline");
 const CHECK_LINKS = args.includes("--links");
+// `--dry`: 何も書かずに判定だけする（`npm run audit:tomorrow` が日付を変えて何度も回すため）。
+// 書いてしまうと、**検証のための実行が次回の比較基準を汚す**（2026-08-09 に実際に踏んだ型）。
+const DRY = args.includes("--dry");
+// `--machine`: 検査の key・レベル・件数を機械可読で出す（人向けの見出しは日本語で key を含まない）。
+const MACHINE = args.includes("--machine");
 
 // ── 所見の記録とラチェット ─────────────────────────────────────────────────
 type Level = "error" | "warn";
@@ -322,6 +327,10 @@ async function main() {
       // 突合の対象から外す（実測 #35299「8月8日まで仙台七夕まつりに掲出!」＝開催 8/6〜8/8）。
       // 締切・終了を表す助詞が続く日付を比較すると、正しいデータを誤りとして鳴らし続ける。
       const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!\s*(?:まで|迄))/g)]
+        // 「8月13日よりセブンで先行販売!」の日付は**先行販売日**。バッジ（一般発売・開催日）と
+        // 異なるのが記事どおり（実測 #57152 ちいかわ: 先行8/13・一般8/24 の両方が記事の事実。
+        // 収集元で裏取り済み）。日付の直後に「先行」が続くものは突合の対象から外す。
+        .filter((m) => !/先行/.test(r.title.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 14)))
         .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
         .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
       if (hits.length !== 1) continue;
@@ -722,16 +731,62 @@ async function main() {
     console.log(`(参考) 画像なし ${noImg.length}/${shown.length}件（${Math.round(rate * 100)}%）`);
   }
 
+  // ── ページから消えた行の理由分け（(14)(14a)(14b) が共通で使う） ────────────────
+  //
+  // 「直前の実行に載っていた id」と今の id を比べ、消えた行を1件ずつ
+  // 「収集元から消えた／日付が過ぎた／説明がつかない」に分ける（src/lib/pageLoss.ts）。
+  // **3つの検査が別々に理由を数え直すと必ずズレる**ので、ここで1回だけ作る。
+  const inDbById = new Map(all.map((r) => [r.id, r]));
+  const lossByPage = new Map<string, ReturnType<typeof classifyPageLoss>>();
+  for (const [name, prevIds] of Object.entries(prevPageIds.ids)) {
+    const nowRows = pages.find((p) => p.name === name)?.rows;
+    const nowIds = new Set((nowRows ?? []).map((r) => r.id));
+    const removed = prevIds
+      .filter((id) => !nowIds.has(id))
+      .map((id) => ({
+        id,
+        inDb: inDbById.has(id),
+        eventDate: inDbById.get(id)?.eventDate ?? null,
+        eventDateText: inDbById.get(id)?.eventDateText ?? null,
+      }));
+    if (removed.length) lossByPage.set(name, classifyPageLoss(name, removed, today));
+  }
+  // 説明のつかない消失の**累計**（基準を受け入れてから今日まで）。
+  // (14) は数日〜数週間前の基準と比べるので、1回の実行の内訳だけでは足りない。
+  const unexplainedToday: Record<string, number> = {};
+  for (const [name, loss] of lossByPage) if (loss.unexplained.length) unexplainedToday[name] = loss.unexplained.length;
+  const unexplainedTotal = (name: string) =>
+    (prevPageIds.unexplainedSince[name] ?? 0) + (unexplainedToday[name] ?? 0);
+
   // (14) ページ件数の急変（基準値比。ページが空になった・半減したのは事故）
+  //
+  // **件数だけで判定してはいけない**（2026-08-11 に `npm run audit:tomorrow` が実測）。
+  // データを変えずに暦を+7日進めると `/genre/スニーカー` が 21→9件（-57%）で ERROR になった。
+  // 中身は発売日を過ぎたスニーカーが抜けただけ＝翌週の更新を誤報で止めるところだった。
+  // スニーカーは発売日当日に消える商品なので、薄いページは暦だけで半減しうる。
+  //
+  // かといって基準比の検査を捨てると、この検査が生まれた事件（/premium を自分のコード変更で
+  // 63→36件に削った）を長い目で見る者がいなくなる（(14b) は直前の実行との比較なので、
+  // 毎日少しずつ削られる型は閾値の下をすり抜ける）。
+  // → **件数の急減は入口の条件のままにして、「説明のつかない消失の累計」がある時だけ鳴らす。**
+  //   累計は基準を受け入れる（--update-baseline）たびに0に戻る＝「最後に受け入れてから
+  //   説明のつかない形で何件減ったか」を見ることになる。
   {
     const bad: string[] = [];
+    const calendar: string[] = [];
     for (const p of pages) {
       const prev = baseline.pages?.[p.name];
       if (prev == null || prev < 10) continue;
-      if (p.rows.length === 0) bad.push(`${p.name} が0件（基準${prev}件）`);
-      else if (p.rows.length < prev * 0.5) bad.push(`${p.name} が急減 ${prev}→${p.rows.length}件`);
+      const dropped = p.rows.length === 0 || p.rows.length < prev * 0.5;
+      if (!dropped) continue;
+      const how = p.rows.length === 0 ? `0件（基準${prev}件）` : `急減 ${prev}→${p.rows.length}件`;
+      const unexplained = unexplainedTotal(p.name);
+      if (unexplained > 0)
+        bad.push(`${p.name} が${how}。基準を受け入れてから**説明のつかない消失が累計${unexplained}件**`);
+      else calendar.push(`${p.name}: ${how}（説明のつかない消失は累計0件＝暦・収集元で説明がつく）`);
     }
     report("page_count_drop", "ページの掲載件数が急減した", "error", bad, baseline);
+    if (calendar.length) console.log(`(参考) 件数は急減したが説明はついているページ: ${calendar.join("  /  ")}`);
   }
 
   // (14a) **ページが丸ごと消えた**。
@@ -743,11 +798,45 @@ async function main() {
   //
   // `/release/*` は暦で自然に増減する（その月に商品が無ければページ自体が無い）ので対象外。
   // 意図して消したページ（例: /premium）は `--update-baseline` で受け入れる＝基準から消える。
+  //
+  // ただし**消えたこと自体では鳴らさない**（2026-08-11 実測）。`/genre/ソフビ・アートトイ` は
+  // 在籍1件（#23086・8/10 開催）で、今日になって過去日で抜けた結果ページごと消えた。ジャンル
+  // ページは行が1件も無ければ作られない（src/lib/pages.ts）ので、**在籍の薄いジャンルは暦が
+  // 進むだけで必ず消える**＝毎日鳴り続ける誤報になる。これは (14b) が `/genre/スニーカー` で
+  // 直したのと同じ型が、行ではなく**ページの単位**で再発したもの。
+  //
+  // なので消えたページも (14b) と同じ理由分け（src/lib/pageLoss.ts）に通し、**説明のつかない
+  // 消失が1件でもあるページだけ**を ERROR にする。直前の実行の記録が無い（初回・
+  // audit-profile.json を消した後）ページは理由を出せないので、従来どおり ERROR のまま
+  // ＝説明できないものを黙って通さない。
   {
     const now = new Set(pages.map((p) => p.name));
-    const vanished = Object.keys(baseline.pages ?? {})
-      .filter((name) => !now.has(name) && !name.startsWith("/release/"))
-      .map((name) => `${name} が存在しない（基準では ${baseline.pages?.[name]}件あった）`);
+    const vanished: string[] = [];
+    const explainedVanish: string[] = [];
+    for (const name of Object.keys(baseline.pages ?? {})) {
+      if (now.has(name) || name.startsWith("/release/")) continue;
+      const head = `${name} が存在しない（基準では ${baseline.pages?.[name]}件あった）`;
+      const prevIds = prevPageIds.ids[name];
+      const loss = lossByPage.get(name);
+      if (!prevIds || !prevIds.length || !loss) {
+        if (isReportableVanish(false, 0))
+          vanished.push(`${head}。直前の実行の記録が無く、消えた理由を確かめられない`);
+        continue;
+      }
+      if (isReportableVanish(true, loss.unexplained.length)) {
+        vanished.push(
+          `${head}。**説明のつかない消失 ${loss.unexplained.length}件**` +
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}）例: ${loss.unexplained
+              .slice(0, 5)
+              .map((id) => `#${id}`)
+              .join(" ")}`
+        );
+      } else {
+        explainedVanish.push(
+          `${name}: 全${prevIds.length}件が日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}`
+        );
+      }
+    }
     report(
       "page_vanished",
       "基準にあったページが丸ごと無くなっている",
@@ -756,6 +845,8 @@ async function main() {
       baseline,
       Object.keys(baseline.pages ?? {}).length
     );
+    if (explainedVanish.length)
+      console.log(`(参考) 暦・収集元で説明のつくページ消失: ${explainedVanish.join("  /  ")}`);
   }
 
   // (14b) **説明のつかない掲載減**。件数の割合ではなく、消えた行を1件ずつ理由に分ける。
@@ -773,7 +864,6 @@ async function main() {
   // ではなく **自分のコード変更が表示範囲を削っていないか** なので、同じデータに対する
   // 前後比較でしか出ない（[[System/rules]]「参照点も分ける」）。
   {
-    const inDb = new Map(all.map((r) => [r.id, r]));
     const bad: string[] = [];
     let comparedPages = 0;
     const explained: string[] = [];
@@ -781,12 +871,9 @@ async function main() {
       const prevIds = prevPageIds.ids[p.name];
       if (!prevIds || prevIds.length < 10) continue;
       comparedPages++;
-      const nowIds = new Set(p.rows.map((r) => r.id));
-      const removed = prevIds
-        .filter((id) => !nowIds.has(id))
-        .map((id) => ({ id, inDb: inDb.has(id), eventDate: inDb.get(id)?.eventDate ?? null }));
-      if (!removed.length) continue;
-      const loss = classifyPageLoss(p.name, removed, today);
+      const loss = lossByPage.get(p.name);
+      if (!loss) continue; // 消えた行が無い
+      const removed = loss.expired + loss.gone + loss.unexplained.length;
       const n = isReportableLoss(prevIds.length, p.rows.length, loss.unexplained.length);
       if (n > 0) {
         bad.push(
@@ -796,9 +883,9 @@ async function main() {
               .map((id) => `#${id}`)
               .join(" ")}`
         );
-      } else if (loss.expired || loss.gone || loss.unexplained.length) {
+      } else if (removed) {
         explained.push(
-          `${p.name}: -${removed.length}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 説明なし ${loss.unexplained.length}）`
+          `${p.name}: -${removed}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 説明なし ${loss.unexplained.length}）`
         );
       }
     }
@@ -1067,14 +1154,16 @@ async function main() {
     );
   }
 
-  runDrift(
-    shown,
-    today,
-    UPDATE_BASELINE,
-    Object.fromEntries(pages.map((p) => [p.name, p.rows.length])),
-    Object.fromEntries(pages.map((p) => [p.name, p.rows.map((r) => r.id)])),
-    dataFingerprint
-  );
+  if (!DRY)
+    runDrift(
+      shown,
+      today,
+      UPDATE_BASELINE,
+      Object.fromEntries(pages.map((p) => [p.name, p.rows.length])),
+      Object.fromEntries(pages.map((p) => [p.name, p.rows.map((r) => r.id)])),
+      dataFingerprint,
+      unexplainedToday
+    );
 
   // ── 出力 ──
   const errors = findings.filter((f) => f.level === "error");
@@ -1111,7 +1200,13 @@ async function main() {
   const nextPages: Record<string, number> = {};
   for (const p of pages) nextPages[p.name] = p.rows.length;
 
-  if (UPDATE_BASELINE) {
+  if (MACHINE) {
+    // 見出しは日本語で key を含まないので、機械が読む行を別に出す（key・レベル・件数）。
+    for (const f of findings) console.log(`##CHECK\t${f.key}\t${f.level}\t${f.items.length}`);
+    console.log(`##TODAY\t${today.toISOString().slice(0, 10)}`);
+  }
+
+  if (UPDATE_BASELINE && !DRY) {
     fs.writeFileSync(
       BASELINE_PATH,
       JSON.stringify(
