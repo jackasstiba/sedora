@@ -416,25 +416,54 @@ function dedupeSameSourceExact<T extends DedupeItem>(items: T[]): T[] {
  * 2枚並んでいた。生タイトルが1文字違わず同じなら別商品ではありえないので、長さ条件なしで畳む。
  */
 function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
+  // 同一ソース・同一生タイトルでまず束ね、日付ごとの扱いはグループ内で決める。
+  // 2026-08-15 実測: トレカ速報が同じ商品を「発売日 2026年11月未定」の旧記事と
+  // 「11/21」の確定記事の両方で持ち続け（BS77・アイカツの2組）、day をキーに含む
+  // 従来ロジックでは別グループになって二重掲載が残った。生タイトルが1字違わず同じで
+  // 片方だけ日付なしなら、それは同じ商品の「月未定だった頃の記事」＝日付なし側を落とす。
+  // 日付ありが複数（再販で別日）はどちらも本物なので温存する。
   const groups = new Map<string, T[]>();
   for (const it of items) {
-    const day = it.eventDate ? dayISO(it.eventDate) : "none";
-    const k = `${it.source}|${it.title}|${day}`;
+    const k = `${it.source}|${it.title}`;
     (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
   }
   const drop = new Set<number>();
   for (const g of groups.values()) {
     if (g.length < 2) continue;
-    let best = g[0];
-    for (const it of g) {
-      if (it === best) continue;
-      const d = repScore(it) - repScore(best);
-      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    const dated = g.filter((it) => it.eventDate);
+    const dateless = g.filter((it) => !it.eventDate);
+
+    // 日付ありは同じ日どうしだけ畳む（別日＝再販は温存）
+    const byDay = new Map<string, T[]>();
+    for (const it of dated) {
+      const day = dayISO(it.eventDate!);
+      (byDay.get(day) ?? byDay.set(day, []).get(day)!).push(it);
     }
-    for (const it of g) {
-      if (it.id === best.id) continue;
-      inheritEnrichment(best, it);
-      drop.add(it.id);
+    const collapse = (sub: T[]) => {
+      if (sub.length < 2) return;
+      let best = sub[0];
+      for (const it of sub) {
+        if (it === best) continue;
+        const d = repScore(it) - repScore(best);
+        if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+      }
+      for (const it of sub) {
+        if (it.id === best.id) continue;
+        inheritEnrichment(best, it);
+        drop.add(it.id);
+      }
+    };
+    for (const sub of byDay.values()) collapse(sub);
+
+    if (dated.length > 0 && dateless.length > 0) {
+      // 日付確定版があるなら「月未定」版は同じ商品の古い記事。代表へ引き継いで落とす。
+      const keep = dated.find((it) => !drop.has(it.id)) ?? dated[0];
+      for (const it of dateless) {
+        inheritEnrichment(keep, it);
+        drop.add(it.id);
+      }
+    } else {
+      collapse(dateless);
     }
   }
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;

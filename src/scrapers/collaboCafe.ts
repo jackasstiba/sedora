@@ -42,6 +42,22 @@ const LISTING_URLS = [
   "https://collabo-cafe.com/events/category/gengaten-tenjikai/",
 ];
 
+// カテゴリは /page/2/ 以降にも先日程の記事が残る（実測: 1ページ目は約16記事で、
+// 投稿が多いカテゴリでは開催前のイベントが2ページ目以降に流れる）。カテゴリページだけ
+// 2ページまで巡回する（トップは新着横断なので1ページで足りる。3ページ目以降は過去
+// 開催が大半＝全記事エンリッチの往復が重くなるだけなので取らない）。
+const CATEGORY_PAGES = 2;
+function listingUrlsWithPages(): string[] {
+  const out: string[] = [];
+  for (const base of LISTING_URLS) {
+    out.push(base);
+    if (base.includes("/events/category/")) {
+      for (let p = 2; p <= CATEGORY_PAGES; p++) out.push(`${base}page/${p}/`);
+    }
+  }
+  return out;
+}
+
 // article class の event-category-* から拾う種別スラッグ → 表示ラベル
 const TYPE_LABELS: Record<string, string> = {
   cafe: "カフェ",
@@ -118,8 +134,13 @@ function parseArticle(block: string): ScrapedItem | null {
 export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
   const byId = new Map<string, ScrapedItem>();
 
-  for (const listUrl of LISTING_URLS) {
-    const html = await fetchHtml(listUrl);
+  for (const listUrl of listingUrlsWithPages()) {
+    let html: string;
+    try {
+      html = await fetchHtml(listUrl);
+    } catch {
+      continue; // /page/N/ が無いカテゴリ（記事が少ない）は飛ばす
+    }
     for (const m of html.matchAll(ARTICLE_RE)) {
       const item = parseArticle(m[0]);
       if (item && !byId.has(item.sourceId)) byId.set(item.sourceId, item);

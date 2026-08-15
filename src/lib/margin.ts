@@ -14,6 +14,21 @@ export function parseYen(price: string | null | undefined): number | null {
   return Number.isFinite(max) && max > 0 ? max : null;
 }
 
+/**
+ * トレカ系で「単パック表記なのにBOX級の価格」の疑い（audit の価格検査と同じ観点）。
+ * 2026-08-15 実測: トレカ速報の一部商品（WS anemoi 52,800円等）は、同シリーズの他商品が
+ * 【10パック入りBOX】を明記する中で販売単位の表記が無く、価格が定価ともBOX価格とも
+ * 裏取りできない。裏取りできない価格は表示しない（[[UIラベルは裏取り済みのみ約束]]）。
+ */
+export function isSuspectPackPrice(genre: string | null, title: string, price: string | null): boolean {
+  if (!price) return false;
+  const y = parseYen(price.split(" / ")[0]);
+  if (y == null || y < 3000) return false;
+  if (genre !== "トレカ" && genre !== "ポケモン") return false;
+  const isBoxWord = /BOX|ＢＯＸ|box|箱|入り|カートン|セット/.test(title);
+  return /(?:ブースター|スターター)?パック/.test(title) && !isBoxWord;
+}
+
 export type Margin = {
   teika: number; // 定価
   market: number; // 相場(中古)

@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
 import { fetchHtml, parseYyyymmdd, sleep } from "./util";
+import { isSuspectPackPrice } from "../lib/margin";
 
 // トレカ速報（ota-goods.info）のTCG発売日カレンダー。
 // 既存の torecamap は「更新が遅く陳腐化しがち」なため、より網羅的で最新の一次カレンダーで補強する。
@@ -10,7 +11,9 @@ import { fetchHtml, parseYyyymmdd, sleep } from "./util";
 // 商品 <li.goods_info> が同列で交互に並ぶ（date-grouped flat list）。商品の日付は
 // 直前の releasedate-section から引き継ぐ。各商品に 画像/商品名/価格/メーカー/安定ID(archives/{id}) あり。
 const BASE = "https://ota-goods.info/tcg/month_release.php";
-const MONTHS_AHEAD = 2; // 今月＋2ヶ月分
+// 2026-08-15 実測: 先2ヶ月では 11月28・12月8・1月1件が窓の外だった（TCGの予約は
+// 3〜5ヶ月先まで告知される）。本人が収集元で取り漏れを発見したのを受けて拡張。
+const MONTHS_AHEAD = 5; // 今月＋5ヶ月分
 
 function monthParams(): string[] {
   const out: string[] = [];
@@ -108,16 +111,19 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
 
             const imageUrl = toFullImage($li.find(".thumbnail img").first().attr("src"));
 
+            const genre = classifyTorecasokuGenre(title);
             items.push({
               source: "torecasoku",
               sourceId,
               title,
-              genre: classifyTorecasokuGenre(title),
+              genre,
               subGenre: maker || null,
               eventType: "発売",
               eventDate: currentDate,
               eventDateText: null,
-              price,
+              // 販売単位の表記が無いのにBOX級の価格が付く商品がある（定価ともBOX価格とも
+              // 裏取りできない）。裏取りできない価格は載せない。
+              price: isSuspectPackPrice(genre, title, price) ? null : price,
               url: href,
               imageUrl,
             });

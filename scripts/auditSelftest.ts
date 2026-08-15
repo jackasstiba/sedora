@@ -21,7 +21,7 @@ import {
   pageExcludesPast,
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
-import { computeMargin, isPerDrawFee } from "../src/lib/margin";
+import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
 import { dedupeItems, eventDateHeading, productUrlKey } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
@@ -635,6 +635,36 @@ const cases: Case[] = [
       ),
     want: null,
   },
+  // ── 同ソースの「月未定→日付確定」二重記事（2026-08-15 実測: トレカ速報BS77・アイカツ） ──
+  {
+    name: "同ソース同一生タイトルで日付あり/なし混在 → 日付なし側を落とす",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "torecasoku", title: "【バトスピ】BS77", eventDate: new Date(Date.UTC(2026, 10, 21)), eventType: "発売" },
+        { id: 2, source: "torecasoku", title: "【バトスピ】BS77", eventDate: null, eventType: "発売" },
+      ] as never[]);
+      return (rows as { id: number }[]).map((r) => r.id).join(",");
+    },
+    want: "1",
+  },
+  {
+    name: "日付ありが別日どうし（再販）は両方残す",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "torecasoku", title: "【バトスピ】BS77", eventDate: new Date(Date.UTC(2026, 10, 21)), eventType: "発売" },
+        { id: 2, source: "torecasoku", title: "【バトスピ】BS77", eventDate: new Date(Date.UTC(2027, 1, 10)), eventType: "発売" },
+      ] as never[]);
+      return (rows as { id: number }[]).length;
+    },
+    want: 2,
+  },
+
+  // ── 裏取りできない価格（単位表記なしのBOX級価格）は表示しない ──────────
+  { name: "単パック表記でBOX級価格 → 疑い", fn: () => isSuspectPackPrice("トレカ", "【WS】ブースターパック anemoi", "52,800円"), want: true },
+  { name: "BOX表記があれば疑わない", fn: () => isSuspectPackPrice("トレカ", "【WS】ブースターパック anemoi 【10パック入りBOX】", "8,800円"), want: false },
+  { name: "単パック相当の価格は疑わない", fn: () => isSuspectPackPrice("トレカ", "ブースターパック 世界最強の戦士", "240円"), want: false },
+  { name: "トレカ以外は対象外", fn: () => isSuspectPackPrice("プラモ", "ＭＧ ストライカーパック", "3,520円"), want: false },
+
   // ── ワンピースカード公式（2026-08-15新設） ──────────
   {
     name: "onepiece: 商品ブロックから名前・日付・価格・画像を読む",

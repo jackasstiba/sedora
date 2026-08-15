@@ -11,11 +11,14 @@ const BASE = "https://1kuji.com/products";
 // 各商品は <li><a href="/products/SLUG"> ... <p class="date">DATE</p> ... <p class="itemName">NAME</p> </a></li>
 const ITEM_RE = /<a href="\/products\/([^"]+)">([\s\S]*?)<\/a>/g;
 
-/** 当月・翌月・翌々月の {月,年} と、発売予定(plan) の巡回URLを作る */
+/** 当月から MONTHS_AHEAD ヶ月先までの {月,年} と、発売予定(plan) の巡回URLを作る。
+ *  2026-08-15 実測: 先2ヶ月では 11月15・12月13・1月3件（ガンダムUC SAGA/ストファイ/CCさくら等）
+ *  が窓の外に取り残されていた（本人が収集元で発見）。公式は5ヶ月先まで告知する。 */
+const MONTHS_AHEAD = 6;
 function listingUrls(): string[] {
   const urls: string[] = [];
   const now = new Date();
-  for (let i = 0; i < 3; i++) {
+  for (let i = 0; i <= MONTHS_AHEAD; i++) {
     const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
     urls.push(`${BASE}?sale_month=${d.getMonth() + 1}&sale_year=${d.getFullYear()}`);
   }
