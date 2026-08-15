@@ -5,13 +5,22 @@
 // 代わりに記事から辿れる一次情報（公式・小売の抽選ページ）や、商品名での楽天検索を購入導線にする。
 // アフィリエイト/トラッキングのクエリは必ず除去する（売上流出＋情報源露見の防止）。
 
+/** HTMLエンティティ全般を実文字に戻す（数値・16進・主要な名前付き）。
+ *  実測: &amp; だけの部分対応では &#039;（'）や &#038; が本番カードに生で残った。 */
+export function decodeHtmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
 /** タグを落として可視テキストにする */
 export function stripTags(html: string): string {
-  return html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&#0?38;/g, "&")
+  return decodeHtmlEntities(html.replace(/<[^>]+>/g, " "))
     .replace(/\s+/g, " ")
     .trim();
 }

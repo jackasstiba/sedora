@@ -1,6 +1,7 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
 import { rakutenSearchUrl } from "../lib/outbound";
+import { decodeHtmlEntities } from "./aggregatorUtil";
 
 // ガンプラ再販カレンダー（リーチャのガンプラ再販情報 / harmonizers-jp.com）。
 // 実測（2026-08-15）: 月別記事に**169行/月**の再販・新発売キットが
@@ -27,7 +28,7 @@ export type GunplaRow = { id: string; name: string; isNew: boolean; month: numbe
 /** 商品名から編集タグ（【新発売】[8月延期][8月追加]等）を落とす。 */
 export function cleanGunplaName(raw: string): { name: string; isNew: boolean } {
   const isNew = /【新発売】/.test(raw);
-  const name = raw
+  const name = decodeHtmlEntities(raw)
     .replace(/【新発売】/g, "")
     .replace(/\[[^\]]*(?:延期|追加|変更)[^\]]*\]/g, "")
     .replace(/\s+/g, " ")
