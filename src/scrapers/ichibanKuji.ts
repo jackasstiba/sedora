@@ -11,32 +11,32 @@ const BASE = "https://1kuji.com/products";
 // 各商品は <li><a href="/products/SLUG"> ... <p class="date">DATE</p> ... <p class="itemName">NAME</p> </a></li>
 const ITEM_RE = /<a href="\/products\/([^"]+)">([\s\S]*?)<\/a>/g;
 
-/** 当月から MONTHS_AHEAD ヶ月先までの {月,年} と、発売予定(plan) の巡回URLを作る。
- *  2026-08-15 実測: 先2ヶ月では 11月15・12月13・1月3件（ガンダムUC SAGA/ストファイ/CCさくら等）
- *  が窓の外に取り残されていた（本人が収集元で発見）。公式は5ヶ月先まで告知する。 */
-const MONTHS_AHEAD = 6;
-function listingUrls(): string[] {
-  const urls: string[] = [];
+/** 月別巡回は**固定の月数ではなく「空の月が2つ続くまで」**進める（上限12ヶ月）。
+ *  2026-08-15 実測: 固定「先2ヶ月」では 11月15・12月13・1月3件（ガンダムUC SAGA/
+ *  ストファイ/CCさくら等）が窓の外に取り残されていた（本人が収集元で発見）。
+ *  固定値はいつか収集元の告知範囲に追い越される＝窓ではなく終端を見る。 */
+const MAX_MONTHS = 12;
+const STOP_AFTER_EMPTY = 2;
+
+function monthUrl(offset: number): string {
   const now = new Date();
-  for (let i = 0; i <= MONTHS_AHEAD; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    urls.push(`${BASE}?sale_month=${d.getMonth() + 1}&sale_year=${d.getFullYear()}`);
-  }
-  urls.push(`${BASE}?sale_year=plan`); // 発売予定（月未定）
-  return urls;
+  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  return `${BASE}?sale_month=${d.getMonth() + 1}&sale_year=${d.getFullYear()}`;
 }
 
 export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
   const byId = new Map<string, ScrapedItem>();
 
-  for (const url of listingUrls()) {
-    const html = await fetchHtml(url);
+  /** 一覧HTMLから商品を byId へ取り込み、見つけた商品カード数を返す。 */
+  const collect = (html: string): number => {
+    let found = 0;
     for (const m of html.matchAll(ITEM_RE)) {
       const slug = m[1];
       const inner = m[2];
 
       const name = inner.match(/class="itemName">([^<]+)</)?.[1]?.trim();
       if (!name) continue; // 商品カード以外の /products/ リンク（カテゴリ等）を除外
+      found++;
       if (byId.has(slug)) continue;
 
       const image = inner.match(/src="(https:\/\/assets\.1kuji\.com\/[^"]+)"/)?.[1] ?? null;
@@ -57,8 +57,17 @@ export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
         imageUrl: image,
       });
     }
+    return found;
+  };
+
+  let emptyStreak = 0;
+  for (let i = 0; i < MAX_MONTHS && emptyStreak < STOP_AFTER_EMPTY; i++) {
+    const html = await fetchHtml(monthUrl(i));
     await sleep(400);
+    emptyStreak = collect(html) > 0 ? 0 : emptyStreak + 1;
   }
+  collect(await fetchHtml(`${BASE}?sale_year=plan`)); // 発売予定（月未定）
+  await sleep(400);
 
   const items = [...byId.values()];
 

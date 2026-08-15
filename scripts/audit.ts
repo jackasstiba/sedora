@@ -639,6 +639,47 @@ async function main() {
     );
   }
 
+  // (10.5) 新設の取り込み面が静かに死んでいないか（2026-08-15）
+  // nyuka_now / tenbaiquest は受付状況で件数が揺れるため checkHealth の件数検査対象外
+  // （VOLATILE_SOURCES）。つまり restock（在庫あり）や発売日投稿のパースが収集元の
+  // マークアップ変更で壊れても、誰も気付かない。prizes_resale_lost と同じ
+  // 「前は十分あったのに0になった」をラチェット（baseline.metrics）で見る。
+  // 前提条件は付けない（前提が満たされない期間、検査は存在しないのと同じ＝2026-08-08の教訓）。
+  {
+    const faces: { key: string; label: string; count: number }[] = [
+      {
+        key: "intake_nyuka_restock",
+        label: "入荷Now 在庫あり(restock)行",
+        count: shown.filter((r) => r.source === "nyuka_now" && r.eventType === "再販").length,
+      },
+      {
+        key: "intake_nyuka_ended",
+        label: "入荷Now 受付終了実績行",
+        count: shown.filter(
+          (r) => r.source === "nyuka_now" && (r.eventDateText ?? "").startsWith("受付終了")
+        ).length,
+      },
+      {
+        key: "intake_tq_release",
+        label: "転売クエスト 発売日投稿行",
+        count: shown.filter((r) => r.source === "tenbaiquest" && r.eventType === "発売").length,
+      },
+    ];
+    const dead: string[] = [];
+    for (const f of faces) {
+      const prev = baseline.metrics?.[f.key] ?? 0;
+      // 5件以上あった面が0になったら死んだ疑い。受付状況の揺れで数件→0はありうるので
+      // 小さい面（発足直後の転売Q発売行=1件等）はこの検査の武装外＝そのことも母数として出す。
+      if (prev >= 5 && f.count === 0)
+        dead.push(`${f.label}: ${prev}件 → 0件（パース破損か収集元のマークアップ変更の疑い）`);
+      metrics[f.key] = f.count;
+    }
+    report("intake_face_dead", "新設の取り込み面が0件に落ちた（機能の死の疑い）", "error", dead, baseline, faces.length);
+    console.log(
+      `(参考) 取り込み面: ${faces.map((f) => `${f.label}=${f.count}件${(baseline.metrics?.[f.key] ?? 0) >= 5 ? "" : "(未武装)"}`).join(" / ")}`
+    );
+  }
+
   // (11) 受付中ストア（stores JSON）の構造
   {
     const bad: string[] = [];

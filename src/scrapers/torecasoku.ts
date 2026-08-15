@@ -11,19 +11,16 @@ import { isSuspectPackPrice } from "../lib/margin";
 // 商品 <li.goods_info> が同列で交互に並ぶ（date-grouped flat list）。商品の日付は
 // 直前の releasedate-section から引き継ぐ。各商品に 画像/商品名/価格/メーカー/安定ID(archives/{id}) あり。
 const BASE = "https://ota-goods.info/tcg/month_release.php";
-// 2026-08-15 実測: 先2ヶ月では 11月28・12月8・1月1件が窓の外だった（TCGの予約は
-// 3〜5ヶ月先まで告知される）。本人が収集元で取り漏れを発見したのを受けて拡張。
-const MONTHS_AHEAD = 5; // 今月＋5ヶ月分
+// 2026-08-15 実測: 固定「先2ヶ月」では 11月28・12月8・1月1件が窓の外だった（TCGの予約は
+// 3〜5ヶ月先まで告知される。本人が収集元で取り漏れを発見）。固定値はいつか収集元の
+// 告知範囲に追い越されるので、**空の月が2つ続くまで**進める適応型にする（上限12ヶ月）。
+const MAX_MONTHS = 12;
+const STOP_AFTER_EMPTY = 2;
 
-function monthParams(): string[] {
-  const out: string[] = [];
+function monthParam(offset: number): string {
   const now = new Date();
-  for (let i = 0; i <= MONTHS_AHEAD; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const ym = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`;
-    out.push(ym);
-  }
-  return out;
+  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
+  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`;
 }
 
 // サムネイルURLの "-190x260" のようなサイズ接尾辞を除いてフル画像URLにする。
@@ -59,11 +56,15 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
   const items: ScrapedItem[] = [];
   const seen = new Set<string>();
 
-  for (const ym of monthParams()) {
+  let emptyStreak = 0;
+  for (let mi = 0; mi < MAX_MONTHS && emptyStreak < STOP_AFTER_EMPTY; mi++) {
+    const ym = monthParam(mi);
+    const monthStart = items.length;
     let html: string;
     try {
       html = await fetchHtml(`${BASE}?date=${ym}&disp=1`);
     } catch {
+      emptyStreak++;
       continue;
     }
     const $ = cheerio.load(html);
@@ -130,6 +131,8 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
           });
       });
 
+    // 同一商品の複数月重複は dedup 済みなので、「この月で新規に増えたか」で空月を判定する。
+    emptyStreak = items.length > monthStart ? 0 : emptyStreak + 1;
     await sleep(600);
   }
 
