@@ -11,7 +11,17 @@
  * 実際にこのテストは、書いた直後の displayEventType のバグを1つ捕まえた:
  * 未知の「エントリー受付中」まで「予約終了」に書き換えていた（予約ではないのに予約と断定）。
  */
-import { displayEventType, eventPeriodText, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
+import {
+  displayEventType,
+  eventPeriodText,
+  hasFrozenRelativeDate,
+  isStalePromise,
+  isStalePlan,
+  monthPrecisionFromTitle,
+  plannedDateFromText,
+} from "../src/lib/date";
+import { storeWhenLabel } from "../src/lib/stores";
+import { unfreezeStoreWhen } from "./backfillDisplayText";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
   accumulateUnexplained,
@@ -740,10 +750,13 @@ const cases: Case[] = [
   { name: "cardchusen: ゲーム接頭辞違いを同じ商品に束ねる", fn: () => productKey("ポケモンカード ストームエメラルダ") === productKey("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」"), want: true },
   { name: "cardchusen: 語順違い(OP-17)も束ねる", fn: () => productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】") === productKey("ONE PIECEカードゲーム ブースターパック OP-17「世界最強の戦士」"), want: true },
   { name: "cardchusen: 別の弾は束ねない", fn: () => productKey("ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」") === productKey("ポケモンカードゲーム MEGA 拡張パック「メガシンフォニア」"), want: false },
-  { name: "cardchusen: 締切 本日は当日日付", fn: () => { const d = parseDue("締切 本日 22:00", today); return d ? `${d.kind}|${ymd(d.date!)}|${d.label}` : null; }, want: "締切|2026-08-08|〜本日 22:00" },
+  // 収集元の「本日/明日」は**保存する時点で暦日に解決する**（2026-08-16の事故）。
+  // 保存文字列に相対表記が残ると、巡回した日を過ぎた瞬間に締切が1日ズレる。
+  { name: "cardchusen: 締切 本日は当日日付＋絶対表記で保存", fn: () => { const d = parseDue("締切 本日 22:00", today); return d ? `${d.kind}|${ymd(d.date!)}|${d.label}` : null; }, want: "締切|2026-08-08|〜8/8 22:00" },
   { name: "cardchusen: 締切 M/D(曜)", fn: () => { const d = parseDue("締切 8/17(月) 13:00", today); return d ? ymd(d.date!) + "|" + d.label : null; }, want: "2026-08-17|〜8/17 13:00" },
   { name: "cardchusen: 調査中は日付を作らない", fn: () => parseDue("締切 調査中", today)?.date ?? "no", want: "no" },
-  { name: "cardchusen: 開始（近日受付）はラベルが開始形", fn: () => parseDue("開始 明日 13:00", today)?.label, want: "明日 13:00〜" },
+  { name: "cardchusen: 開始（近日受付）は明日でも絶対表記＋開始形", fn: () => parseDue("開始 明日 13:00", today)?.label, want: "8/9 13:00〜" },
+  { name: "cardchusen: 保存ラベルに相対日付を残さない", fn: () => ["締切 本日 22:00", "締切 明日 23:59", "開始 明日 10:00"].some((t) => hasFrozenRelativeDate(parseDue(t, today)!.label)), want: false },
   {
     // 実測: title属性の &amp; が未復号のまま本番カードに「ルフィ&amp;エース」と出た（audit:page が35件検出）
     name: "cardchusen: title属性のHTMLエンティティを実文字に戻す",
@@ -824,6 +837,40 @@ const cases: Case[] = [
       ).length,
     want: 2,
   },
+
+  // ── 相対日付の凍結（2026-08-16。「〜明日 22:00」が翌日から1日ズレていた事故） ──────
+  // 鳴る側と鳴らない側を両方固定する。**作品名を巻き込む検査は誤報する検査＝信用されない。**
+  { name: "相対日付: 保存された締切は鳴る", fn: () => hasFrozenRelativeDate("〜明日 23:59"), want: true },
+  { name: "相対日付: 本日＋時刻は鳴る", fn: () => hasFrozenRelativeDate("本日 22:00まで受付"), want: true },
+  { name: "相対日付: 明日まで は鳴る", fn: () => hasFrozenRelativeDate("明日まで抽選受付中"), want: true },
+  { name: "相対日付: 作品名『明日ちゃんのセーラー服』は鳴らない", fn: () => hasFrozenRelativeDate("明日ちゃんのセーラー服 アクリルスタンド"), want: false },
+  { name: "相対日付: 人名『天上院明日香』は鳴らない", fn: () => hasFrozenRelativeDate("遊☆戯☆王GX BIG缶バッジ 天上院明日香"), want: false },
+  { name: "相対日付: 絶対表記は鳴らない", fn: () => hasFrozenRelativeDate("〜8/21 23:59"), want: false },
+
+  // 表示側は today から相対表記を作る（保存物は絶対のまま＝古くなっても嘘にならない）
+  { name: "受付ラベル: 当日は本日と出す", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "〜8/8 22:00", note: null, at: "2026-08-08", kind: "締切" }, today), want: "〜本日 22:00" },
+  { name: "受付ラベル: 翌日は明日と出す", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "〜8/9 23:59", note: null, at: "2026-08-09", kind: "締切" }, today), want: "〜明日 23:59" },
+  { name: "受付ラベル: 先の日付はそのまま", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "〜8/21 18:00", note: null, at: "2026-08-21", kind: "締切" }, today), want: "〜8/21 18:00" },
+  // 「受付中ストア」の見出しの下に、まだ始まっていない店が同じ顔で並んでいた（実測）
+  { name: "受付ラベル: 開始が未来なら受付前と書く", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, today), want: "8/20 00:00〜（受付前）" },
+  { name: "受付ラベル: 開始が過去なら受付前と書かない", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "7/8 12:00〜", note: null, at: "2026-07-08", kind: "開始" }, today), want: "7/8 12:00〜" },
+  { name: "受付ラベル: 暦日を持たない旧データは保存文字列のまま", fn: () => storeWhenLabel({ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }, today), want: "締切時刻 調査中" },
+
+  // 保存済みの凍結ラベルを、巡回時刻を基準に絶対表記へ戻す（既存行の修復）
+  { name: "凍結解除: 明日は巡回日の翌日に解決", fn: () => { const u = unfreezeStoreWhen("〜明日 22:00", null, new Date("2026-08-15T13:49:00Z")); return `${u.when}|${u.at}|${u.kind}`; }, want: "〜8/16 22:00|2026-08-16|締切" },
+  { name: "凍結解除: 本日は巡回日(JST)に解決", fn: () => { const u = unfreezeStoreWhen("〜本日 22:00", null, new Date("2026-08-15T13:49:00Z")); return `${u.when}|${u.at}`; }, want: "〜8/15 22:00|2026-08-15" },
+  { name: "凍結解除: 絶対表記は文字列を変えず暦日だけ足す", fn: () => { const u = unfreezeStoreWhen("〜8/21 23:59", null, new Date("2026-08-15T13:49:00Z")); return `${u.when}|${u.at}`; }, want: "〜8/21 23:59|2026-08-21" },
+  { name: "凍結解除: 開始形は kind=開始 と読む", fn: () => unfreezeStoreWhen("8/20 00:00〜", null, new Date("2026-08-15T13:49:00Z")).kind, want: "開始" },
+
+  // ── 「日付未定」なのに商品名が時期を言っている（2026-08-16・観点C 通読で発見） ──────
+  // **日は作らない**（月精度のテキストだけ）。年も推測しない（過去月は読まない）。
+  { name: "月精度: 12月発売 を読む", fn: () => monthPrecisionFromTitle("ダンガンロンパ 超高校級の「くるみたぴぬい 全8種」12月発売!", today), want: "2026年12月発売予定" },
+  { name: "月精度: 上旬まで拾う", fn: () => monthPrecisionFromTitle("映画ちいかわ ゆらゆらソーラー 8月上旬登場!", today), want: "2026年8月上旬登場予定" },
+  { name: "月精度: 「待望の9月再販!」も読む", fn: () => monthPrecisionFromTitle("「とある」シリーズ 人気グッズ 9月待望の再販!", today), want: "2026年9月再販予定" },
+  { name: "月精度: 日まで書いてあるものには手を出さない", fn: () => monthPrecisionFromTitle("BANANA FISH ポップアップ 8月28日より渋谷にて開催", today), want: null },
+  { name: "月精度: 過ぎた月は年を推測せず読まない", fn: () => monthPrecisionFromTitle("旧グッズ 7月発売!", today), want: null },
+  { name: "月精度: 「10周年記念」の数字を月と読まない", fn: () => monthPrecisionFromTitle("ヒロアカ 10周年記念グッズ", today), want: null },
+  { name: "月精度: 月と動詞が離れていたら読まない", fn: () => monthPrecisionFromTitle("8月の新作をまとめて紹介するイベントが開催", today), want: null },
 
   // ── 画像の選び方（2026-08-15。「画像がないのが多数ある」の修正で入れた判定） ──────
   // 間違った画像を出すのは、画像が無いより悪い。**採らない側**の条件を固定する。

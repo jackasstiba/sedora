@@ -5,7 +5,9 @@ import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 import { mergePrizeEnrichment } from "../src/lib/prizes";
 import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
+import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
+import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen"]);
@@ -37,10 +39,18 @@ async function main() {
       // 灰色タイルが商品画像の顔をして並び、監査にも掛からなかった（実測 2026-08-15:
       // トレカ速報40件が no-image_150x150.png、トレカマップ8件が empty.png）。
       // 各スクレイパーに同じ判定を書かせない＝新しいソースでも自動で効かせるために保存側に置く。
+      const title = cleanTitle(raw.title);
       const item = {
         ...raw,
-        title: cleanTitle(raw.title),
+        title,
         imageUrl: raw.imageUrl && !isGenericImageUrl(raw.imageUrl) ? raw.imageUrl : null,
+        // 商品名が「12月発売」と言っているのに日付欄が空、を保存側で塞ぐ。各スクレイパーに
+        // 同じ判定を書かせない＝新しいソースでも自動で効く（画像の汎用判定と同じ置き場）。
+        // 日は作らない（eventDate は触らない）＝月精度のまま出す。
+        eventDateText:
+          raw.eventDate || raw.eventDateText
+            ? raw.eventDateText
+            : monthPrecisionFromTitle(title, todayJst()),
       };
       // 各賞の二次相場は別スクリプト（scrape:kuji:prices）が後付けするので、
       // 巡回で取り直した prizes をそのまま書くと毎回消える。賞ラベルで突合して引き継ぐ。
@@ -98,6 +108,10 @@ async function main() {
 
   // 巡回窓（一覧3ページ）から流れた抽選行の応募先を、記事再訪で埋める（定常経路）。
   await backfillChanneltonoRaffleUrls(prisma);
+
+  // 保存済みの表示文字列の修復（相対日付の凍結解除・月精度の補完）。巡回窓から流れた行は
+  // 二度と上書きされないので、スクレイパー側の修正だけでは既存行に届かない。
+  await backfillDisplayText(prisma);
 
   checkHealth(results);
 

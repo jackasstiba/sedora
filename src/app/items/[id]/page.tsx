@@ -11,7 +11,7 @@ import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
-import { groupStoresByLabel, parseStoresJson, storeSectionCopy } from "@/lib/stores";
+import { groupStoresByLabel, parseStoresJson, storeSectionCopy, storeWhenLabel } from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -339,7 +339,10 @@ export default async function ItemPage({ params }: Props) {
           <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">{storeCopy.note}</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {storeGroups.flatMap((g) =>
-              g.entries.map((s, i) => (
+              g.entries.map((s, i) => {
+              // 受付時刻は保存文字列そのままではなく today から作る（保存物は絶対表記のまま）。
+              const whenLabel = storeWhenLabel(s, todayJst());
+              return (
               <li
                 key={s.name + (s.url ?? "")}
                 className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
@@ -355,14 +358,14 @@ export default async function ItemPage({ params }: Props) {
                       </span>
                     )}
                   </div>
-                  {(s.form || s.when) && (
+                  {(s.form || whenLabel) && (
                     <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
                       {s.form && (
                         <span className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
                           {s.form}
                         </span>
                       )}
-                      {s.when && <span className="font-semibold text-rose-600 dark:text-rose-400">{s.when}</span>}
+                      {whenLabel && <span className="font-semibold text-rose-600 dark:text-rose-400">{whenLabel}</span>}
                     </div>
                   )}
                   {s.note && (
@@ -385,7 +388,8 @@ export default async function ItemPage({ params }: Props) {
                   </OutboundLink>
                 )}
               </li>
-              ))
+              );
+              })
             )}
           </ul>
         </section>

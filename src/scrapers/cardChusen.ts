@@ -34,7 +34,15 @@ export function productKey(name: string): string {
   return [...t].sort().join("");
 }
 
-/** 「締切 本日 22:00」「開始 8/17(月) 10:00」等 → 期日と表示文字列。調査中は null。 */
+/**
+ * 「締切 本日 22:00」「開始 8/17(月) 10:00」等 → 期日と表示文字列。調査中は null。
+ *
+ * **収集元の「本日/明日」を label に残さない。** 収集元は毎日書き換わる相対表記を使うが、
+ * こちらは巡回した時点の文字列を DB に保存して手動更新まで出し続けるので、保存した瞬間から
+ * 日ごとにズレる（実測 2026-08-16: 前夜22:49に取った「〜明日 22:00」が、翌0時には
+ * 実際の締切より1日先を指していた）。ここでは必ず暦日に解決して絶対表記にし、
+ * 「本日/明日」は表示時に storeWhenLabel が today から作る。
+ */
 export function parseDue(
   text: string,
   reference = new Date()
@@ -48,20 +56,17 @@ export function parseDue(
 
   const time = rest.match(/(\d{1,2}:\d{2})/)?.[1] ?? null;
   let date: Date | null = null;
-  let dayLabel: string;
   if (/^本日/.test(rest)) {
     date = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()));
-    dayLabel = "本日";
   } else if (/^明日/.test(rest)) {
     const d = new Date(reference.getTime() + 86_400_000);
     date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-    dayLabel = "明日";
   } else {
     const md = rest.match(/(\d{1,2})\/(\d{1,2})/);
     if (!md) return { kind, date: null, label: `${kind} ${rest}` };
     date = resolveMonthDay(Number(md[1]), Number(md[2]), reference);
-    dayLabel = `${Number(md[1])}/${Number(md[2])}`;
   }
+  const dayLabel = `${date.getUTCMonth() + 1}/${date.getUTCDate()}`;
   const label = kind === "締切" ? `〜${dayLabel}${time ? " " + time : ""}` : `${dayLabel}${time ? " " + time : ""}〜`;
   return { kind, date, label };
 }
@@ -130,6 +135,9 @@ export function buildCardChusenItems(entries: Entry[], reference = new Date()): 
       form: "抽選",
       when: e.due?.label ?? null,
       note: e.conds.length ? e.conds.join("・") : null,
+      // 暦日を併せて持たせる＝表示側が「本日/明日」「受付前」を today から作れる。
+      at: e.due?.date ? e.due.date.toISOString().slice(0, 10) : null,
+      kind: e.due?.kind ?? null,
     }));
 
     // 表示日＝今日以降で最も近い締切（開始日しか無い枠は開始日）。

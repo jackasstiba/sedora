@@ -241,6 +241,55 @@ export function isMonthPrecision(eventDateText: string | null): boolean {
 }
 
 /**
+ * 「保存してはいけない相対日付」を含む表示文字列か（純関数・監査と selftest が使う）。
+ *
+ * 相対日付は**読んだ瞬間の today から作る**もので、DBに保存した時点で「巡回した日」に
+ * 固定される＝翌日から嘘になる。ハツコレは手動更新なので、ズレは更新するまで増え続ける。
+ *
+ * 作品名・人名を巻き込まないよう、**相対日付として使われている形**だけを拾う
+ * （実測: 全DB3396件で「天上院明日香」「中村明日美子」は素通り、相対表記だけが鳴った）。
+ */
+export function hasFrozenRelativeDate(text: string | null | undefined): boolean {
+  if (!text) return false;
+  return /[〜～]\s*(?:本日|明日|明後日)|(?:本日|明日|明後日|今日|昨日)\s*\d{1,2}\s*[:：時]|(?:本日|明日|明後日)\s*(?:まで|より|から|締切|発売|開始|受付|抽選|入荷|販売)/.test(
+    text
+  );
+}
+
+/**
+ * 商品名（＝画面に出ているタイトル）が「◯月発売」と言っているのに、日付欄が「日付未定」に
+ * なっている行から、**月精度の予定テキスト**を作る。読めなければ null。
+ *
+ * なぜ要るか（2026-08-16 実測・観点C 通読）: 掲載1464件のうち194件が日付未定で、うち49件は
+ * カードの商品名そのものが「ヒロアカ … 12月発売」「ちいかわ … 8月上旬登場!」と月を書いていた。
+ * **同じカードの中で、商品名が「12月発売」と言い、その真横のラベルが「日付未定」**という状態で、
+ * 「いつ買えるか」を約束するサイトとしては人間が一目で気付く矛盾だった。情報は既に持っていて、
+ * 読み取っていないだけ。
+ *
+ * 精度を足さない（ミス15）ための約束:
+ *  ・**日は作らない。** 返すのは「2026年12月発売予定」という月精度のテキストだけで、
+ *    eventDate（特定日）は埋めない。isMonthPrecision / plannedDateFromText が月末扱いする。
+ *  ・**年を推測しない。** 基準日の月より前の月（＝今年なら過去）は、来年のことなのか
+ *    去年の記事なのか決められないので **読まない**（過ぎた日付が未来に化けたミスの再発防止）。
+ *  ・**日が書いてあるタイトルには手を出さない。** 「8月28日より開催」は日精度の情報なので、
+ *    ここで月に丸めると精度を落とす。別の経路（extractDateAndEventFromText）の担当。
+ */
+const MONTH_PLAN_VERBS = "発売|再販|登場|発送|開催|販売|公開|配信|開始";
+export function monthPrecisionFromTitle(title: string, today: Date): string | null {
+  if (!title) return null;
+  if (/\d{1,2}\s*月\s*\d{1,2}\s*日/.test(title)) return null; // 日まで書いてある＝ここの担当外
+  const m = title.match(
+    new RegExp(`(\\d{1,2})\\s*月\\s*(上旬|中旬|下旬)?[^\\d月]{0,4}?(${MONTH_PLAN_VERBS})`)
+  );
+  if (!m) return null;
+  const month = Number(m[1]);
+  if (month < 1 || month > 12) return null;
+  const curMonth = today.getUTCMonth() + 1;
+  if (month < curMonth) return null; // 年を決められない＝読まない
+  return `${today.getUTCFullYear()}年${month}月${m[2] ?? ""}${m[3]}予定`;
+}
+
+/**
  * カード・詳細に出す日付ラベル。分かっている精度でしか書かない。
  *  ・日まで分かっている → "8/8(土)" / "2026年8月8日(土)"
  *  ・月までしか分からない → "2026年9月"（合成した日を出さない）

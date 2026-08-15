@@ -21,7 +21,15 @@
 import fs from "node:fs";
 import path from "node:path";
 import { prisma } from "../src/lib/prisma";
-import { displayEventDateText, eventDateLabel, isMonthPrecision, isStalePromise, todayJst } from "../src/lib/date";
+import {
+  displayEventDateText,
+  eventDateLabel,
+  hasFrozenRelativeDate,
+  isMonthPrecision,
+  isStalePromise,
+  monthPrecisionFromTitle,
+  todayJst,
+} from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
@@ -735,6 +743,67 @@ async function main() {
         indistinguishable.push(`[${r.source} #${r.id}] 要約に同一表記が重複: ${summary}`);
     }
     report("stores_indistinguishable", "受付中ストアの表示が区別できない（同じ表記が並ぶ）", "warn", indistinguishable, baseline);
+  }
+
+  // (11b) **保存された相対日付**（「〜明日 22:00」）。
+  //
+  // 2026-08-16 実測: 収集元が使う相対表記をそのまま stores/highlights に保存していたため、
+  // 巡回した日を過ぎた瞬間に画面の締切が1日ズレた（同じ商品ページで、上部が「抽選日 8/16 🔥本日」、
+  // 下の店舗行が「〜明日 22:00」と食い違っていた）。ハツコレは手動更新なので、更新しない限り
+  // ズレは増え続ける。締切は「今から間に合うか」を決める値なので、間違えると応募を逃す。
+  //
+  // 相対日付は**読んだ瞬間に today から作る**もので、保存してよいものではない。ソースを問わず
+  // 誤りと言えるので、全件検査に置く（[[System/rules]]「客観的に誤りと言えるものだけ全件検査」）。
+  // 対象は**画面に出る文字列だけ**（生タイトルには「本日7月22日締切」等が普通に入っており、
+  // 整形で消えている＝データを理由に鳴らすと決して0にならない検査になる）。
+  // 誤報テスト（実測・全DB3396件）: 作品名の「天上院明日香」「中村明日美子」は素通り、
+  // 相対表記として使われている 46件だけが鳴った。
+  {
+    const frozen: string[] = [];
+    for (const r of shown) {
+      const fields: [string, string | null][] = [
+        ["商品名", cleanListTitle(r.source, r.title)],
+        ["カード要約", r.highlights ?? null],
+        ["日付欄", displayEventDateText(r.eventDateText)],
+        ["取扱店", r.salesChannel ?? null],
+        ...(parseStoresJson(r.stores) ?? []).map(
+          (s): [string, string | null] => [`受付中ストア(${s.name})`, s.when]
+        ),
+      ];
+      for (const [where, text] of fields) {
+        if (text && hasFrozenRelativeDate(text))
+          frozen.push(`[${r.source} #${r.id}] ${where}に相対日付が保存されている: ${text.slice(0, 80)}`);
+      }
+    }
+    report(
+      "frozen_relative_date",
+      "保存された表示文字列に相対日付（本日/明日）が入っている＝更新しない日から嘘になる",
+      "error",
+      frozen,
+      baseline,
+      shown.length
+    );
+
+    // (11c) タイトルが「12月発売」と言っているのに日付欄が「日付未定」。
+    // 情報を持っているのに読み取っていないだけの型（実測 2026-08-16: 日付未定194件のうち49件）。
+    // カードの中で商品名とラベルが矛盾するので、人間なら一目で気付く。
+    const undatedWithMonth: string[] = [];
+    let undated = 0;
+    for (const r of shown) {
+      if (eventDateLabel(r.eventDate, r.eventDateText, "short")) continue;
+      undated++;
+      const title = cleanListTitle(r.source, r.title);
+      const text = monthPrecisionFromTitle(title, today);
+      if (text) undatedWithMonth.push(`[${r.source} #${r.id}] 「日付未定」だが商品名は ${text}: ${title.slice(0, 60)}`);
+    }
+    report(
+      "undated_month_in_title",
+      "日付欄が「日付未定」なのに、商品名には時期が書いてある",
+      "warn",
+      undatedWithMonth,
+      baseline,
+      undated
+    );
   }
 
   // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。

@@ -9,8 +9,15 @@ export type StoreEntry = {
   // どの店のものか特定できない。持っていないURLを紐づけない（誤った場所へ案内しない）。
   url: string | null;
   form: string | null; // 販売形式（"抽選販売" 等）／コラボは都道府県（書いてある時だけ）
-  when: string | null; // 受付・開始・締切の表示用テキスト（例: "9/5 17:00〜", "〜8/10"）
+  // 受付・開始・締切の表示用テキスト（例: "9/5 17:00〜", "〜8/10"）。
+  // **必ず絶対表記で保存する**（「〜明日 23:59」のような相対表記を保存しない）。
+  // 理由は下の storeWhenLabel を参照＝保存した瞬間から日ごとに嘘になるため。
+  when: string | null;
   note: string | null; // 応募条件（購入履歴・会員登録など＝当落を左右する“せどりの肝”）
+  /** when が指す暦日（"YYYY-MM-DD"）。分かっているときだけ。表示側の「本日/明日」はここから作る。 */
+  at?: string | null;
+  /** at が締切なのか受付開始なのか。開始日が未来なら「受付前」と正直に書くために要る。 */
+  kind?: "締切" | "開始" | null;
 };
 
 /**
@@ -60,14 +67,44 @@ export function groupStoresByLabel(stores: StoreEntry[]): StoreGroup[] {
   return [...groups.values()];
 }
 
-/** カード/一覧に出す短い要約（先頭 max 件＋「他N店」）。同一ラベルは「・N口」にまとめる。 */
-export function summarizeStores(stores: StoreEntry[], max = 3): string {
+/**
+ * 受付時刻の表示ラベル。**相対表記（本日/明日）はここでしか作らない。**
+ *
+ * 2026-08-16 実測の事故: 収集元の「締切 明日 22:00」をそのまま `when` に保存していたため、
+ * 巡回した日から1日でも経つと画面の「〜明日 22:00」が丸ごと1日ズレた。しかもハツコレは
+ * 手動更新なので、更新しない限りズレは増え続ける。同じ商品ページの上部が「抽選日 8/16 🔥本日」、
+ * 下の店舗行が「〜明日 22:00」と**1画面の中で食い違って**いた。締切は「今から間に合うか」を
+ * 決める値で、1日ズレたら応募を逃す＝サイトの存在意義に直結する。
+ *
+ * 対策の形: **保存する文字列は常に絶対表記**（"〜8/17 23:59"）にし、`at`（暦日）を併せて持つ。
+ * 「本日/明日」は読んだ瞬間の today から作る＝保存物が古くなっても嘘にならない。
+ * at を持たない行（他ソース・旧データ）は保存文字列をそのまま出す。
+ */
+export function storeWhenLabel(s: StoreEntry, today: Date): string | null {
+  if (!s.when) return null;
+  if (!s.at) return s.when;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.at);
+  if (!m) return s.when;
+  const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const days = Math.round((at - today.getTime()) / 86_400_000);
+  const rel = days === 0 ? "本日" : days === 1 ? "明日" : null;
+  let label = rel ? s.when.replace(/\d{1,2}\/\d{1,2}/, rel) : s.when;
+  // 「受付中ストア」の一覧に、まだ始まっていない店が同じ顔で並んでいた（実測 2026-08-16:
+  // 「おもちゃのペリカン（抽選・8/20 00:00〜）」が受付中として並ぶ）。事実で区別する。
+  if (s.kind === "開始" && days > 0) label += "（受付前）";
+  return label;
+}
+
+/** カード/一覧に出す短い要約（先頭 max 件＋「他N店」）。同一ラベルは「・N口」にまとめる。
+ *  today を渡すとその日基準の相対表記（本日/明日）にする。**保存用に作るときは渡さない**
+ *  （保存した相対表記は翌日から嘘になる＝storeWhenLabel のコメント参照）。 */
+export function summarizeStores(stores: StoreEntry[], max = 3, today?: Date): string {
   const groups = groupStoresByLabel(stores);
   const head = groups
     .slice(0, max)
     .map((g) => {
       const s = g.entries[0];
-      const parts = [s.form, s.when].filter(Boolean);
+      const parts = [s.form, today ? storeWhenLabel(s, today) : s.when].filter(Boolean);
       if (g.entries.length > 1) parts.push(`${g.entries.length}口`);
       return `${s.name}${parts.length ? `（${parts.join("・")}）` : ""}`;
     })
@@ -92,6 +129,8 @@ export function parseStoresJson(json: string | null | undefined): StoreEntry[] |
           form: typeof s.form === "string" && s.form ? s.form : null,
           when: typeof s.when === "string" && s.when ? s.when : null,
           note: typeof s.note === "string" && s.note ? s.note : null,
+          at: /^\d{4}-\d{2}-\d{2}$/.test(s.at) ? s.at : null,
+          kind: s.kind === "締切" || s.kind === "開始" ? s.kind : null,
         })
       );
     return rows.length ? rows : null;
