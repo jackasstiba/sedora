@@ -29,7 +29,8 @@ import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboE
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
 import { extractRaffleUrl } from "../src/scrapers/channeltono";
-import { buildRecentEndedItem, parseEndedStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
+import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
+import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
@@ -664,6 +665,32 @@ const cases: Case[] = [
   { name: "BOX表記があれば疑わない", fn: () => isSuspectPackPrice("トレカ", "【WS】ブースターパック anemoi 【10パック入りBOX】", "8,800円"), want: false },
   { name: "単パック相当の価格は疑わない", fn: () => isSuspectPackPrice("トレカ", "ブースターパック 世界最強の戦士", "240円"), want: false },
   { name: "トレカ以外は対象外", fn: () => isSuspectPackPrice("プラモ", "ＭＧ ストライカーパック", "3,520円"), want: false },
+
+  // ── 入荷Now restock／転売クエスト発売日投稿（2026-08-15・本人指摘「全然取れてない」） ──
+  {
+    name: "restock: 店舗テーブルから外部リンクだけ拾いアフィリを掃除する",
+    fn: () => {
+      const html =
+        '</head><h3>【在庫あり】テスト を再販実施中のストア</h3><table>' +
+        '<tr><th>LOHACO</th><td><a href="https://nyuka.jp/archives/2349">内部リダイレクト</a></td></tr>' +
+        '<tr><th>駿河屋</th><td><a href="https://nyuka-now.com/archives/152225">内部</a></td></tr>' +
+        '<tr><th>Amazon</th><td><a href="https://www.amazon.co.jp/dp/B0GKLJ7DHD/?emi=X&#038;tag=nnowapp-22">本体（価格：69,462円）</a></td></tr>' +
+        "</table><h2>販売履歴</h2>";
+      return parseRestockStores(html)
+        .map((s) => `${s.name}|${s.url}|${s.note}`)
+        .join(";");
+    },
+    want: "Amazon|https://www.amazon.co.jp/dp/B0GKLJ7DHD|価格 69,462円",
+  },
+  {
+    name: "restock: 記事タイトル→商品名",
+    fn: () => cleanRestockName("【2026年8月15日更新】Nintendo Switch 2の在庫あり・再販入荷情報まとめ"),
+    want: "Nintendo Switch 2",
+  },
+  { name: "転売Q: 発売日投稿を採用する（年4桁必須）", fn: () => isReleaseTitle("【2026年9月16日（水）】ポケモンカードゲーム MEGA"), want: true },
+  { name: "転売Q: 年無しの日付投稿は採らない", fn: () => isReleaseTitle("【7月3日（金）】Audio-Technica"), want: false },
+  { name: "転売Q: 抽選でも発売日でもない投稿は対象外", fn: () => isReleaseTitle("【完売店舗多数】EGOIST"), want: false },
+  { name: "転売Q: ブラケット除去で商品名", fn: () => cleanTqProductName("【2026年9月16日（水）】ポケモンカードゲーム MEGA 拡張パック"), want: "ポケモンカードゲーム MEGA 拡張パック" },
 
   // ── ワンピースカード公式（2026-08-15新設） ──────────
   {

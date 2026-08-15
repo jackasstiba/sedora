@@ -22,6 +22,10 @@ function todayCal(): Date {
 // トレカ/フィギュア/プラモ/ソフビ・アートトイ等）は商品名から推定する。
 
 const CATEGORY_BASE = "https://nyuka-now.com/archives/category/chusen";
+// 【2026-08-15 拡張】入荷情報(restock)カテゴリ＝「在庫あり・再販入荷情報まとめ」記事も取る。
+// 本人指摘「入荷Nowが全然取れてない」。restock はRTX/Ryzen/Switch2/ロルカナ等の製品ハブで、
+// 今在庫がある店舗テーブル（th=店名/td=商品リンク）を持つ＝「いま買える」速報そのもの。
+const RESTOCK_BASE = "https://nyuka-now.com/archives/category/restock";
 const ARTICLE_BASE = "https://nyuka-now.com/archives/";
 const MAX_PAGES = 8; // 実測3ページ。将来増えても取りこぼさないよう余裕を持たせる。
 
@@ -43,10 +47,10 @@ function parseArticleList(html: string): Article[] {
 }
 
 /** カテゴリを全ページ巡回して記事一覧を集める（重複id除去）。 */
-async function collectArticles(): Promise<Article[]> {
+async function collectArticles(base = CATEGORY_BASE): Promise<Article[]> {
   const byId = new Map<string, Article>();
   for (let p = 1; p <= MAX_PAGES; p++) {
-    const url = p === 1 ? CATEGORY_BASE : `${CATEGORY_BASE}/page/${p}`;
+    const url = p === 1 ? base : `${base}/page/${p}`;
     let html: string;
     try {
       html = await fetchHtml(url);
@@ -305,6 +309,53 @@ function parseStores(sectionHtml: string): Store[] {
   return stores;
 }
 
+// ── 入荷情報(restock)の取り込み ─────────────────────────────────────────
+
+export type RestockStore = { name: string; url: string; note: string | null };
+
+/** restock記事タイトル「【…更新】X の在庫あり・再販入荷情報まとめ」→ 商品名 */
+export function cleanRestockName(title: string): string {
+  return title
+    .replace(/^【[^】]*】\s*/, "")
+    .replace(/の在庫あり[・･].*$/, "")
+    .replace(/の再販入荷情報.*$/, "")
+    .trim();
+}
+
+/**
+ * restock記事の「【在庫あり】…再販実施中のストア」節から、今在庫がある店舗を取り出す。
+ * 実測の構造: accordionBox 内の table 行＝ <th>店名</th><td><a href="…">商品リスティング</a></td>。
+ * リンクは収集元の内部リダイレクト(nyuka-now.com/nyuka.jp)やAmazonアフィリ付きが混ざるので、
+ * cleanStoreUrl で掃除し、外部の実店舗リンクが残った行だけを使う（ソース非公開ルール）。
+ */
+export function parseRestockStores(html: string): RestockStore[] {
+  const body = html.slice(html.indexOf("</head>"));
+  const i = body.indexOf("再販実施中のストア");
+  if (i < 0) return [];
+  let seg = body.slice(i);
+  const j = seg.search(/<h2[\s>]/); // 次の h2（販売履歴）まで
+  if (j > 0) seg = seg.slice(0, j);
+
+  const out: RestockStore[] = [];
+  const seen = new Set<string>();
+  for (const tr of seg.matchAll(
+    /<th[^>]*>([\s\S]*?)<\/th>\s*<td[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g
+  )) {
+    const name = stripTags(tr[1]);
+    if (!name || name.length > 40) continue;
+    if (NOISE_LINK.test(tr[2])) continue;
+    const url = cleanStoreUrl(tr[2]);
+    if (!url || NOISE_LINK.test(url)) continue;
+    const key = `${name}|${url}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const listing = stripTags(tr[3]);
+    const price = listing.match(/価格：([\d,，]+円)/)?.[1] ?? null;
+    out.push({ name, url, note: price ? `価格 ${price}` : null });
+  }
+  return out;
+}
+
 export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
   // 抽選まとめ記事だけを対象にする（「アプリ更新のお願い」等の告知記事を除外）。
   const articles = (await collectArticles()).filter((a) => a.title.includes("抽選"));
@@ -375,6 +426,61 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
       stores: JSON.stringify(
         stores.map((s) => ({ name: s.name, url: s.url, form: s.form, when: s.when, note: s.note }))
       ),
+    });
+  }
+
+  // ── 入荷情報(restock): 今在庫がある店舗を持つ記事だけ載せる ──
+  // 同じ商品の抽選まとめ行が既にあるときは行を増やさず、そちらへ「在庫あり」を合流する
+  // （行を分けると同名カードが2枚並ぶ）。
+  const byName = new Map<string, ScrapedItem>();
+  for (const it of items) byName.set(it.title, it);
+  let restockArticles: Article[] = [];
+  try {
+    restockArticles = (await collectArticles(RESTOCK_BASE)).filter((a) =>
+      /在庫あり|再販入荷/.test(a.title)
+    );
+  } catch {
+    // restockカテゴリの取得失敗は chusen 分に影響させない
+  }
+  for (const a of restockArticles) {
+    let html: string;
+    try {
+      html = await fetchHtml(ARTICLE_BASE + a.id);
+    } catch {
+      continue;
+    }
+    await sleep(400);
+    const rstores = parseRestockStores(html);
+    if (rstores.length === 0) continue; // 在庫のある店が無い記事は載せない
+    const product = cleanRestockName(a.title);
+    if (!product) continue;
+
+    // 節の見出しどおり「先着販売・再販実施中」＝先着（抽選ではない）。
+    const storeObjs = rstores.map((s) => ({ name: s.name, url: s.url, form: "先着販売", when: null, note: s.note }));
+    const summary = summarizeStores(storeObjs, 3);
+
+    const existing = byName.get(product);
+    if (existing) {
+      const prev = existing.stores ? (JSON.parse(existing.stores) as unknown[]) : [];
+      existing.stores = JSON.stringify([...prev, ...storeObjs]);
+      existing.highlights = `${existing.highlights ?? ""}${existing.highlights ? " ／ " : ""}在庫あり：${summary}`;
+      continue;
+    }
+    items.push({
+      source: "nyuka_now",
+      sourceId: a.id,
+      title: product,
+      genre: classifyAggregatorGenre(product),
+      subGenre: null,
+      eventType: "再販",
+      eventDate: null,
+      eventDateText: "在庫あり・再販中",
+      price: null,
+      url: storeObjs[0].url,
+      imageUrl: null,
+      highlights: `在庫あり・再販中のストア：${summary}`,
+      hasLottery: false,
+      stores: JSON.stringify(storeObjs),
     });
   }
 

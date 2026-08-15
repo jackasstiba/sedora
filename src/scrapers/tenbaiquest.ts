@@ -8,9 +8,12 @@ import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
 // 収集元（転売クエストの名・記事へのリンク）を一切出さない＝「情報源にしていない体裁」。
 // 購入導線は商品名での楽天検索に寄せ、Amazon等のアフィリ/トラッキングは載せない。
 //
-// 取得方式: 素の fetch で取れる WordPress。記事一覧（/page/N）を巡回し、タイトルが
-// 「【抽選：YYYY年M月D日…まで】…」形式の投稿だけを採用する（＝抽選ファースト）。
-// 「【2026年M月D日（水）】…」のような単なる発売日投稿（抽選でない）は採用しない。
+// 取得方式: 素の fetch で取れる WordPress。記事一覧（/page/N）を巡回し、
+// ①「【抽選：YYYY年M月D日…まで】…」の抽選投稿（締切が未来のもの）
+// ②「【YYYY年M月D日（曜）】商品名」の発売日投稿（発売日が今日以降のもの）
+// を採用する。②は2026-08-15追加＝本人指摘「全然取れてない」。1-5頁の実測で
+// 抽選98に対し発売日投稿が47件あり全部捨てていた（ポケカMEGA 30th等の転売向き新商品）。
+// 「限定公開記事」等の商品名を持たない投稿は採用しない。
 
 const HOME = "https://tenbaiquest.com/";
 const MAX_LIST_PAGES = 5; // 開催中の抽選は新しい投稿に集中するため、直近ページで十分カバーできる。
@@ -41,13 +44,18 @@ function parseCards(html: string): Card[] {
   return out;
 }
 
-/** タイトルが抽選投稿か（「【抽選：…】…」で始まる）。発売日のみの投稿は false。 */
+/** タイトルが抽選投稿か（「【抽選：…】…」で始まる）。 */
 function isLotteryTitle(title: string): boolean {
   return /^\s*【\s*抽選/.test(title);
 }
 
-/** 先頭の【抽選：…】等のブラケットを外して商品名にする。 */
-function cleanProductName(title: string): string {
+/** タイトルが発売日投稿か（「【YYYY年M月D日…】商品名」。年4桁必須＝年無しの曖昧な日付は採らない）。 */
+export function isReleaseTitle(title: string): boolean {
+  return /^\s*【\s*\d{4}年\s*\d{1,2}月\s*\d{1,2}日/.test(title.normalize("NFKC"));
+}
+
+/** 先頭の【抽選：…】【YYYY年…】等のブラケットを外して商品名にする。 */
+export function cleanProductName(title: string): string {
   return title.replace(/^\s*【[^】]*】\s*/, "").trim();
 }
 
@@ -83,13 +91,18 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
 
   const items: ScrapedItem[] = [];
   for (const c of byId.values()) {
-    if (!isLotteryTitle(c.title)) continue; // 抽選ファースト（発売日のみの投稿は除外）
+    const lottery = isLotteryTitle(c.title);
+    const release = !lottery && isReleaseTitle(c.title);
+    if (!lottery && !release) continue; // 「限定公開記事」等の商品名を持たない投稿は採らない
+
     const name = cleanProductName(c.title);
     if (name.length < 3) continue;
+    if (/限定公開記事/.test(name)) continue;
 
-    // 締切＝タイトル内の「YYYY年M月D日」。過去の締切（受付終了）は載せない。
-    const deadline = parseJapaneseFullDate(c.title.normalize("NFKC"));
-    if (deadline && deadline.getTime() < today.getTime()) continue;
+    // 抽選＝タイトル内の締切日／発売日投稿＝発売日。どちらも過去なら載せない。
+    const date = parseJapaneseFullDate(c.title.normalize("NFKC"));
+    if (date && date.getTime() < today.getTime()) continue;
+    if (release && !date) continue; // 発売日投稿なのに日付が読めない＝採らない
 
     let genre = classifyAggregatorGenre(name);
     if (genre === "その他" && CAT_GENRE[c.cat]) genre = CAT_GENRE[c.cat];
@@ -100,14 +113,14 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
       title: name,
       genre,
       subGenre: null,
-      eventType: "抽選",
-      eventDate: deadline,
-      eventDateText: deadline ? null : "抽選 受付中",
+      eventType: lottery ? "抽選" : "発売",
+      eventDate: date,
+      eventDateText: date ? null : "抽選 受付中",
       price: null,
       // 収集元（転売クエスト）は一切出さない。購入導線は商品名で楽天検索に寄せる。
       url: rakutenSearchUrl(name),
       imageUrl: null, // 競合ドメイン画像のホットリンクは情報源露見につながるため使わない。
-      hasLottery: true,
+      hasLottery: lottery,
     });
   }
 

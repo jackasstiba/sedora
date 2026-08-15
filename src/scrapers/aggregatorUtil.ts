@@ -18,7 +18,7 @@ export function stripTags(html: string): string {
 
 // 情報源（アグリ本体）・SNS・アプリストア等、購入導線として使えないリンク。
 export const NOISE_LINK =
-  /nyuka-now\.com|nyukanow\.page\.link|tenbaiquest\.com|apple\.co|apps\.apple\.com|play\.google\.com|twitter\.com|x\.com|facebook\.com|line\.me|b\.hatena|getpocket\.com|kaereba\.com|policies\.google|accesstrade\.net|a8\.net|aucfree\.com|auctions\.yahoo\.co\.jp\/closedsearch/i;
+  /nyuka-now\.com|nyukanow\.page\.link|nyuka\.jp|tenbaiquest\.com|apple\.co|apps\.apple\.com|play\.google\.com|twitter\.com|x\.com|facebook\.com|line\.me|b\.hatena|getpocket\.com|kaereba\.com|policies\.google|accesstrade\.net|a8\.net|aucfree\.com|auctions\.yahoo\.co\.jp\/closedsearch/i;
 
 // アフィリエイト/トラッキングのクエリ。特に Amazon アソシエイトタグ（tag=... 等）を必ず落とす。
 const TRACK_PARAM =
