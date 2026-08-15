@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeItems } from "./itemFilter";
+import { dedupeItems, sortByEventDate } from "./itemFilter";
 
 // トレカを「タイトル別」（ポケカ / ワンピースカード / 遊戯王 …）に束ねるための定義。
 // DBにタイトル列は無く、データが源ごとに分散している（pokemoncard=ポケカ、
@@ -81,7 +81,7 @@ async function upcomingTcgRows() {
   });
   // 他の一覧と同じ整理を通す。以前は dedupeCrossSource だけを呼んでいたため、語順違い・
   // 同一ソース再投稿の重複と、商品として成立していない投稿がこのページにだけ残っていた。
-  return dedupeItems(rows);
+  return sortByEventDate(dedupeItems(rows));
 }
 
 /** ナビ/サイトマップ用：現在アイテムを持つタイトルと件数（TCG_TITLESの並び順を保持） */

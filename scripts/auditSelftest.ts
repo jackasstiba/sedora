@@ -20,7 +20,7 @@ import {
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
-import { storeWhenLabel } from "../src/lib/stores";
+import { lastDeadline, soonestOpenDeadline, storeWhenLabel, type StoreEntry } from "../src/lib/stores";
 import { unfreezeStoreWhen } from "./backfillDisplayText";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
@@ -32,7 +32,7 @@ import {
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
-import { dedupeItems, eventDateHeading, productUrlKey } from "../src/lib/itemFilter";
+import { dedupeItems, eventDateHeading, liveStoreSummary, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
@@ -43,7 +43,7 @@ import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockS
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
-import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
+import { jstCalDate, parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
@@ -75,6 +75,10 @@ const merged = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_FRESH));
 const relabeled = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_RELABELED));
 
 const today = new Date(Date.UTC(2026, 7, 8)); // 2026-08-08 固定（今日に依存させない）
+
+/** 締切日と種別だけを持つ応募先の配列を手早く作る（締切の幅に関する検査用）。 */
+const S = (rows: [at: string, kind: "締切" | "開始"][]): StoreEntry[] =>
+  rows.map(([at, kind], i) => ({ name: `店${i + 1}`, url: null, form: "抽選", when: at, note: null, at, kind }));
 const PAST = "2023年4月発送予定";
 const FUTURE = "2027年4月発送予定";
 const THIS_MONTH = "2026年8月発送予定"; // 月精度は月末に倒すので「まだ過ぎていない」
@@ -861,6 +865,42 @@ const cases: Case[] = [
   { name: "凍結解除: 本日は巡回日(JST)に解決", fn: () => { const u = unfreezeStoreWhen("〜本日 22:00", null, new Date("2026-08-15T13:49:00Z")); return `${u.when}|${u.at}`; }, want: "〜8/15 22:00|2026-08-15" },
   { name: "凍結解除: 絶対表記は文字列を変えず暦日だけ足す", fn: () => { const u = unfreezeStoreWhen("〜8/21 23:59", null, new Date("2026-08-15T13:49:00Z")); return `${u.when}|${u.at}`; }, want: "〜8/21 23:59|2026-08-21" },
   { name: "凍結解除: 開始形は kind=開始 と読む", fn: () => unfreezeStoreWhen("8/20 00:00〜", null, new Date("2026-08-15T13:49:00Z")).kind, want: "開始" },
+
+  // ── 締切の「幅」を1つの日付に潰さない（2026-08-16・観点D／本番で商品が丸ごと消えていた） ──
+  // 1商品が143店・締切8/15〜8/26 という*幅*を持つのに、eventDate に巡回日基準の「最短」を
+  // 焼き付けていたため、翌日には表示スコープから商品ごと落ちた（#75417＝締切前102店が不在）。
+  // 表示日は today から作り直し、DBは「最後の締切」を持つ。
+  { name: "締切: 過ぎた枠を飛ばし、まだ締切前の最短を表示日にする", fn: () => soonestOpenDeadline(S([["2026-08-01", "締切"], ["2026-08-21", "締切"]]), today)?.toISOString().slice(0, 10) ?? "null", want: "2026-08-21" },
+  { name: "締切: 当日の締切はまだ有効（最短に選ぶ）", fn: () => soonestOpenDeadline(S([["2026-08-08", "締切"], ["2026-08-21", "締切"]]), today)?.toISOString().slice(0, 10) ?? "null", want: "2026-08-08" },
+  { name: "締切: 全部過ぎていたら null", fn: () => soonestOpenDeadline(S([["2026-08-01", "締切"], ["2026-08-05", "締切"]]), today)?.toISOString().slice(0, 10) ?? "null", want: "null" },
+  { name: "締切: 開始日の枠は締切として数えない", fn: () => soonestOpenDeadline(S([["2026-08-20", "開始"]]), today)?.toISOString().slice(0, 10) ?? "null", want: "null" },
+  { name: "締切: 暦日を持たない枠（調査中）は判断材料にしない", fn: () => soonestOpenDeadline([{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today)?.toISOString().slice(0, 10) ?? "null", want: "null" },
+  { name: "期限: 最後の締切を載せてよい期限にする", fn: () => lastDeadline(S([["2026-08-08", "締切"], ["2026-08-26", "締切"], ["2026-08-21", "締切"]]))?.toISOString().slice(0, 10) ?? "null", want: "2026-08-26" },
+  { name: "期限: 締切の暦日が無ければ null（＝触らない）", fn: () => lastDeadline(S([["2026-08-20", "開始"]]))?.toISOString().slice(0, 10) ?? "null", want: "null" },
+  // 詳細ページ側: 表示日だけ差し替え、落とさない（直リンク・検索流入の入口なので404にしない）
+  { name: "詳細: 過去日の eventDate をまだ締切前の最短に直す", fn: () => { const r = withLiveStoreDeadline({ id: 1, source: "card_chusen", title: "x", url: null, eventDate: new Date("2026-08-01T00:00:00Z"), price: null, imageUrl: null, stores: JSON.stringify(S([["2026-08-01", "締切"], ["2026-08-21", "締切"]])) }, today); return (r.eventDate as Date).toISOString().slice(0, 10); }, want: "2026-08-21" },
+  { name: "詳細: 全部過ぎていれば eventDate は変えない（404にしない）", fn: () => { const r = withLiveStoreDeadline({ id: 1, source: "card_chusen", title: "x", url: null, eventDate: new Date("2026-08-01T00:00:00Z"), price: null, imageUrl: null, stores: JSON.stringify(S([["2026-08-01", "締切"]])) }, today); return (r.eventDate as Date).toISOString().slice(0, 10); }, want: "2026-08-01" },
+  { name: "詳細: stores を持たない行は素通り", fn: () => { const r = withLiveStoreDeadline({ id: 1, source: "figisland", title: "x", url: null, eventDate: new Date("2026-08-01T00:00:00Z"), price: null, imageUrl: null }, today); return (r.eventDate as Date).toISOString().slice(0, 10); }, want: "2026-08-01" },
+
+  // 「本日」の基準は**日本時間**の暦日。UTC の暦日を使うと 09:00 JST 前の巡回で1日早くなる。
+  // 実測 2026-08-16 06:39 JST(=21:39Z): 締切197枠中93枠(47%)が前日に解決され、
+  // まだ今日応募できる抽選を「昨日締切」と表示していた（＋商品が全一覧から消えた）。
+  { name: "JST暦日: 09時前の巡回でも当日（21:39Z→翌JST日）", fn: () => jstCalDate(Date.parse("2026-08-15T21:39:06Z")).toISOString().slice(0, 10), want: "2026-08-16" },
+  { name: "JST暦日: 夜の巡回は同じ日（13:49Z＝JST 8/15 22:49）", fn: () => jstCalDate(Date.parse("2026-08-15T13:49:00Z")).toISOString().slice(0, 10), want: "2026-08-15" },
+  { name: "JST暦日: JST 08:59 は前日扱いにしない", fn: () => jstCalDate(Date.parse("2026-08-15T23:59:00Z")).toISOString().slice(0, 10), want: "2026-08-16" },
+  { name: "JST暦日: JST 00:00 ちょうど", fn: () => jstCalDate(Date.parse("2026-08-15T15:00:00Z")).toISOString().slice(0, 10), want: "2026-08-16" },
+  { name: "締切解決: 09時前の巡回で「本日」が当日になる", fn: () => parseDue("締切 本日 22:00", jstCalDate(Date.parse("2026-08-15T21:39:06Z")))?.date?.toISOString().slice(0, 10) ?? "null", want: "2026-08-16" },
+  { name: "締切解決: 09時前の巡回で「明日」が翌日になる", fn: () => parseDue("締切 明日 22:00", jstCalDate(Date.parse("2026-08-15T21:39:06Z")))?.date?.toISOString().slice(0, 10) ?? "null", want: "2026-08-17" },
+
+  // カードの「受付中ストア：」は保存文字列＝締切の近い順の先頭3件。日が経つと先頭が
+  // ちょうど期限切れの店になる。表示時に「今まさに受付中の店」だけへ絞り直す。
+  // **相対表記(本日/明日)はここでは作らない**（audit frozen_relative_date と区別できなくなるため）。
+  { name: "カード要約: 期限切れの店を落とす", fn: () => liveStoreSummary("受付中ストア：店1（抽選・〜8/1）、店2（抽選・〜8/21）", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }, { name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店2（抽選・〜8/21）" },
+  { name: "カード要約: まだ始まっていない店は受付中に数えない", fn: () => liveStoreSummary("受付中ストア：店1（抽選・8/20 00:00〜）、店2（抽選・〜8/21）", [{ name: "店1", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, { name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店2（抽選・〜8/21）" },
+  { name: "カード要約: 相対表記を作らない（本日/明日を混ぜない）", fn: () => /本日|明日/.test(liveStoreSummary("受付中ストア：店1（抽選・〜8/1）、店2（抽選・〜8/8）", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }, { name: "店2", url: null, form: "抽選", when: "〜8/8", note: null, at: "2026-08-08", kind: "締切" }], today) ?? ""), want: false },
+  { name: "カード要約: 全部受付中なら触らない", fn: () => liveStoreSummary("受付中ストア：そのまま", [{ name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：そのまま" },
+  { name: "カード要約: 締切が分からない枠は落とさない", fn: () => liveStoreSummary("受付中ストア：x", [{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today), want: "受付中ストア：x" },
+  { name: "カード要約: 「受付中ストア：」以外の要約は触らない", fn: () => liveStoreSummary("抽選受付 〜8/16", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }], today), want: "抽選受付 〜8/16" },
 
   // ── 「日付未定」なのに商品名が時期を言っている（2026-08-16・観点C 通読で発見） ──────
   // **日は作らない**（月精度のテキストだけ）。年も推測しない（過去月は読まない）。

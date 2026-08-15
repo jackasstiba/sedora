@@ -13,7 +13,7 @@
 import type { PrismaClient } from "../src/generated/prisma/client";
 import { prisma } from "../src/lib/prisma";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
-import { parseStoresJson, summarizeStores, type StoreEntry } from "../src/lib/stores";
+import { lastDeadline, parseStoresJson, summarizeStores, type StoreEntry } from "../src/lib/stores";
 import { resolveMonthDay } from "../src/scrapers/util";
 
 /** 保存済みの受付時刻ラベルを、絶対表記＋暦日(at)に直す（純関数・selftest対象）。 */
@@ -89,10 +89,44 @@ async function fillMonthPrecisionFromTitles(db: PrismaClient): Promise<number> {
   return filled;
 }
 
+/**
+ * (3) eventDate を「最後の締切」に直す。
+ *
+ * 巡回時の「今日以降で最も近い締切」を焼き付けていた行は、翌日にはその日付が過去になり
+ * `eventDate >= today` の表示スコープから**商品ごと落ちる**（まだ締切前の店が残っていても）。
+ * スクレイパーを直しても、巡回窓から流れた行には永久に届かないので定常経路で直す
+ * （ミス13・8/15の画像バックフィル・8/16の相対日付と同じ型）。
+ *
+ * 締切の暦日を持つ枠が無いソース（コラボの開催店舗・締切「調査中」）は触らない。
+ */
+async function repairEventDateFromStores(db: PrismaClient): Promise<number> {
+  const rows = await db.item.findMany({
+    where: { stores: { not: null } },
+    select: { id: true, stores: true, eventDate: true, eventDateText: true },
+  });
+  let fixed = 0;
+  for (const r of rows) {
+    const stores = parseStoresJson(r.stores);
+    if (!stores) continue;
+    const last = lastDeadline(stores);
+    if (!last) continue; // 締切の暦日を持たない＝判断材料が無いので触らない
+    if (r.eventDate && r.eventDate.getTime() === last.getTime()) continue;
+    await db.item.update({
+      where: { id: r.id },
+      data: { eventDate: last, eventDateText: null },
+    });
+    fixed++;
+  }
+  return fixed;
+}
+
 export async function backfillDisplayText(db: PrismaClient): Promise<void> {
   const unfrozen = await unfreezeRelativeStoreLabels(db);
   const filled = await fillMonthPrecisionFromTitles(db);
-  console.log(`[表示文字列の修復] 相対日付の凍結解除 ${unfrozen}件 / 月精度の補完 ${filled}件`);
+  const redated = await repairEventDateFromStores(db);
+  console.log(
+    `[表示文字列の修復] 相対日付の凍結解除 ${unfrozen}件 / 月精度の補完 ${filled}件 / 締切期限の再計算 ${redated}件`
+  );
 }
 
 // 単体実行（`node --env-file-if-exists=.env --import tsx scripts/backfillDisplayText.ts`）

@@ -1,7 +1,28 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay } from "./util";
 import { decodeHtmlEntities, stripTags } from "./aggregatorUtil";
-import { summarizeStores } from "../lib/stores";
+import { lastDeadline, summarizeStores } from "../lib/stores";
+
+/**
+ * 「日本時間の今日」を時刻なしの暦日(UTC0時)で返す（nyukaNow.ts の todayCal と同じ規約）。
+ *
+ * **`new Date()` をそのまま基準にしてはいけない。** 以前ここが `reference = new Date()` で、
+ * 下の parseDue が `reference.getUTC*()` を読んでいたため、**日本時間 09:00 より前に巡回すると
+ * UTC上はまだ前日**で、収集元の「締切 本日 22:00」が*1日早い*日付に解決されていた。
+ *
+ * 実測（2026-08-16 06:39 JST ＝ 21:39Z の巡回）: 締切付き197枠のうち **93枠(47%)** が
+ * 2026-08-15 に解決され、**まだ今日応募できる抽選を「昨日締切」と表示**していた。
+ * 併せて eventDate も過去日になり、商品が全一覧から消えた（card_chusen 56件中23件）。
+ * 締切は「今から間に合うか」を決める値なので、1日ズレると応募を逃す。
+ */
+export function jstCalDate(nowMs: number): Date {
+  const j = new Date(nowMs + 9 * 60 * 60 * 1000);
+  return new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
+}
+
+function todayCal(): Date {
+  return jstCalDate(Date.now());
+}
 
 // カード抽選まとめ（cardchusen.com）: ポケカ/ワンピ/遊戯王/DB の**店舗別抽選**を
 // 締切順に集約する非公式アグリ。実測（2026-08-15）: 受付中306件＋近日9件が
@@ -45,7 +66,7 @@ export function productKey(name: string): string {
  */
 export function parseDue(
   text: string,
-  reference = new Date()
+  reference = todayCal()
 ): { kind: "締切" | "開始"; date: Date | null; label: string } | null {
   const t = text.replace(/\s+/g, " ").trim();
   const m = t.match(/^(締切|開始)\s*(.+)$/);
@@ -89,7 +110,7 @@ type Entry = {
 };
 
 /** 一覧HTMLから店×商品の応募枠を全部取り出す（純関数・selftest対象）。 */
-export function parseCardChusen(html: string, reference = new Date()): Entry[] {
+export function parseCardChusen(html: string, reference = todayCal()): Entry[] {
   const body = html.slice(html.indexOf("</head>"));
   const out: Entry[] = [];
   for (const m of body.matchAll(
@@ -98,7 +119,10 @@ export function parseCardChusen(html: string, reference = new Date()): Entry[] {
     const product = decodeHtmlEntities(m[1]).trim();
     const store = stripTags(m[2]);
     const due = parseDue(stripTags(m[3]), reference);
-    const url = m[4];
+    // 応募ページURLもエンティティを戻す。`?q=…&amp;b=birthday` のまま配ると、クエリ名が
+    // `amp;b` になって絞り込みが落ちる（実測 2026-08-16: しまむらパークの応募リンク）。
+    // 商品名だけ decodeHtmlEntities していて、URLは素通しだった。
+    const url = decodeHtmlEntities(m[4]);
     if (!product || !store || !url) continue;
     // カードの条件タグは store 要素より前にあるので、この match からは取れない。
     // 条件は直前1000字から拾う。
@@ -110,7 +134,7 @@ export function parseCardChusen(html: string, reference = new Date()): Entry[] {
 }
 
 /** 応募枠を商品単位にまとめて ScrapedItem にする（純関数・selftest対象）。 */
-export function buildCardChusenItems(entries: Entry[], reference = new Date()): ScrapedItem[] {
+export function buildCardChusenItems(entries: Entry[]): ScrapedItem[] {
   const groups = new Map<string, Entry[]>();
   for (const e of entries) {
     const k = productKey(e.product);
@@ -140,12 +164,14 @@ export function buildCardChusenItems(entries: Entry[], reference = new Date()): 
       kind: e.due?.kind ?? null,
     }));
 
-    // 表示日＝今日以降で最も近い締切（開始日しか無い枠は開始日）。
-    const today = new Date(Date.UTC(reference.getUTCFullYear(), reference.getUTCMonth(), reference.getUTCDate()));
-    const futureDates = g
-      .map((e) => e.due?.date ?? null)
-      .filter((d): d is Date => !!d && d.getTime() >= today.getTime())
-      .sort((a, b) => a.getTime() - b.getTime());
+    // eventDate は「**最後の締切**＝この商品を載せ続けてよい期限」にする。
+    //
+    // 以前はここに「巡回した日以降で最も近い締切」を入れていたが、それは *その日にしか
+    // 正しくない値*だった。1商品が143店・締切8/15〜8/26という幅を持つので、翌日には
+    // 最短が過去になり `eventDate >= today` の表示スコープから**商品ごと落ちた**
+    // （実測 2026-08-16: #75417 はまだ締切前の店が102店あるのに本番のどの一覧にも不在）。
+    // 画面に出す「いちばん急ぐ日」は表示時に today から作る（applyLiveStoreDeadline）。
+    const lastDue = lastDeadline(stores);
 
     // item.url は「公式ページ」表示になるため、店舗ドメイン＞Googleフォーム＞X告知の順で選ぶ。
     const isX = (u: string) => /(^|\.)x\.com|twitter\.com/i.test(new URL(u).hostname);
@@ -163,8 +189,8 @@ export function buildCardChusenItems(entries: Entry[], reference = new Date()): 
       genre: "トレカ",
       subGenre: sub,
       eventType: "抽選",
-      eventDate: futureDates[0] ?? null,
-      eventDateText: futureDates[0] ? null : "抽選 受付中",
+      eventDate: lastDue,
+      eventDateText: lastDue ? null : "抽選 受付中",
       price: null,
       url: pick.url,
       imageUrl: null,

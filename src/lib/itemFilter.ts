@@ -2,6 +2,7 @@
 // prisma を import しないこと（クライアントバンドルに載せるため）。
 import { isStalePlan, plannedDateFromText, todayJst } from "./date";
 import { parseYen } from "./margin";
+import { parseStoresJson, soonestOpenDeadline, summarizeStores, type StoreEntry } from "./stores";
 import { cleanListTitle, hasProductSegment } from "./title";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
@@ -136,6 +137,9 @@ type DedupeItem = {
   // 「公式ページで見る」の遷移先。URLベースの重複突合（dedupeSameProductUrlCrossSource）が
   // 見る。持たない呼び出しにも無害（任意）。
   officialUrl?: string | null;
+  // 応募先(店×応募ページ)のJSON。表示日を「まだ締切前の最短」に作り直すために見る
+  // （applyLiveStoreDeadline）。持たない呼び出しにも無害（任意）。
+  stores?: string | null;
 };
 
 /** 落とす重複 `from` が持つ相場/抽選/賞品情報を、残す代表 `keep` が欠くなら引き継ぐ。
@@ -498,6 +502,89 @@ function dropStalePlans<T extends DedupeItem & { eventDateText?: string | null }
 }
 
 /**
+ * 応募先(stores)を持つ商品の表示日を、**読んだ瞬間に today から作り直す**。
+ *
+ * 直す対象（2026-08-16 実測・本番で再現）: card_chusen は「店×商品」を1商品にまとめるため、
+ * 1行が「143店・締切 8/15〜8/26」という*幅*を持つ。ところが eventDate には巡回した日を基準に
+ * 「今日以降で最も近い締切」を**焼き付けて**いたので、翌日にはそれが過去日になり、
+ * `eventDate >= today` の表示スコープから**商品ごと消えた**。まだ締切前の店が残っていても、だ。
+ *
+ * 実測: #75417（ONE PIECE OP-17）は今日まだ締切前の店が **102店**あるのに、トップ・/lottery・
+ * /genre/トレカ・/tcg/ワンピースカード のどれにも出ていなかった（本番HTMLで不在を確認）。
+ * さらに悪いことに、**スクレイプ直後は必ず正しくなる**ので、更新直後に走る audit からは
+ * 永久に見えない（ミス23と同じ盲点＝"今日"に依存する値をDBに凍結した）。
+ *
+ * ここでの規約:
+ *  ・締切が未来の枠が1つでもある → その**最短**を表示日にする（＝いちばん急ぐ日）
+ *  ・そうでなければ **何もしない**。
+ *
+ * **ここで行を落としてはいけない。** 掲載スコープを決めるのは DB の eventDate（＝最後の締切）と
+ * SQL の `eventDate >= today` であって、ここではない。全店締切済みの行はその時点で
+ * SQL から外れる。一方 `/release/*` は**過去も意図して載せる**面なので、ここで落とすと
+ * 月ページから過去の抽選が消える（[[System/rules]]「過去日を理由にしてよいページといけないページ」）。
+ * 実装中に一度「全店締切済みなら落とす」を書いてこの穴に気付いた。
+ */
+function applyLiveStoreDeadline<T extends DedupeItem>(items: T[]): T[] {
+  const today = todayJst();
+  return items.map((it) => {
+    const stores = it.stores ? parseStoresJson(it.stores) : null;
+    if (!stores) return it;
+    const soonest = soonestOpenDeadline(stores, today);
+    const highlights = liveStoreSummary(it.highlights ?? null, stores, today);
+    if (!soonest && highlights === it.highlights) return it;
+    // 表示日とカード要約だけを差し替える（商品・店・条件は一切触らない）。
+    return { ...it, ...(soonest ? { eventDate: soonest } : {}), highlights } as T;
+  });
+}
+
+/**
+ * カードの「受付中ストア：…」を、**今この瞬間に本当に受付中の店だけ**で作り直す。
+ *
+ * 直す対象（2026-08-16・本番のトップで確認）: この要約は巡回時に作って保存した文字列で、
+ * `stores` は締切の近い順に並び、要約はその**先頭3件**を採る。つまり日が経つほど、
+ * カードの見出しに出る3店はちょうど**締切が過ぎた店**になる。実際に本番のカードには
+ * 「受付中ストア：…おもちゃのペリカン（抽選・8/20 00:00〜）…」と、**まだ始まっていない店**が
+ * 受付中として並んでいた（詳細ページ側は前日に「（受付前）」を付けて区別済みで、
+ * カードと詳細で食い違っていた）。
+ *
+ * **相対表記（本日/明日）はここでは作らない。** 作ると audit `frozen_relative_date` が
+ * 「保存された相対日付」と区別できなくなる（あの検査は表示用の row を読む）。
+ * ここでやるのは「嘘の除去」だけ＝日付は絶対表記のまま、対象を受付中の店に絞る。
+ */
+export function liveStoreSummary(
+  highlights: string | null,
+  stores: StoreEntry[],
+  today: Date
+): string | null {
+  const PREFIX = "受付中ストア：";
+  if (!highlights?.startsWith(PREFIX)) return highlights;
+  const open = stores.filter((s) => {
+    if (!s.at) return true; // 締切が分からない枠は落とさない（知らないことを根拠にしない）
+    const at = new Date(`${s.at}T00:00:00.000Z`).getTime();
+    if (s.kind === "締切") return at >= today.getTime();
+    if (s.kind === "開始") return at <= today.getTime(); // まだ始まっていない店は「受付中」ではない
+    return true;
+  });
+  if (!open.length || open.length === stores.length) return highlights;
+  return `${PREFIX}${summarizeStores(open, 3)}`;
+}
+
+/**
+ * 1件版（商品詳細ページ用）。表示日を today 基準に作り直すだけで、**落とさない**。
+ *
+ * 一覧と違い、詳細ページは直リンク・検索流入で開かれる正当な入口なので、締切が全部
+ * 過ぎていても 404 にはしない（sitemap も60日は残す方針）。
+ * これが無いと、同じ1ページの中で上が「抽選日 2026年8月15日(土)」＝過去、
+ * 下の店舗行が「〜本日 18:00」と食い違う（2026-08-16 に本番で実際に起きていた）。
+ */
+export function withLiveStoreDeadline<T extends DedupeItem>(item: T, today = todayJst()): T {
+  const stores = item.stores ? parseStoresJson(item.stores) : null;
+  if (!stores) return item;
+  const soonest = soonestOpenDeadline(stores, today);
+  return soonest ? ({ ...item, eventDate: soonest } as T) : item;
+}
+
+/**
  * Xミラー（実況投稿を拾うソース）は、**日付が取れているものだけ**掲載する。
  *
  * 全1440件を通読して分かったこと: 粗はサイト全体に散っているのではなく、ここに集中していた。
@@ -527,15 +614,36 @@ function dropUndatedMirrorPosts<T extends DedupeItem & { eventDateText?: string 
 /** 一覧に出す前の整理をまとめて適用（重複解消4種＋商品として成立していない投稿の除外）。
  *  ページごとに呼び出しが分かれると必ず適用漏れが出るので、表示用の取得は全てここを通す。 */
 export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
+  // applyLiveStoreDeadline を**最初**に通す。後段の dropStalePlans は eventDate を見て
+  // 「過ぎた予定」を落とすので、先に表示日を today 基準へ作り直しておかないと、
+  // 復活すべき行（まだ締切前の店がある商品）がそこで捨てられる。
   return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
     dedupeSneakerCrossSource(
       dedupeSameSourceExact(
         dedupeWordOrderCrossSource(
-          dedupeCrossSource(dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(items)))
+          dedupeCrossSource(
+            dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(applyLiveStoreDeadline(items)))
+          )
         )
       )
     )
   )));
+}
+
+/**
+ * 発売日/締切の昇順（日付なしは末尾）、同日は id 降順。SQL の orderBy と同じ規則。
+ *
+ * **「締切が近い順」で見せる面だけが呼ぶ。** dedupeItems の中に入れてはいけない:
+ * RSS は `sort:"recent"`（新着＝id降順）で配信しており、dedupeItems が日付順に
+ * 並べ直すとフィードの意味が黙って変わる（実装中に一度この形にして気付いた）。
+ *
+ * 呼ぶ理由: applyLiveStoreDeadline が表示日を**後ろにずらす**ことがあるため
+ * （凍結された過去日 → まだ締切前の最短）、SQL が付けた順序はその行についてだけ古くなる。
+ * 並べ直さないと、復活した行が「締切が近い順」の先頭に居座って嘘の緊急度を出す。
+ */
+export function sortByEventDate<T extends DedupeItem>(items: T[]): T[] {
+  const key = (d: Date | string | null) => (d ? new Date(d).getTime() : Number.POSITIVE_INFINITY);
+  return [...items].sort((a, b) => key(a.eventDate) - key(b.eventDate) || b.id - a.id);
 }
 
 // ── 検索の同義語（略称 → タイトルに実際に現れる正式表記） ─────────────────────

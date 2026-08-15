@@ -1,6 +1,6 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeItems, dedupeKey, GENRE_ORDER } from "./itemFilter";
+import { dedupeItems, dedupeKey, GENRE_ORDER, sortByEventDate, withLiveStoreDeadline } from "./itemFilter";
 import { computeMargin } from "./margin";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
@@ -12,7 +12,10 @@ export type SeoItem = Awaited<ReturnType<typeof getItemById>>;
 
 export async function getItemById(id: number) {
   if (!Number.isFinite(id)) return null;
-  return prisma.item.findUnique({ where: { id } });
+  const row = await prisma.item.findUnique({ where: { id } });
+  // 応募先を持つ商品の「抽選日」は、一覧と同じく today から作り直す。DBの eventDate は
+  // 最後の締切（＝載せ続けてよい期限）なので、そのまま出すと一覧と日付が食い違う。
+  return row ? withLiveStoreDeadline(row) : null;
 }
 
 /**
@@ -84,7 +87,8 @@ export async function getItemsByGenre(genre: string, take = 1500) {
     take,
   });
   // ジャンルページの一覧・見出し件数（items.length）から重複を除く。
-  return dedupeItems(rows);
+  // 応募先を持つ商品は表示日が today 基準に作り直されるので、並べ直してから返す。
+  return sortByEventDate(dedupeItems(rows));
 }
 
 /**
@@ -161,7 +165,7 @@ export async function getLotteryItems(take = 300) {
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
     take: 1000,
   });
-  return dedupeItems(rows).slice(0, take);
+  return sortByEventDate(dedupeItems(rows)).slice(0, take);
 }
 
 /** "2026-08" -> その月の [開始, 翌月開始) */
@@ -181,12 +185,14 @@ export async function getItemsByMonth(month: string, take = 300) {
   if (!range) return [];
   // 月ページも他の一覧と同じ整理（重複解消・非商品投稿の除外）を通す。ここだけ dedupeItems を
   // 呼んでいなかったため、同じ商品が2枚並ぶ・実況投稿が載るのが月ページだけ起きていた。
-  return dedupeItems(
-    await prisma.item.findMany({
-      where: { eventDate: { gte: range.start, lt: range.end } },
-      orderBy: [{ eventDate: "asc" }, { id: "desc" }],
-      take,
-    })
+  return sortByEventDate(
+    dedupeItems(
+      await prisma.item.findMany({
+        where: { eventDate: { gte: range.start, lt: range.end } },
+        orderBy: [{ eventDate: "asc" }, { id: "desc" }],
+        take,
+      })
+    )
   );
 }
 

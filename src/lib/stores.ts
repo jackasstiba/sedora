@@ -113,6 +113,46 @@ export function summarizeStores(stores: StoreEntry[], max = 3, today?: Date): st
   return `${head}${rest > 0 ? ` 他${rest}店` : ""}`;
 }
 
+/**
+ * 締切の暦日を持つ枠だけを取り出す。`at` を持たない枠（締切時刻が「調査中」・開催店舗など）は
+ * 締切を知らないので判断材料にしない（知らないことを「終わった」と言わないため）。
+ */
+function datedDeadlines(stores: StoreEntry[]): { at: string }[] {
+  return stores.filter((s): s is StoreEntry & { at: string } => s.kind === "締切" && !!s.at);
+}
+
+/**
+ * **まだ締切前の枠のうち、いちばん早い締切**（＝この商品で今いちばん急ぐ日）。
+ * 締切付きの枠が1つも無い／全部過ぎている場合は null。
+ *
+ * これが要る理由（2026-08-16 実測 = ミス23と同型の3例目）:
+ * card_chusen は「店×商品」を1商品にまとめるので、1行が **143店・締切8/15〜8/26** のような
+ * *幅* を持つ。ところが eventDate には巡回した日の「今日以降で最も近い締切」を**焼き付けて**
+ * いたため、翌日にはその日付が過去になり `eventDate >= today` の表示スコープから商品ごと落ちた。
+ * 実測: #75417（ONE PIECE OP-17）は **今日まだ締切前の店が102店**あるのに、トップ・/lottery・
+ * /genre/トレカ・/tcg/ワンピースカード のどこにも出ていなかった（本番HTMLで確認）。
+ * しかも症状は**更新直後だけ消える**ので、更新直後に走る audit では永久に見えなかった。
+ *
+ * 対策の形は storeWhenLabel と同じ＝**"今日"に依存する値をDBに凍結せず、読んだ瞬間に作る**。
+ * DBの eventDate は「最後の締切（＝この商品がまだ有効な期限）」を持ち、画面に出す日付は
+ * ここで today から作り直す。
+ */
+export function soonestOpenDeadline(stores: StoreEntry[], today: Date): Date | null {
+  const open = datedDeadlines(stores)
+    .map((s) => new Date(`${s.at}T00:00:00.000Z`))
+    .filter((d) => d.getTime() >= today.getTime())
+    .sort((a, b) => a.getTime() - b.getTime());
+  return open[0] ?? null;
+}
+
+/** **最後の締切**（＝全店が締め切る日＝この商品を載せ続けてよい期限）。無ければ null。 */
+export function lastDeadline(stores: StoreEntry[]): Date | null {
+  const all = datedDeadlines(stores)
+    .map((s) => new Date(`${s.at}T00:00:00.000Z`))
+    .sort((a, b) => b.getTime() - a.getTime());
+  return all[0] ?? null;
+}
+
 /** Item.stores（JSON配列文字列）を安全にパースする。壊れていれば null。 */
 export function parseStoresJson(json: string | null | undefined): StoreEntry[] | null {
   if (!json) return null;

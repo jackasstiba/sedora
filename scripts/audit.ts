@@ -745,6 +745,48 @@ async function main() {
     report("stores_indistinguishable", "受付中ストアの表示が区別できない（同じ表記が並ぶ）", "warn", indistinguishable, baseline);
   }
 
+  // (11a2) **まだ締切前の応募先があるのに、商品がサイトのどこにも出ていない**（観点D＝逆方向の照合）。
+  //
+  // これは「画面を見ても永久に分からない」型。エラーも出ず件数もそれらしいので、
+  // 出ている物だけを検査する他の不変条件は全部素通りする。
+  //
+  // 2026-08-16 実測: card_chusen の eventDate に「巡回した日以降で最も近い締切」を焼き付けて
+  // いたため、翌日には表示スコープ（eventDate >= today）から商品ごと落ちていた。
+  // #75417（ONE PIECE OP-17）は**今日まだ締切前の店が102店**あるのに、トップ・/lottery・
+  // /genre/トレカ・/tcg/ワンピースカード のどこにも無かった（本番HTMLで不在を確認）。
+  // 症状は**スクレイプ直後だけ消える**ので、更新直後に走る audit からは永久に見えなかった
+  // （＝ミス23と同じ盲点。"今日"に依存する値をDBに凍結すると、検査の目の前で自然に治る）。
+  //
+  // 重複解消で畳まれた行は「消えた」ではないので、同じ dedupeKey の代表が出ていれば見逃す。
+  {
+    const shownKeys = new Set(shown.map((r) => dedupeKey(r.title)));
+    const hidden: string[] = [];
+    let examined = 0;
+    for (const r of all) {
+      if (!r.stores) continue;
+      const stores = parseStoresJson(r.stores);
+      if (!stores) continue;
+      const open = stores.filter(
+        (s) => s.kind === "締切" && s.at && new Date(`${s.at}T00:00:00.000Z`).getTime() >= today.getTime()
+      );
+      if (!open.length) continue;
+      examined++;
+      if (byId.has(r.id)) continue;
+      if (shownKeys.has(dedupeKey(r.title))) continue; // 重複の代表が出ている＝欠落ではない
+      hidden.push(
+        `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title).slice(0, 44)} … まだ締切前の応募先 ${open.length}件（最短 ${open.map((s) => s.at!).sort()[0]}）なのに全ページに不在`
+      );
+    }
+    report(
+      "stores_open_but_hidden",
+      "まだ締切前の応募先があるのに商品が表示されていない",
+      "error",
+      hidden,
+      baseline,
+      examined
+    );
+  }
+
   // (11b) **保存された相対日付**（「〜明日 22:00」）。
   //
   // 2026-08-16 実測: 収集元が使う相対表記をそのまま stores/highlights に保存していたため、
@@ -1149,10 +1191,19 @@ async function main() {
   // あわせて、HTMLエンティティが残ったURL（`?a=1&amp;b=2`）も落とす。クエリ名が
   // `amp;utm_source` になった壊れたURLを公式として提示していた（実測119件）。
   {
+    const ENTITY = /&(amp|lt|gt|quot|#0?39);/;
     const entity = shown
-      .filter((r) => r.officialUrl && /&(amp|lt|gt|quot|#0?39);/.test(r.officialUrl))
+      .filter((r) => r.officialUrl && ENTITY.test(r.officialUrl))
       .map((r) => `[${r.source} #${r.id}] ${r.officialUrl!.slice(0, 90)}`);
-    report("official_url_entity", "公式URLにHTMLエンティティが残っている", "error", entity, baseline, shown.length);
+    // **応募ページURL（stores[].url）も同じ検査に掛ける。** officialUrl だけ見ていたため、
+    // 店舗の応募リンクに残った `&amp;` は素通りしていた（実測 2026-08-16・観点Aの巡回で発見）。
+    // 「同じ型の粗は、同じ型の出口すべてに出る」＝出口を数え上げてから検査する。
+    for (const r of shown) {
+      for (const s of parseStoresJson(r.stores) ?? [])
+        if (s.url && ENTITY.test(s.url))
+          entity.push(`[${r.source} #${r.id}] 応募ページ ${s.name}: ${s.url.slice(0, 80)}`);
+    }
+    report("official_url_entity", "外部URLにHTMLエンティティが残っている", "error", entity, baseline, shown.length);
 
     const eventProduct = shown
       .filter((r) => r.eventType === "開催" && r.officialUrl && isSingleProductUrl(r.officialUrl))

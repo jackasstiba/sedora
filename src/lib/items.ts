@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
-import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeItems, type ItemStatus, type ItemWhen } from "./itemFilter";
+import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeItems, sortByEventDate, type ItemStatus, type ItemWhen } from "./itemFilter";
 
 // 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
 // クライアント側フィルタと共有する。ここではそれらを再エクスポートして使う。
@@ -107,7 +107,10 @@ export async function getItems(filter: ItemFilter) {
     take: 5000,
   });
   // 複数ソースが同じ商品を載せる重複表示を解消（figisland↔koretore／Nike SNKRS↔snkrdunk）。
-  return dedupeItems(rows);
+  const deduped = dedupeItems(rows);
+  // 日付順の面だけ並べ直す。応募先を持つ商品の表示日は dedupeItems の中で today 基準に
+  // 作り直されるので、SQL の並びはその行だけ古い。新着順(RSS)はここを通さない。
+  return filter.sort === "recent" ? deduped : sortByEventDate(deduped);
 }
 
 /** 最終更新時刻（最新の scrapedAt）だけを返す。
