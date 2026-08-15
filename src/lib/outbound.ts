@@ -16,6 +16,7 @@ const OFFICIAL_URL_SOURCES = new Set([
   "raffle_kuji", // オンラインくじの一次プラットフォーム。item.url は応募ページ(/lotteries/id)に直リンク
   "kujimap", // item.url は各くじブランドの公式LP（segaplaza/furyuprize等）に直リンク。無い行は掲載しない
   "onepiece_card", // ONE PIECEカードゲーム公式の商品ページに直リンク
+  "card_chusen", // item.url は各店の応募ページ（抽選システム/店舗告知＝一次）に直リンク
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -76,6 +77,9 @@ const SEARCHABLE_SOURCES = new Set([
   "tenbaiquest", // item.url は楽天検索（収集元は非公開）＝商品名で市場検索できる
   "kujimap", // くじ名（セガ ラッキーくじ「◯◯」等）で市場検索できる
   "onepiece_card", // 商品名（ブースターパック◯◯【OP-17】等）で市場検索できる
+  "card_chusen", // 商品名（拡張パック名）で市場検索できる
+  "gunpla_resale", // item.url は楽天検索（収集元は非公開）＝商品名で市場検索できる
+  "sofvi", // item.url は楽天検索（収集元は非公開）＝商品名で市場検索できる
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */

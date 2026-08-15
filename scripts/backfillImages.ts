@@ -69,6 +69,8 @@ const SEARCH_PAGE_RE = /search\.rakuten\.co\.jp|shopping\.yahoo\.co\.jp\/search|
  */
 function sourceArticleUrl(source: string, sourceId: string): string | null {
   if (source === "tenbaiquest") return `https://tenbaiquest.com/${sourceId}`;
+  if (source === "sofvi") return `https://sofvi.tokyo/${sourceId}/`; // 掲載URLは楽天検索なので記事はここから
+
   // channeltono / rarecheck は掲載URLがそのまま記事なので、ここで二重に取りに行かない。
   return null;
 }

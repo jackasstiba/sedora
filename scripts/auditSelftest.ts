@@ -33,6 +33,9 @@ import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockS
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
+import { parseDue, productKey } from "../src/scrapers/cardChusen";
+import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
+import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 
@@ -692,6 +695,55 @@ const cases: Case[] = [
   { name: "転売Q: 年無しの日付投稿は採らない", fn: () => isReleaseTitle("【7月3日（金）】Audio-Technica"), want: false },
   { name: "転売Q: 抽選でも発売日でもない投稿は対象外", fn: () => isReleaseTitle("【完売店舗多数】EGOIST"), want: false },
   { name: "転売Q: ブラケット除去で商品名", fn: () => cleanTqProductName("【2026年9月16日（水）】ポケモンカードゲーム MEGA 拡張パック"), want: "ポケモンカードゲーム MEGA 拡張パック" },
+
+  // ── sofvi.tokyo ソフビ情報（2026-08-15新設） ──────────
+  // ニュース見出しを商品名にしない＝［ブランド］＋「商品名」を組み立てられる記事だけ載せる
+  {
+    name: "sofvi: ブランド＋商品名の組み立て",
+    fn: () => sofviProductName("抽選受付締切は16日まで！「スーパー戦隊」の原点！［HEROES VINYL ART］に「秘密戦隊ゴレンジャー ソフビセット（劇中カラー）」登場！"),
+    want: "HEROES VINYL ART 秘密戦隊ゴレンジャー ソフビセット（劇中カラー）",
+  },
+  { name: "sofvi: 「」が無い見出しは載せない", fn: () => sofviProductName("エビ沢キヨミのそふび道（超番外編）"), want: null },
+  {
+    name: "sofvi: 日だけの締切は記事日付の月で補完",
+    fn: () => { const r = sofviEventInfo("抽選受付締切は16日まで！…", new Date(Date.UTC(2026, 7, 15))); return r ? `${r.eventType}|${ymd(r.date)}` : null; },
+    want: "抽選|2026-08-16",
+  },
+  {
+    name: "sofvi: 記事日より過去の日は翌月に倒す",
+    fn: () => { const r = sofviEventInfo("抽選受付締切は2日まで！", new Date(Date.UTC(2026, 7, 15))); return r ? ymd(r.date) : null; },
+    want: "2026-09-02",
+  },
+  {
+    name: "sofvi: 日付の無い発売済みレポートは載せない",
+    fn: () => sofviEventInfo("奇才・安楽安作氏が「マシュマロマン」を手掛けた！", new Date(Date.UTC(2026, 7, 15))),
+    want: null,
+  },
+
+  // ── gunpla_resale ガンプラ再販カレンダー（2026-08-15新設） ──────────
+  {
+    name: "gunpla: 行のパース（名前・日付・新発売タグ・価格）",
+    fn: () => {
+      const html =
+        '</head><table><tr><td><li><a href="#2608001">HGUC ザクI (旧ザク) </a></li></td><td width="10%">08/10(月)</td></tr>' +
+        '<tr><td><li><a href="#26070809025">30MF 鉄禍ノ武闘家 【新発売】[8月延期]</a></li></td><td>08/29(土)</td></tr></table>' +
+        '<table><tr><td id="2608001">HGUC ザクI (旧ザク)</td><td width="15%">1320</td><td>08/10(月)</td></tr></table>';
+      const { rows, prices } = parseGunplaCalendar(html);
+      return rows.map((r) => `${r.name}|${r.isNew}|${r.month}/${r.day}`).join(";") + `|price=${prices.get("2608001")}`;
+    },
+    want: "HGUC ザクI (旧ザク)|false|8/10;30MF 鉄禍ノ武闘家|true|8/29|price=1320",
+  },
+  { name: "gunpla: 編集タグ除去", fn: () => cleanGunplaName("ENTRY GRADE ガンダム 【新発売】[8月追加]").name, want: "ENTRY GRADE ガンダム" },
+
+  // ── card_chusen 店舗別トレカ抽選（2026-08-15新設） ──────────
+  // 商品名の表記ゆれ・語順ゆれの名寄せ（実測: 同じ弾が店ごとに5表記あった）
+  { name: "cardchusen: ゲーム接頭辞違いを同じ商品に束ねる", fn: () => productKey("ポケモンカード ストームエメラルダ") === productKey("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」"), want: true },
+  { name: "cardchusen: 語順違い(OP-17)も束ねる", fn: () => productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】") === productKey("ONE PIECEカードゲーム ブースターパック OP-17「世界最強の戦士」"), want: true },
+  { name: "cardchusen: 別の弾は束ねない", fn: () => productKey("ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」") === productKey("ポケモンカードゲーム MEGA 拡張パック「メガシンフォニア」"), want: false },
+  { name: "cardchusen: 締切 本日は当日日付", fn: () => { const d = parseDue("締切 本日 22:00", today); return d ? `${d.kind}|${ymd(d.date!)}|${d.label}` : null; }, want: "締切|2026-08-08|〜本日 22:00" },
+  { name: "cardchusen: 締切 M/D(曜)", fn: () => { const d = parseDue("締切 8/17(月) 13:00", today); return d ? ymd(d.date!) + "|" + d.label : null; }, want: "2026-08-17|〜8/17 13:00" },
+  { name: "cardchusen: 調査中は日付を作らない", fn: () => parseDue("締切 調査中", today)?.date ?? "no", want: "no" },
+  { name: "cardchusen: 開始（近日受付）はラベルが開始形", fn: () => parseDue("開始 明日 13:00", today)?.label, want: "明日 13:00〜" },
 
   // ── ワンピースカード公式（2026-08-15新設） ──────────
   {

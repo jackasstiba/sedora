@@ -165,7 +165,12 @@ async function main() {
       }
 
       // (2) 価格: 手元の定価が本文のどこにも出てこない。
-      const yen = r.price ? parseYen(r.price.split(" / ")[0]) : null;
+      //     ただし**リンク先が検索結果ページのソース**（gunpla_resale等＝収集元非公開で
+      //     楽天検索を導線にしている）は対象外。検索結果に並ぶのは出品者の実売価格で、
+      //     カタログ定価が載っている保証がそもそも無い＝この検査の前提（リンク先＝価格の
+      //     一次情報）が成り立たない。実測: HGUC ボール 定価1,760円が検索結果に無く誤報。
+      const urlIsSearchPage = /search\.rakuten\.co\.jp|shopping\.yahoo\.co\.jp\/search|amazon\.co\.jp\/s\b/.test(r.url);
+      const yen = !urlIsSearchPage && r.price ? parseYen(r.price.split(" / ")[0]) : null;
       if (yen != null && yen > 0) {
         const forms = [String(yen), yen.toLocaleString("en-US")];
         if (!forms.some((f) => text.includes(normalizeForSearch(f)))) {

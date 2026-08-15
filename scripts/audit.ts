@@ -512,6 +512,8 @@ async function main() {
       nyuka_now: "1つの抽選ページで複数商品の応募を受け付ける（百貨店のウイスキー3種など）",
       pokemon_goods: "1つのキャンペーン特集ページに複数グッズが載る",
       nike_snkrs: "1つの launch ページに大人用とキッズ用が並ぶ",
+      // 実測: エディオンの合同抽選(pokeca082801)が3弾、店の抽選システムトップが複数弾を受け付ける
+      card_chusen: "1つの応募ページで複数弾の抽選を受け付ける（エディオン合同抽選など）",
     };
     const byUrl = new Map<string, Row[]>();
     for (const r of shown) (byUrl.get(r.url) ?? byUrl.set(r.url, []).get(r.url)!).push(r);
@@ -664,6 +666,11 @@ async function main() {
         key: "intake_tq_release",
         label: "転売クエスト 発売日投稿行",
         count: shown.filter((r) => r.source === "tenbaiquest" && r.eventType === "発売").length,
+      },
+      {
+        key: "intake_card_chusen",
+        label: "店舗別トレカ抽選(card_chusen)行",
+        count: shown.filter((r) => r.source === "card_chusen").length,
       },
     ];
     const dead: string[] = [];

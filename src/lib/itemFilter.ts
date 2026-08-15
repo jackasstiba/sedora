@@ -63,6 +63,11 @@ const SOURCE_LABELS: Record<string, string> = {
   // kujimap は非公式アグリを収集元にするが名は出さない（url は各くじの公式LPに直リンク）。
   kujimap: "くじ情報",
   onepiece_card: "ワンピースカード公式",
+  // card_chusen は非公式アグリ＝名は出さない（url は各店の応募ページに直リンク）。
+  card_chusen: "トレカ抽選情報",
+  // gunpla_resale も非公式アグリ＝名は出さない（url は楽天検索）。
+  gunpla_resale: "ガンプラ再販情報",
+  sofvi: "ソフビ情報",
 };
 
 export function sourceLabel(source: string): string {

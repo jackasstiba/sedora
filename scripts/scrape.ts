@@ -8,7 +8,7 @@ import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
-const RECONCILE_SOURCES = new Set(["nyuka_now"]);
+const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen"]);
 
 async function main() {
   // figisland_pb は詳細ページ取得型。「最後に詳細を取り直した時刻」を渡して古い順に一巡させる。
