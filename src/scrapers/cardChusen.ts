@@ -21,6 +21,18 @@ import { summarizeStores } from "../lib/stores";
 
 const HOME = "https://cardchusen.com/";
 
+/** title属性から取る商品名はHTMLエンティティのまま（実測: ルフィ&amp;エース）。実文字に戻す。 */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)))
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
 /** 商品名からグループ化キーを作る（表記ゆれ・語順ゆれを吸収）。 */
 export function productKey(name: string): string {
   let t = name.normalize("NFKC").toLowerCase();
@@ -89,7 +101,7 @@ export function parseCardChusen(html: string, reference = new Date()): Entry[] {
   for (const m of body.matchAll(
     /board-card__store" title="([^"]+)"[^>]*>([\s\S]*?)<\/p>[\s\S]{0,600}?board-card__due"[^>]*>([\s\S]*?)<\/div>[\s\S]{0,300}?board-card__cta" href="([^"]+)"/g
   )) {
-    const product = m[1].trim();
+    const product = decodeEntities(m[1]).trim();
     const store = stripTags(m[2]);
     const due = parseDue(stripTags(m[3]), reference);
     const url = m[4];

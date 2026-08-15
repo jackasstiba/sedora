@@ -33,7 +33,7 @@ import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockS
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
-import { parseDue, productKey } from "../src/scrapers/cardChusen";
+import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
@@ -744,6 +744,19 @@ const cases: Case[] = [
   { name: "cardchusen: 締切 M/D(曜)", fn: () => { const d = parseDue("締切 8/17(月) 13:00", today); return d ? ymd(d.date!) + "|" + d.label : null; }, want: "2026-08-17|〜8/17 13:00" },
   { name: "cardchusen: 調査中は日付を作らない", fn: () => parseDue("締切 調査中", today)?.date ?? "no", want: "no" },
   { name: "cardchusen: 開始（近日受付）はラベルが開始形", fn: () => parseDue("開始 明日 13:00", today)?.label, want: "明日 13:00〜" },
+  {
+    // 実測: title属性の &amp; が未復号のまま本番カードに「ルフィ&amp;エース」と出た（audit:page が35件検出）
+    name: "cardchusen: title属性のHTMLエンティティを実文字に戻す",
+    fn: () => {
+      const html =
+        '</head><div class="board-card__tags"><span class="board-cond__txt">会員</span></div>' +
+        '<p class="board-card__store" title="ONE PIECEカードゲーム スタートデッキEX ルフィ&amp;エース【ST-29】">テスト店</p>' +
+        '<div class="board-card__due"> 締切 本日 23:59 </div>' +
+        '<a class="board-card__cta" href="https://example.com/l/1">応募</a>';
+      return parseCardChusen(html, today)[0]?.product ?? null;
+    },
+    want: "ONE PIECEカードゲーム スタートデッキEX ルフィ&エース【ST-29】",
+  },
 
   // ── ワンピースカード公式（2026-08-15新設） ──────────
   {
