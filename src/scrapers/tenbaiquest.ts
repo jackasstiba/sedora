@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
 
@@ -65,8 +66,7 @@ function rakutenSearchUrl(name: string): string {
 
 export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
   // 「日本時間の今日」を暦日(UTC0時)で。締切が過去の抽選（＝受付終了）は載せない。
-  const j = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const today = new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
+  const today = todayJst();
 
   const byId = new Map<string, Card>();
   for (let p = 1; p <= MAX_LIST_PAGES; p++) {

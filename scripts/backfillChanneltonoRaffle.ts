@@ -8,9 +8,10 @@
 import type { PrismaClient } from "../src/generated/prisma/client";
 import { extractRaffleUrl } from "../src/scrapers/channeltono";
 import { fetchHtml, sleep } from "../src/scrapers/util";
+import { todayJst } from "../src/lib/date";
 
 export async function backfillChanneltonoRaffleUrls(prisma: PrismaClient): Promise<number> {
-  const today = new Date();
+  const today = todayJst();
   today.setUTCHours(0, 0, 0, 0);
   const rows = await prisma.item.findMany({
     where: {

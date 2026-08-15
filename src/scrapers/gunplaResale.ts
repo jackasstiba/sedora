@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
 import { rakutenSearchUrl } from "../lib/outbound";
 import { decodeHtmlEntities } from "./aggregatorUtil";
@@ -54,7 +55,7 @@ export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
   const top = await fetchHtml(HOME);
   const urls = [...new Set(top.match(CALENDAR_URL_RE) ?? [])];
 
-  const today = new Date();
+  const today = todayJst();
   const cutoff = today.getTime() - 3 * 86_400_000; // 過ぎた再販は3日で消す
 
   const byId = new Map<string, ScrapedItem>();

@@ -9,6 +9,7 @@
 // 実行: npm run analytics  （任意で日数: npm run analytics -- 7）
 
 import { prisma } from "@/lib/prisma";
+import { nowInstant } from "../src/lib/date";
 
 const BASE = "https://api.vercel.com/v1/query/web-analytics";
 
@@ -66,9 +67,8 @@ async function main() {
   }
 
   const days = Number(process.argv[2]) || 30;
-  const until = new Date();
-  const since = new Date();
-  since.setDate(since.getDate() - days);
+  const until = nowInstant();
+  const since = new Date(until.getTime() - days * 86_400_000);
   const range = { since: ymd(since), until: ymd(until) };
 
   console.log(`=== ハツコレ アクセス解析（直近${days}日: ${range.since}〜${range.until}）===`);

@@ -1,6 +1,7 @@
 import { prisma } from "../../src/lib/prisma";
 import { X_WATCH_SOURCE, X_MARKET_SOURCE, scoreMatch, distinctiveTokens } from "../../src/lib/xWatch";
 import { X_WATCHLIST } from "../../src/data/xWatchlist";
+import { nowInstant } from "../../src/lib/date";
 
 // X巡回パイプラインの自己点検。DB書き込みはしない（--fix 指定時のみ潜在重複を統合）。
 // 使い方: npm run x:audit [-- --fix]
@@ -68,7 +69,7 @@ async function main() {
         if (x?.marketPriceText) {
           await prisma.item.update({
             where: { id: best.id },
-            data: { marketPrice: x.marketPrice, marketPriceText: x.marketPriceText, marketUrl: x.marketUrl, marketSource: X_MARKET_SOURCE, marketCheckedAt: new Date() },
+            data: { marketPrice: x.marketPrice, marketPriceText: x.marketPriceText, marketUrl: x.marketUrl, marketSource: X_MARKET_SOURCE, marketCheckedAt: nowInstant() },
           });
         }
         await prisma.item.delete({ where: { id: it.id } });

@@ -2,12 +2,10 @@ import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
 import { classifyAggregatorGenre, cleanStoreUrl, NOISE_LINK, stripTags } from "./aggregatorUtil";
 import { summarizeStores } from "../lib/stores";
-
-// 「日本時間の今日」を時刻なしの暦日(UTC0時)で返す（util.ts の calDate 規約と同じ）。
-function todayCal(): Date {
-  const j = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
-}
+// 「日本時間の今日」は src/lib/date.ts の todayJst() だけが持つ。
+// ここに +9h の実装をコピーしていたのを 2026-08-16 に統合した（同じ実装が6箇所にあり、
+// うち1つ＝cardChusen.ts が UTC暦日で、そこだけ朝の巡回で1日ズレていた）。
+import { todayJst } from "../lib/date";
 
 // 入荷Now（nyuka-now.com）の「抽選・予約」情報を全カテゴリ横断で収集する。
 //
@@ -189,7 +187,7 @@ export type EndedStore = { name: string; url: string | null; form: string | null
  * 受付終了節の日付は必ず過去（終了した抽選が未来に開始していることはない）なので、
  * resolveMonthDay の「最も近い年」規則を使うと「9月19日」が来月に化ける。
  */
-export function resolvePastMonthDay(month: number, day: number, reference = new Date()): Date {
+export function resolvePastMonthDay(month: number, day: number, reference = todayJst()): Date {
   const base = reference.getUTCFullYear();
   const cand = new Date(Date.UTC(base, month - 1, day));
   return cand.getTime() <= reference.getTime()
@@ -199,7 +197,7 @@ export function resolvePastMonthDay(month: number, day: number, reference = new 
 
 /** 受付終了節のストアブロックを解析する。並びは新しい順（サイト仕様）を前提に、
  *  年無し日付の解決が前のブロックより未来に出たら年を1つ戻して単調非増加を保つ。 */
-export function parseEndedStores(sectionHtml: string, reference = new Date()): EndedStore[] {
+export function parseEndedStores(sectionHtml: string, reference = todayJst()): EndedStore[] {
   const blocks = sectionHtml.split(/<h3[^>]*>/).slice(1);
   const out: EndedStore[] = [];
   let prevTime = Infinity;
@@ -246,7 +244,7 @@ export function buildRecentEndedItem(
   articleId: string,
   articleTitle: string,
   ended: EndedStore[],
-  reference = new Date()
+  reference = todayJst()
 ): ScrapedItem | null {
   const product = cleanProductName(articleTitle);
   if (!product) return null;
@@ -360,7 +358,7 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
   // 抽選まとめ記事だけを対象にする（「アプリ更新のお願い」等の告知記事を除外）。
   const articles = (await collectArticles()).filter((a) => a.title.includes("抽選"));
 
-  const today = todayCal();
+  const today = todayJst();
   const items: ScrapedItem[] = [];
 
   for (const a of articles) {

@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { classifyGenre, fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import {
   extractDrawFee,
@@ -42,8 +43,7 @@ function parseCard(inner: string) {
 
 export async function scrapeRaffleKuji(): Promise<ScrapedItem[]> {
   // 「日本時間の今日」を暦日(UTC0時)で。締切が過去の抽選（受付終了）は載せない。
-  const j = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  const today = new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
+  const today = todayJst();
 
   const html = await fetchHtml(LIST_URL);
   const byId = new Map<string, ScrapedItem>();

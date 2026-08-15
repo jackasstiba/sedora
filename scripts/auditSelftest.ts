@@ -12,11 +12,15 @@
  * 未知の「エントリー受付中」まで「予約終了」に書き換えていた（予約ではないのに予約と断定）。
  */
 import {
+  countdownBadgeProblem,
+  parseDisplayedDate,
+  renderedDateProblems,
   displayEventType,
   eventPeriodText,
   hasFrozenRelativeDate,
   isStalePromise,
   isStalePlan,
+  jstCalDate,
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
@@ -43,9 +47,10 @@ import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockS
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
-import { jstCalDate, parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
+import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
+import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 
@@ -58,6 +63,9 @@ const EVENT_ARTICLE_HTML =
   "</div>";
 
 const ymd = (d: Date) => d.toISOString().slice(0, 10);
+
+/** 時計lint の呼び出しを短く書くための helper（ファイル名は検査対象になる任意の名前）。 */
+const cl = (src: string) => findClockViolations("src/scrapers/example.ts", src);
 
 // 巡回で取り直した prizes（相場なし）に、既存の相場が引き継がれるか。
 // 実測: これが無かったため、付与直後に別件で scrape を回しただけで 67件すべての
@@ -891,6 +899,55 @@ const cases: Case[] = [
   { name: "JST暦日: JST 00:00 ちょうど", fn: () => jstCalDate(Date.parse("2026-08-15T15:00:00Z")).toISOString().slice(0, 10), want: "2026-08-16" },
   { name: "締切解決: 09時前の巡回で「本日」が当日になる", fn: () => parseDue("締切 本日 22:00", jstCalDate(Date.parse("2026-08-15T21:39:06Z")))?.date?.toISOString().slice(0, 10) ?? "null", want: "2026-08-16" },
   { name: "締切解決: 09時前の巡回で「明日」が翌日になる", fn: () => parseDue("締切 明日 22:00", jstCalDate(Date.parse("2026-08-15T21:39:06Z")))?.date?.toISOString().slice(0, 10) ?? "null", want: "2026-08-17" },
+
+  // ── 時計を読む行の静的検査（audit の clock_discipline / npm run audit:clocklint）──
+  //
+  // 「今日を求める関数が2つ以上あってはいけない」は rules.md に文章で書いてあったのに、
+  // 翌日に数えたら +9h の実装が6箇所あった。**文章で守れなかったものは機械に落とすまで
+  // 守れていない**ので、検出器そのものをここで固定する。鳴る側と鳴らない側の両方を置く。
+  { name: "時計lint: 引数なし new Date() を検出", fn: () => cl("const t = new Date();")[0]?.rule ?? "none", want: "wall_clock" },
+  { name: "時計lint: Date.now() を検出", fn: () => cl("const t = Date.now();")[0]?.rule ?? "none", want: "wall_clock" },
+  { name: "時計lint: ローカル時刻ゲッターを検出", fn: () => cl("const y = d.getFullYear();")[0]?.rule ?? "none", want: "local_getter" },
+  { name: "時計lint: ローカル時刻セッターを検出", fn: () => cl("d.setDate(d.getUTCDate() - 60);")[0]?.rule ?? "none", want: "local_setter" },
+  { name: "時計lint: new Date(年,月,日) を検出", fn: () => cl("const d = new Date(2026, 7, 16);")[0]?.rule ?? "none", want: "local_ctor" },
+  { name: "時計lint: TZ未指定の日時整形を検出", fn: () => cl('d.toLocaleDateString("ja-JP")')[0]?.rule ?? "none", want: "tz_unspecified_format" },
+  { name: "時計lint: テンプレート内のコードも見る", fn: () => cl("const s = `更新 ${new Date().toUTCString()}`;")[0]?.rule ?? "none", want: "wall_clock" },
+  // 鳴ってはいけない側。誤報する検査は本物を埋もれさせる（ミス12・14）。
+  { name: "時計lint・誤報: Date.UTC で作る暦日は鳴らない", fn: () => cl("const d = new Date(Date.UTC(y, m, 1));").length, want: 0 },
+  { name: "時計lint・誤報: getUTC* は鳴らない", fn: () => cl("const y = d.getUTCFullYear(); const m = d.getUTCMonth();").length, want: 0 },
+  { name: "時計lint・誤報: 引数つき new Date は鳴らない", fn: () => cl('const d = new Date("2026-08-16T00:00:00Z"); const e = new Date(ms);').length, want: 0 },
+  { name: "時計lint・誤報: 数値の桁区切り toLocaleString は鳴らない", fn: () => cl('const s = yen.toLocaleString("ja-JP");').length, want: 0 },
+  { name: "時計lint・誤報: TZを明示した整形は鳴らない", fn: () => cl('d.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo", year: "numeric" })').length, want: 0 },
+  { name: "時計lint・誤報: コメント内の new Date() は鳴らない", fn: () => cl("// 以前は new Date() を使っていた\n/* Date.now() も同様 */").length, want: 0 },
+  { name: "時計lint・誤報: 文字列内の new Date() は鳴らない", fn: () => cl('const msg = "new Date() は禁止";').length, want: 0 },
+  { name: "時計lint・誤報: 正規表現の直後の行を読み飛ばさない", fn: () => cl("const re = /https:\\/\\/x\\.com/;\nconst t = new Date();").length, want: 1 },
+  { name: "時計lint: date.ts 自身は検査から外す", fn: () => isClockLinted("src/lib/date.ts"), want: false },
+  { name: "時計lint: 他のファイルは検査する", fn: () => isClockLinted("src/scrapers/cardChusen.ts"), want: true },
+
+  // ── 画面に出ている日付の整合（描画監査 audit:page が使う純関数）──────────
+  // 2026-08-16 の実物: 上部「抽選日 2026年8月16日(日) 🔥本日」／下の店舗行「〜明日 22:00」。
+  // today は 2026-08-08（このファイルの基準日）。
+  { name: "画面日付: 曜日が暦と違う", fn: () => renderedDateProblems("2026年8月16日(月)", today).length, want: 1 },
+  { name: "画面日付: 正しい曜日は鳴らない", fn: () => renderedDateProblems("2026年8月16日(日)", today).length, want: 0 },
+  { name: "画面日付: 短縮形の曜日も見る", fn: () => renderedDateProblems("8/16(月) 発売", today).length, want: 1 },
+  // カウントダウンのバッジと日付ラベルの突合は、**同じカードの要素同士**で行う。
+  // テキストの隣接で判定した最初の版は、本番の描画（「🔥 本日ワンピースカード8/16(日)」＝
+  // 別要素が隙間なく繋がる）で 1枚も突き合わせられず、しかも作品名「明日ちゃんのセーラー服」を
+  // 誤検出した。両方向に間違える判定だったので、要素単位に作り直した。
+  { name: "カード日付: 「本日」なのに今日でない", fn: () => countdownBadgeProblem("🔥 本日", "8/16(日)", today) !== null, want: true },
+  { name: "カード日付: 「本日」が本当に今日なら鳴らない", fn: () => countdownBadgeProblem("🔥 本日", "8/8(土)", today), want: null },
+  { name: "カード日付: 「明日」が翌日なら鳴らない", fn: () => countdownBadgeProblem("明日", "8/9(日)", today), want: null },
+  { name: "カード日付: 「あと3日」の食い違い", fn: () => countdownBadgeProblem("あと3日", "8/9(日)", today) !== null, want: true },
+  { name: "カード日付: 「あと1日」＝明日なら鳴らない", fn: () => countdownBadgeProblem("あと1日", "8/9(日)", today), want: null },
+  { name: "カード日付: 年つき長形式も読む", fn: () => countdownBadgeProblem("🔥 本日", "2026年8月8日(土)", today), want: null },
+  { name: "カード日付: 月精度の表示は対象外（合成日で判定しない）", fn: () => countdownBadgeProblem("🔥 本日", "2026年9月", today), want: null },
+  { name: "カード日付: バッジでない文字列は対象外", fn: () => countdownBadgeProblem("予約受付中", "8/16(日)", today), want: null },
+  { name: "カード日付: 年をまたぐ短縮表示は近い方の年で読む", fn: () => parseDisplayedDate("1/5(火)", today)?.toISOString().slice(0, 10), want: "2027-01-05" },
+  { name: "画面日付・誤報: 価格や型番の数字を日付と読まない", fn: () => renderedDateProblems("¥8,900 ST-29 HG 1/144", today).length, want: 0 },
+  // 実測（本番 /release/2027-01 で誤報）: カレンダーの日付グリッド「…3031」に見出し
+  // 「1月1日(金)」が続き、text() の連結で「311月1日(金)」＝**11月1日**と読んでしまった。
+  // 検出器の誤報は本物を埋もれさせる（ミス12・14）ので、数字の境界をその場で固定する。
+  { name: "画面日付・誤報: 直前の数字と繋げて月日を読まない（カレンダーの連結）", fn: () => renderedDateProblems("28293031" + "1月1日(金) 1件", today).length, want: 0 },
 
   // カードの「受付中ストア：」は保存文字列＝締切の近い順の先頭3件。日が経つと先頭が
   // ちょうど期限切れの店になる。表示時に「今まさに受付中の店」だけへ絞り直す。

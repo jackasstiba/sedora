@@ -1,6 +1,7 @@
 import { prisma } from "../src/lib/prisma";
 import { fetchSurugayaPrice, LINE_LEVEL_SOURCES } from "../src/scrapers/surugayaPrice";
 import { sleep } from "../src/scrapers/util";
+import { nowInstant } from "../src/lib/date";
 
 // ハツコレの各アイテムに「相場（駿河屋の中古/新品価格）」をベストエフォートで付与する。
 // 未発売品は駿河屋に市場が無く null のまま（＝サイトでは相場を出さない）。
@@ -50,7 +51,7 @@ async function main() {
           marketPriceText: mp?.priceText ?? null,
           marketUrl: mp?.url ?? null,
           marketSource: mp?.source ?? null,
-          marketCheckedAt: new Date(),
+          marketCheckedAt: nowInstant(),
         },
       });
       if (mp) {

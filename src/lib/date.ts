@@ -9,6 +9,71 @@
 
 const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
 
+// ── 壁時計を読むのは、このファイルの中だけ ──────────────────────────────
+//
+// 2026-08-16 に日付の事故を2日連続で起こした（ミス23・ミス24）。原因はどちらも
+// 「いま何日か」を各所がバラバラに求めていたこと:
+//  ・`new Date()` の **UTC暦日** を今日とみなす実装が cardChusen.ts にあり、
+//    **日本時間 09:00 より前に巡回した回だけ**すべての締切が1日早く解決されていた
+//    （実測 06:39 JST の巡回で 197枠中93枠＝47%）。昼に動かすと再現しないので、
+//    「たまたま朝に回した日だけサイトが嘘をつく」状態だった。
+//  ・「日本時間の今日」を求める +9h のコードが **6箇所にコピーされていた**
+//    （date.ts / cardChusen.ts / nyukaNow.ts / raffleKuji.ts / tenbaiquest.ts /
+//    backfillDisplayText.ts）。1つ直しても他が残る。
+//
+// 結論: **時計を読む行はここにしか置かない。** 他のファイルは下の3つを名前で呼ぶ。
+// 名前がそのまま「どの種類の値か」の宣言になる（暦日なのか、瞬間なのか）。
+//  ・todayJst()    … 日本時間の「今日」（時刻を持たない暦日）
+//  ・jstCalDate(ms)… 任意の瞬間 → 日本時間の暦日
+//  ・nowInstant()  … 「瞬間」（scrapedAt・ログの時刻）。暦日ではない
+// この規約は文章ではなく機械で守る:
+//  ・`npm run audit` の `clock_discipline` … 他ファイルの `new Date()` / `Date.now()` /
+//    ローカル時刻ゲッター（getFullYear 等）を ERROR にする（＝書いた時点で落ちる）
+//  ・`npm run audit:clock` … 同じ日本時間の日を、時刻とTZだけ変えて（UTC/JST/US、
+//    JST 00:00〜23:59）実行し、**出力が1バイトでも変わったら ERROR**（＝振る舞いで落ちる）
+
+/** 壁時計。**このファイルの外から呼ばない**（上のコメント参照）。 */
+function wallClockMs(): number {
+  return Date.now();
+}
+
+/**
+ * 「瞬間」を表す値（scrapedAt / marketCheckedAt / ログの時刻）。
+ *
+ * 暦日（発売日・締切日）には**使わない**。暦日が要るときは todayJst()。
+ * 分けている理由: 瞬間をそのまま日付として読むと、読む側のTZで日が変わる。
+ */
+export function nowInstant(): Date {
+  return new Date(wallClockMs());
+}
+
+/**
+ * 任意の瞬間（epoch ms）→ **日本時間での暦日**（UTC 0時固定）。
+ *
+ * 実測（2026-08-16 06:39 JST ＝ 21:39Z）: ここを通さず `new Date()` の UTC暦日を
+ * 使っていたため、収集元の「締切 本日 22:00」が前日に解決され、
+ * **今日まだ応募できる抽選を「昨日締切」と表示**していた。
+ */
+export function jstCalDate(nowMs: number): Date {
+  const j = new Date(nowMs + 9 * 60 * 60 * 1000);
+  return new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
+}
+
+/**
+ * 日本時間の「今月」から monthOffset ヶ月ずらした年月。
+ * 収集元の月別ページURL（`?sale_month=8&sale_year=2026` 等）を組み立てる用。
+ *
+ * なぜ要るか: 月URLを `new Date().getMonth()` で作っていたソースが3つあった
+ * （ichibanKuji / snkrdunk / torecasoku）。ローカル時刻なので実行環境のTZ次第で、
+ * UTCの箱で回すと**毎月1日の JST 00:00〜08:59 に前月のページを取りに行く**＝
+ * その月の新商品を丸ごと取りこぼす。エラーも件数の急減も出ない静かな取りこぼし。
+ */
+export function jstYearMonth(monthOffset = 0): { year: number; month: number } {
+  const t = todayJst();
+  const d = new Date(Date.UTC(t.getUTCFullYear(), t.getUTCMonth() + monthOffset, 1));
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1 };
+}
+
 /** 年月日から「暦日」を作る（UTC 0時固定） */
 export function calendarDate(year: number, month1: number, day: number): Date {
   return new Date(Date.UTC(year, month1 - 1, day));
@@ -36,8 +101,7 @@ export function todayJst(): Date {
     if (!m) throw new Error(`HATSUKORE_SIMULATE_TODAY は YYYY-MM-DD で指定する: ${sim}`);
     return new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
   }
-  const jst = new Date(Date.now() + 9 * 60 * 60 * 1000);
-  return new Date(Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()));
+  return jstCalDate(wallClockMs());
 }
 
 /** "7/25(土)"。ただし今年(日本時間基準)以外は年を付けて "2027/7/28(水)"。
@@ -110,6 +174,108 @@ export function formatDateTimeJst(d: Date | string): string {
 }
 
 export const WEEKDAY_LABELS = DAYS;
+
+/**
+ * **画面に出ている文字列そのもの**を読んで、日付の矛盾を見つける（描画監査 `audit:page` 用）。
+ *
+ * なぜデータ側の検査と別に要るか（2026-08-16 ミス23）: 同じ商品ページの上部が
+ * 「抽選日 2026年8月16日(日) 🔥本日」、下の店舗行が「〜明日 22:00」と**1画面の中で
+ * 食い違って**いた。人間が見れば一瞬で気付くのに、audit も audit:page も selftest も
+ * 全部 ERROR 0 だった（データは「壊れて」おらず、保存した相対表記が古くなっただけだから）。
+ *
+ * ここでは、読む人が実際に目にする文字列だけを見る:
+ *  ① 曜日が暦と合っているか（「8月16日(月)」＝実際は日曜、のような単純な嘘）
+ *  ② 「本日 / 明日 / あとN日」が、その隣に書いてある暦日と合っているか
+ * どちらも**今日を使って**判定するので、更新しないまま日が経つと鳴る＝
+ * 「更新しないと嘘になる表示」をそのまま検出できる。
+ */
+export function renderedDateProblems(text: string, today: Date): string[] {
+  const out: string[] = [];
+  const t = text.replace(/\s+/g, " ");
+  const nearestYear = (m: number, d: number): Date => {
+    const base = today.getUTCFullYear();
+    let best = new Date(Date.UTC(base, m - 1, d));
+    for (const y of [base - 1, base + 1]) {
+      const cand = new Date(Date.UTC(y, m - 1, d));
+      if (Math.abs(cand.getTime() - today.getTime()) < Math.abs(best.getTime() - today.getTime())) best = cand;
+    }
+    return best;
+  };
+
+  // ① 曜日の食い違い（年つき・年なしの両方の書式）
+  for (const m of t.matchAll(/(?<!\d)(?:(\d{4})年)?(\d{1,2})月(\d{1,2})日\(([日月火水木金土])\)/g)) {
+    const mo = Number(m[2]);
+    const day = Number(m[3]);
+    if (mo < 1 || mo > 12 || day < 1 || day > 31) continue;
+    const d = m[1] ? new Date(Date.UTC(Number(m[1]), mo - 1, day)) : nearestYear(mo, day);
+    if (d.getUTCDate() !== day) continue; // 2月30日のような存在しない日は別の検査の担当
+    if (DAYS[d.getUTCDay()] !== m[4])
+      out.push(`曜日が暦と違う: 「${m[0]}」（${d.toISOString().slice(0, 10)} は${DAYS[d.getUTCDay()]}曜）`);
+  }
+  for (const m of t.matchAll(/(?<!\d)(\d{1,2})\/(\d{1,2})\(([日月火水木金土])\)/g)) {
+    const mo = Number(m[1]);
+    const day = Number(m[2]);
+    if (mo < 1 || mo > 12 || day < 1 || day > 31) continue;
+    const d = nearestYear(mo, day);
+    if (d.getUTCDate() !== day) continue;
+    if (DAYS[d.getUTCDay()] !== m[3])
+      out.push(`曜日が暦と違う: 「${m[0]}」（${d.toISOString().slice(0, 10)} は${DAYS[d.getUTCDay()]}曜）`);
+  }
+
+  // ② 暦日のすぐ隣にある相対表記（本日/明日/あとN日）が、その暦日と合っているか。
+  //    間に数字を挟まない短い範囲だけを見る（別のカードの文字列を巻き込まないため）。
+  return out;
+}
+
+/**
+ * 画面に出ている**日付ラベル**（"8/16(日)" / "2026年8月16日(日)" / "2027/1/5(火)"）を読む。
+ * 年が書いていないものは、基準日にいちばん近い年として解釈する（画面の読み方と同じ）。
+ */
+export function parseDisplayedDate(label: string, today: Date): Date | null {
+  const s = label.replace(/\s+/g, "");
+  const nearest = (mo: number, day: number): Date | null => {
+    if (mo < 1 || mo > 12 || day < 1 || day > 31) return null;
+    const base = today.getUTCFullYear();
+    let best = new Date(Date.UTC(base, mo - 1, day));
+    for (const y of [base - 1, base + 1]) {
+      const cand = new Date(Date.UTC(y, mo - 1, day));
+      if (Math.abs(cand.getTime() - today.getTime()) < Math.abs(best.getTime() - today.getTime())) best = cand;
+    }
+    return best.getUTCDate() === day ? best : null;
+  };
+  const long = s.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
+  if (long) return new Date(Date.UTC(Number(long[1]), Number(long[2]) - 1, Number(long[3])));
+  const withYear = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
+  if (withYear) return new Date(Date.UTC(Number(withYear[1]), Number(withYear[2]) - 1, Number(withYear[3])));
+  const md = s.match(/^(\d{1,2})[/月](\d{1,2})日?/);
+  if (md) return nearest(Number(md[1]), Number(md[2]));
+  return null;
+}
+
+/**
+ * 同じカード（同じ商品）の中で、**カウントダウンのバッジ**（🔥 本日 / 明日 / あと3日）と
+ * **日付ラベル**（8/16(日)）が食い違っていないか。食い違っていれば理由を返す。
+ *
+ * これがミス23の症状そのもの: 上が「🔥本日」、下が別の日を指していると、人間は一目で
+ * 気付くのに機械の検査は全部素通りしていた。**文字列の近さ（テキストの連結）ではなく
+ * 同じカードの要素同士**で突き合わせる。
+ * 実測でこの判断は必要だった: 本番の描画は「🔥 本日ワンピースカード8/16(日)」のように
+ * 別要素の文字が隙間なく繋がるので、テキストの隣接では作品名（「明日ちゃんのセーラー服」）と
+ * 区別できず、両方向の誤りが出た。
+ */
+export function countdownBadgeProblem(badge: string, dateLabel: string, today: Date): string | null {
+  const b = badge.replace(/[🔥\s]/g, "");
+  const m = b.match(/^(本日|明日|あと(\d{1,2})日)$/);
+  if (!m) return null; // カウントダウンのバッジではない
+  const want = m[1] === "本日" ? 0 : m[1] === "明日" ? 1 : Number(m[2]);
+  const d = parseDisplayedDate(dateLabel, today);
+  if (!d) return null; // 日付が読めない（月精度の「2026年9月」等）＝この検査の対象外
+  const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
+  if (diff === want) return null;
+  return `バッジ「${badge.trim()}」と日付「${dateLabel.trim()}」が食い違う（${d
+    .toISOString()
+    .slice(0, 10)} は今日から${diff}日）`;
+}
 
 /**
  * 日付が確定していないときに、日付欄へ出してよいテキストかどうか。

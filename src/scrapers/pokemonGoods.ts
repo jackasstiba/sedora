@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml, sleep } from "./util";
 
 // ポケモン公式サイトのグッズ一覧。ページはSPAだが、裏で叩いているJSON APIを直接取得する。
@@ -30,8 +31,9 @@ function parseDotDate(s: string | null): Date | null {
 
 export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
   const items: ScrapedItem[] = [];
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - RECENT_DAYS);
+  // 「直近N日」の起点も日本時間の暦日から作る（ローカル時刻依存にしない）。
+  const t = todayJst();
+  const cutoff = new Date(t.getTime() - RECENT_DAYS * 86_400_000);
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const json = JSON.parse(await fetchHtml(API + page)) as { results?: ApiItem[] };

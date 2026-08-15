@@ -13,6 +13,7 @@
 import { prisma } from "../src/lib/prisma";
 import { fetchSurugayaPrice, LINE_LEVEL_SOURCES } from "../src/scrapers/surugayaPrice";
 import { sleep } from "../src/scrapers/util";
+import { nowInstant } from "../src/lib/date";
 
 const isDry = process.argv.includes("--dry");
 
@@ -36,7 +37,7 @@ async function main() {
       if (!isDry) {
         await prisma.item.update({
           where: { id: r.id },
-          data: { marketPrice: null, marketPriceText: null, marketUrl: null, marketSource: null, marketCheckedAt: new Date() },
+          data: { marketPrice: null, marketPriceText: null, marketUrl: null, marketSource: null, marketCheckedAt: nowInstant() },
         });
       }
       continue;
@@ -64,7 +65,7 @@ async function main() {
             marketPrice: mp.price,
             marketPriceText: mp.priceText,
             marketUrl: mp.url,
-            marketCheckedAt: new Date(),
+            marketCheckedAt: nowInstant(),
           },
         });
       }
@@ -79,7 +80,7 @@ async function main() {
             marketPriceText: null,
             marketUrl: null,
             marketSource: null,
-            marketCheckedAt: new Date(),
+            marketCheckedAt: nowInstant(),
           },
         });
       }

@@ -26,6 +26,7 @@ import {
   eventDateLabel,
   hasFrozenRelativeDate,
   isMonthPrecision,
+  nowInstant,
   isStalePromise,
   monthPrecisionFromTitle,
   todayJst,
@@ -35,7 +36,7 @@ import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSear
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
-import { parseStoresJson } from "../src/lib/stores";
+import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
@@ -43,6 +44,8 @@ import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { getSitemapItemRefs } from "../src/lib/seo";
+import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
+import { scanRepoClockViolations } from "./clockScan";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -743,6 +746,42 @@ async function main() {
         indistinguishable.push(`[${r.source} #${r.id}] 要約に同一表記が重複: ${summary}`);
     }
     report("stores_indistinguishable", "受付中ストアの表示が区別できない（同じ表記が並ぶ）", "warn", indistinguishable, baseline);
+
+    // (11b) **保存した日付が、その行のデータから作り直せるか**（＝「今日」が焼き付いていないか）。
+    //
+    // ミス24の核心は「巡回した時点で最も近い締切」を eventDate に入れたことだった。
+    // その値は*巡回した日にしか正しくない*ので、翌日には過去日になり、まだ締切前の応募先が
+    // 102店あるのに商品が全一覧から消えた。しかも症状は**更新直後だけ消える**ので、
+    // 更新直後に走る audit には原理的に映らない（＝時間を進める audit:tomorrow でしか出ない）。
+    //
+    // ここでは時間を進めずに同じ型を捕まえる: 締切の暦日を持つ行は、eventDate が
+    // **その行の stores から再計算できる値（＝最後の締切）と一致する**はず。
+    // 一致しなければ、外から来た「今日に依存する何か」が入り込んでいる。
+    // 「今日」を一切使わない検査なので、いつ回しても同じ答えになる。
+    const frozen: string[] = [];
+    let recomputable = 0;
+    for (const r of all) {
+      const stores = parseStoresJson(r.stores);
+      if (!stores) continue;
+      const expected = lastDeadline(stores);
+      if (!expected) continue; // 締切の暦日を持たない（開催店舗・調査中）＝再計算の対象外
+      recomputable++;
+      const got = r.eventDate ? new Date(r.eventDate).toISOString().slice(0, 10) : "なし";
+      const want = expected.toISOString().slice(0, 10);
+      if (got !== want)
+        frozen.push(
+          `[${r.source} #${r.id}] eventDate=${got} だが、この行の応募先から作り直すと ${want}（最後の締切）。` +
+            `「巡回した日から見て最も近い締切」等、今日に依存する値が保存されている疑い: ${r.title.slice(0, 40)}`
+        );
+    }
+    report(
+      "eventdate_not_recomputable",
+      "保存された日付が、その行のデータから作り直せない（“今日”が焼き付いている疑い）",
+      "error",
+      frozen,
+      baseline,
+      recomputable
+    );
   }
 
   // (11a2) **まだ締切前の応募先があるのに、商品がサイトのどこにも出ていない**（観点D＝逆方向の照合）。
@@ -869,7 +908,7 @@ async function main() {
     const stale: string[] = [];
     const staleByDesign: string[] = [];
     for (const [src, t] of last) {
-      const days = (Date.now() - t) / 86_400_000;
+      const days = (nowInstant().getTime() - t) / 86_400_000;
       if (days < 3) continue;
       const line = `${src}: ${count.get(src)}件が ${Math.round(days)}日前の取得のまま`;
       if (BY_DESIGN[src]) staleByDesign.push(`${line}（${BY_DESIGN[src]}）`);
@@ -888,7 +927,7 @@ async function main() {
     // 誰も（何も）それを見張っていなかった。**定期実行を前提にする機能は、その定期実行が
     // 生きていること自体を検査する。**
     const newest = Math.max(...all.map((r) => new Date(r.scrapedAt).getTime()), 0);
-    const hours = newest ? (Date.now() - newest) / 3_600_000 : Infinity;
+    const hours = newest ? (nowInstant().getTime() - newest) / 3_600_000 : Infinity;
     // 巡回は1日2回（8:00/20:00）。1回飛ぶのは在席状況で起こりうるので、2回連続で
     // 飛んだ相当（>30時間）を異常とする。
     report(
@@ -1374,6 +1413,32 @@ async function main() {
     report("report_items_truncated", "監査の件数が切り詰めた配列で数えられている", "error", bad, baseline, 1);
   }
   {
+    // (17b) **「今日」を読む行が src/lib/date.ts の外に無いか**（＝日付事故の再発防止の本体）。
+    //
+    // 2026-08-16 の事故（ミス24）は、cardChusen.ts が独自に `new Date()` の **UTC暦日**を
+    // 今日として使っていたために起きた。日本時間 09:00 より前に巡回した回だけ、締切197枠中
+    // 93枠(47%)が1日早く解決され、**今日まだ応募できる抽選を「昨日締切」と表示**していた。
+    // 直後に数えたら、同じ +9h の実装が **6箇所にコピー**され、月別ページURLを
+    // ローカル時刻で組み立てるスクレイパーが3つあった（＝UTCの箱で回すと毎月1日の朝に
+    // その月を丸ごと取りこぼす）。
+    //
+    // データを何時間眺めても分からない／昼に動かすと再現しない型なので、**書いた時点で落とす**。
+    // 「今日を求める関数が2つ以上あってはいけない」は rules.md に文章で書いてあったのに、
+    // 翌日には6箇所あった＝**文章では守れない。機械に落とすまで守れていないと見なす。**
+    const { files, violations } = scanRepoClockViolations();
+    const bad = violations.map(
+      (v) => `${v.file}:${v.line} [${v.rule}] ${v.snippet} … ${CLOCK_RULE_WHY[v.rule] ?? ""}`
+    );
+    report(
+      "clock_discipline",
+      "時計を読む行が src/lib/date.ts の外にある（日付が実行時刻・TZに依存する）",
+      "error",
+      bad,
+      baseline,
+      files.length
+    );
+  }
+  {
     // schema.prisma の Item の列が、いま繋がっているDBに全部あるか（＝適用漏れ）。
     const declared = [
       ...fs
@@ -1491,7 +1556,7 @@ async function main() {
           //   audit:facts もラチェット（facts.checked / facts.findings）を置く。
           //   丸ごと組み立て直すと、もう一方の基準を黙って消してしまう。
           ...baseline,
-          updatedAt: new Date().toISOString(),
+          updatedAt: nowInstant().toISOString(),
           checks: nextChecks,
           pages: nextPages,
           metrics: { ...(baseline.metrics ?? {}), ...metrics },

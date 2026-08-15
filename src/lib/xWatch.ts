@@ -12,6 +12,7 @@
 import { classifyGenre, extractDateAndEventFromText } from "../scrapers/util";
 import { matchFranchises, franchiseAliases } from "./franchise";
 import type { ScrapedItem } from "../scrapers/types";
+import { nowInstant } from "./date";
 
 export const X_WATCH_SOURCE = "x_watch";
 export const X_MARKET_SOURCE = "x"; // 相場の出所（メルカリ等の実売をXで確認したもの）
@@ -67,7 +68,7 @@ export function formatResaleText(entry: XWatchEntry): string | null {
 }
 
 /** エントリから market* 用フィールドを組み立てる。相場が無ければ全 null（marketCheckedAt のみ現時刻）。 */
-export function buildMarketFields(entry: XWatchEntry, now: Date = new Date()): MarketFields {
+export function buildMarketFields(entry: XWatchEntry, now: Date = nowInstant()): MarketFields {
   const text = formatResaleText(entry);
   const yen = entry.resaleYen && entry.resaleYen > 0 ? Math.round(entry.resaleYen) : null;
   return {
@@ -86,7 +87,7 @@ export function xWatchSourceId(entry: XWatchEntry): string {
 }
 
 /** kind:"new" のエントリを ScrapedItem（source=x_watch）へ変換。相場は market* に載る。 */
-export function toScrapedItem(entry: XWatchEntry, now: Date = new Date()): ScrapedItem & MarketFields {
+export function toScrapedItem(entry: XWatchEntry, now: Date = nowInstant()): ScrapedItem & MarketFields {
   const title = (entry.title ?? "").trim();
   const inferred = extractDateAndEventFromText(`${title} ${entry.eventDateText ?? ""}`.trim());
   const eventDate = entry.eventDate ? new Date(entry.eventDate) : inferred.date;

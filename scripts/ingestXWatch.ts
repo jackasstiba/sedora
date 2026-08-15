@@ -10,6 +10,7 @@ import {
   toScrapedItem,
   type XWatchInbox,
 } from "../src/lib/xWatch";
+import { nowInstant } from "../src/lib/date";
 
 // X巡回（Claude for Chrome）で構造化した受け皿JSONをハツコレDBに取り込む。
 // 使い方: npm run ingest:x [-- --file scripts/x_watch/x_watch_inbox.json] [--dry]
@@ -78,7 +79,7 @@ async function main() {
   const entries = inbox.entries ?? [];
   console.log(`[x] ${entries.length}件 読み込み${dry ? "（DRY RUN・DB書き込みなし）" : ""} <- ${file}`);
 
-  const now = new Date();
+  const now = nowInstant();
   let added = 0;
   let merged = 0;
   let priced = 0;

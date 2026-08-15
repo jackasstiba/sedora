@@ -1,5 +1,6 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml } from "./util";
+import { nowInstant } from "../lib/date";
 
 // Nike SNKRS の抽選/LAUNCH（応募制）商品を収集する。
 // 既存の snkrdunk は「発売カレンダー」で、抽選の応募期間・締切までは拾えていない。
@@ -116,7 +117,7 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
   const items: ScrapedItem[] = [];
 
   // 過去に落ちた抽選は載せない（サイト側でも過去は除外されるが二重防御）。
-  const cutoff = Date.now() - 2 * 24 * 60 * 60 * 1000;
+  const cutoff = nowInstant().getTime() - 2 * 24 * 60 * 60 * 1000;
 
   // launchViews に載る＝LAUNCH商品（抽選 DRAW / 先着 LINE）。通常の常時販売品は除外される。
   for (const [productId, entry] of Object.entries(launchViews)) {

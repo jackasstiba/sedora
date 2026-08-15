@@ -2,27 +2,14 @@ import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay } from "./util";
 import { decodeHtmlEntities, stripTags } from "./aggregatorUtil";
 import { lastDeadline, summarizeStores } from "../lib/stores";
+import { todayJst } from "../lib/date";
 
-/**
- * 「日本時間の今日」を時刻なしの暦日(UTC0時)で返す（nyukaNow.ts の todayCal と同じ規約）。
- *
- * **`new Date()` をそのまま基準にしてはいけない。** 以前ここが `reference = new Date()` で、
- * 下の parseDue が `reference.getUTC*()` を読んでいたため、**日本時間 09:00 より前に巡回すると
- * UTC上はまだ前日**で、収集元の「締切 本日 22:00」が*1日早い*日付に解決されていた。
- *
- * 実測（2026-08-16 06:39 JST ＝ 21:39Z の巡回）: 締切付き197枠のうち **93枠(47%)** が
- * 2026-08-15 に解決され、**まだ今日応募できる抽選を「昨日締切」と表示**していた。
- * 併せて eventDate も過去日になり、商品が全一覧から消えた（card_chusen 56件中23件）。
- * 締切は「今から間に合うか」を決める値なので、1日ズレると応募を逃す。
- */
-export function jstCalDate(nowMs: number): Date {
-  const j = new Date(nowMs + 9 * 60 * 60 * 1000);
-  return new Date(Date.UTC(j.getUTCFullYear(), j.getUTCMonth(), j.getUTCDate()));
-}
-
-function todayCal(): Date {
-  return jstCalDate(Date.now());
-}
+// 「今日」は必ず src/lib/date.ts の todayJst()（日本時間の暦日）から取る。
+// 以前ここに `reference = new Date()` と独自の +9h 実装があり、parseDue が
+// `reference.getUTC*()` を読んでいたため、**日本時間 09:00 より前に巡回した回だけ**
+// UTC上はまだ前日で、収集元の「締切 本日 22:00」が1日早く解決されていた。
+// 実測（2026-08-16 06:39 JST ＝ 21:39Z の巡回）: 締切付き197枠のうち 93枠(47%) が
+// 前日に解決され、**まだ今日応募できる抽選を「昨日締切」と表示**していた。
 
 // カード抽選まとめ（cardchusen.com）: ポケカ/ワンピ/遊戯王/DB の**店舗別抽選**を
 // 締切順に集約する非公式アグリ。実測（2026-08-15）: 受付中306件＋近日9件が
@@ -66,7 +53,7 @@ export function productKey(name: string): string {
  */
 export function parseDue(
   text: string,
-  reference = todayCal()
+  reference = todayJst()
 ): { kind: "締切" | "開始"; date: Date | null; label: string } | null {
   const t = text.replace(/\s+/g, " ").trim();
   const m = t.match(/^(締切|開始)\s*(.+)$/);
@@ -110,7 +97,7 @@ type Entry = {
 };
 
 /** 一覧HTMLから店×商品の応募枠を全部取り出す（純関数・selftest対象）。 */
-export function parseCardChusen(html: string, reference = todayCal()): Entry[] {
+export function parseCardChusen(html: string, reference = todayJst()): Entry[] {
   const body = html.slice(html.indexOf("</head>"));
   const out: Entry[] = [];
   for (const m of body.matchAll(

@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml } from "./util";
 import { stripTags } from "./aggregatorUtil";
 import { rakutenSearchUrl } from "../lib/outbound";
@@ -77,7 +78,7 @@ export function sofviEventInfo(
 
 export async function scrapeSofvi(): Promise<ScrapedItem[]> {
   const html = await fetchHtml(HOME);
-  const today = new Date();
+  const today = todayJst();
   const cutoff = today.getTime() - 3 * 86_400_000;
 
   const items: ScrapedItem[] = [];

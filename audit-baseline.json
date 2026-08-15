@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-15T22:23:08.429Z",
+  "updatedAt": "2026-08-15T23:49:13.751Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -64,7 +64,9 @@
     "image_rate_dropped": 0,
     "frozen_relative_date": 0,
     "undated_month_in_title": 0,
-    "stores_open_but_hidden": 0
+    "stores_open_but_hidden": 0,
+    "eventdate_not_recomputable": 0,
+    "clock_discipline": 0
   },
   "pages": {
     "/": 1211,
@@ -165,7 +167,9 @@
     "coverage:image_bad_url": 1317,
     "coverage:frozen_relative_date": 1469,
     "coverage:undated_month_in_title": 139,
-    "coverage:stores_open_but_hidden": 39
+    "coverage:stores_open_but_hidden": 39,
+    "coverage:eventdate_not_recomputable": 39,
+    "coverage:clock_discipline": 109
   },
   "coverage": {
     "title_noise:相場・在庫の実況": 25,
@@ -197,7 +201,9 @@
     "image_bad_url": 1317,
     "frozen_relative_date": 1469,
     "undated_month_in_title": 139,
-    "stores_open_but_hidden": 39
+    "stores_open_but_hidden": 39,
+    "eventdate_not_recomputable": 39,
+    "clock_discipline": 109
   },
   "facts": {
     "checked": 55,

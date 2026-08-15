@@ -1,6 +1,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import type { ScraperResult } from "../src/scrapers";
+import { nowInstant } from "../src/lib/date";
 
 // スクレイプの「静かな取りこぼし/破損」を検知するための健全性チェック。
 // 各ソースの取得件数・日付付与率を前回スナップショットと比較し、急減・ゼロ落ち・
@@ -49,7 +50,7 @@ function loadSnapshot(): Snapshot | null {
 }
 
 function saveSnapshot(stats: Record<string, SourceStat>): void {
-  const snap: Snapshot = { updatedAt: new Date().toISOString(), sources: stats };
+  const snap: Snapshot = { updatedAt: nowInstant().toISOString(), sources: stats };
   fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(snap, null, 2));
 }
 
@@ -101,7 +102,7 @@ export function checkHealth(results: ScraperResult[]): boolean {
   if (warnings.length > 0) {
     console.log(`\n⚠️  ${warnings.length}件の警告:`);
     warnings.forEach((w) => console.log(`   - ${w}`));
-    const stamp = new Date().toISOString();
+    const stamp = nowInstant().toISOString();
     const logLine = warnings.map((w) => `${stamp}\t${w}`).join("\n") + "\n";
     try {
       fs.appendFileSync(LOG_PATH, logLine);

@@ -8,6 +8,7 @@ import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
+import { nowInstant } from "../src/lib/date";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen"]);
@@ -84,7 +85,7 @@ async function main() {
           salesChannel: item.salesChannel ?? null,
           prizes,
           stores: item.stores ?? null,
-          scrapedAt: new Date(),
+          scrapedAt: nowInstant(),
         },
       });
       total++;

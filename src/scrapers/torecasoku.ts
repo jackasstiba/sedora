@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
+import { jstYearMonth } from "../lib/date";
 import { fetchHtml, parseYyyymmdd, sleep } from "./util";
 import { isSuspectPackPrice } from "../lib/margin";
 
@@ -18,9 +19,9 @@ const MAX_MONTHS = 12;
 const STOP_AFTER_EMPTY = 2;
 
 function monthParam(offset: number): string {
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-  return `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}01`;
+  // 月は必ず日本時間で決める（ローカル時刻だと実行環境のTZで月がズレる）。
+  const { year, month } = jstYearMonth(offset);
+  return `${year}${String(month).padStart(2, "0")}01`;
 }
 
 // サムネイルURLの "-190x260" のようなサイズ接尾辞を除いてフル画像URLにする。

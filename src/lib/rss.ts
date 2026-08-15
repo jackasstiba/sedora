@@ -1,6 +1,7 @@
 import { getItems } from "./items";
 import { cleanListTitle } from "./title";
 import { formatPriceDisplay } from "./margin";
+import { formatLong, nowInstant } from "./date";
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 
@@ -12,8 +13,10 @@ function esc(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+// 暦日は UTC 0時で保存しているので、表示も UTC 系のゲッター（formatLong）で読む。
+// toLocaleDateString(TZ指定なし) は実行環境のTZで日がズレる＝RSSの日付が1日前になりうる。
 function fmtDate(d: Date | null): string {
-  return d ? new Date(d).toLocaleDateString("ja-JP") : "日付未定";
+  return d ? formatLong(d) : "日付未定";
 }
 
 /**
@@ -54,7 +57,7 @@ export async function buildRss(genre?: string): Promise<string> {
     <atom:link href="${feedUrl}" rel="self" type="application/rss+xml" />
     <description>フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど、レア・限定アイテムの新着予約・発売情報をお届け。</description>
     <language>ja</language>
-    <lastBuildDate>${new Date().toUTCString()}</lastBuildDate>
+    <lastBuildDate>${nowInstant().toUTCString()}</lastBuildDate>
 ${entries}
   </channel>
 </rss>`;

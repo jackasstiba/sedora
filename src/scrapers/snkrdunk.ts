@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
+import { jstYearMonth } from "../lib/date";
 import { fetchHtml, parseSlashMonthDay, sleep } from "./util";
 
 const BASE = "https://snkrdunk.com/calendars";
@@ -14,11 +15,9 @@ export const SNKRDUNK_RELEASE_TITLE = /抽選\s*[／/]\s*販売\s*[／/]\s*定�
 
 function monthKeys(): { key: string; year: number; month: number }[] {
   const out: { key: string; year: number; month: number }[] = [];
-  const now = new Date();
   for (let i = 0; i <= MONTHS_AHEAD; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
-    const year = d.getFullYear();
-    const month = d.getMonth() + 1;
+    // 月は必ず日本時間で決める（ローカル時刻だと実行環境のTZで月がズレる）。
+    const { year, month } = jstYearMonth(i);
     out.push({ key: `${year}-${String(month).padStart(2, "0")}`, year, month });
   }
   return out;

@@ -18,6 +18,7 @@
 import * as cheerio from "cheerio";
 import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
+import { countdownBadgeProblem, renderedDateProblems, todayJst } from "../src/lib/date";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -48,6 +49,36 @@ function toUrl(name: string): string {
   return `${BASE}/${parts.join("/")}`;
 }
 
+/**
+ * **同じカードの中**で、カウントダウンのバッジと日付ラベルが食い違っていないか。
+ *
+ * テキストの隣接では判定できない（実測: 描画は「🔥 本日ワンピースカード8/16(日)」と
+ * 別要素が隙間なく繋がるので、作品名「明日ちゃんのセーラー服」と区別がつかない）。
+ * カード要素（/items/N へのリンク）を単位にして、その中の span 同士を突き合わせる。
+ */
+function cardDateProblems($: cheerio.CheerioAPI, today: Date): { problems: string[]; badges: number } {
+  const problems: string[] = [];
+  let badges = 0;
+  $('a[href^="/items/"]').each((_, el) => {
+    const card = $(el);
+    const texts = card
+      .find("span")
+      .map((_, s) => $(s).text().replace(/\s+/g, " ").trim())
+      .get();
+    const badge = texts.find((t) => /^(?:🔥\s*)?(?:本日|明日|あと\d{1,2}日)$/.test(t));
+    if (!badge) return;
+    badges++;
+    const dateLabel = texts.find((t) => /^(?:\d{4}[年/])?\d{1,2}[/月]\d{1,2}日?(?:\([日月火水木金土]\))?$/.test(t));
+    if (!dateLabel) {
+      problems.push(`カウントダウン「${badge}」が出ているのに日付ラベルが無い（${card.attr("href")}）`);
+      return;
+    }
+    const problem = countdownBadgeProblem(badge, dateLabel, today);
+    if (problem) problems.push(`${problem}（${card.attr("href")}）`);
+  });
+  return { problems, badges };
+}
+
 /** 商品カードの見出しテキストを取り出す（カードは /items/N へのリンク）。 */
 function cardTitles($: cheerio.CheerioAPI): string[] {
   const out: string[] = [];
@@ -60,11 +91,14 @@ function cardTitles($: cheerio.CheerioAPI): string[] {
 
 async function main() {
   console.log(`== ハツコレ 描画監査 == (${BASE})`);
+  const today = todayJst();
   const pages = await loadDisplayedPages();
 
   let checked = 0;
   let cardsSeen = 0;
   let listItemsSeen = 0;
+  // 「🔥本日/明日/あとN日」のバッジを何枚見たか。0枚なら日付の突合は空振り（＝何も守っていない）。
+  let badgesSeen = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -141,6 +175,13 @@ async function main() {
     // (7) 空のページ（見出しはあるのにカードが0枚）。
     if (p.rows.length > 0 && titles.length === 0)
       flag(p.name, "空ページ", `データは ${p.rows.length}件あるのにカードが0枚`);
+
+    // (8) **画面に出ている日付そのものの整合**（曜日／本日・明日・あとN日）。
+    //     人間が一目で気付く型（1画面の中で上下が食い違う）を、描画結果の文字列で見る。
+    for (const msg of renderedDateProblems(text, today)) flag(p.name, "日付の食い違い（画面）", msg);
+    const cardDates = cardDateProblems($, today);
+    badgesSeen += cardDates.badges;
+    for (const msg of cardDates.problems) flag(p.name, "日付の食い違い（画面）", msg);
   }
 
   // 商品詳細ページも見る。受付中ストア一覧・各賞ギャラリーは詳細にしか無く、
@@ -173,6 +214,13 @@ async function main() {
       }
       const numEnt2 = text.match(/&#x?[0-9a-fA-F]{2,6};/);
       if (numEnt2) flag(`/items/${r.id}`, "エスケープ漏れ", `本文に「${numEnt2[0]}」が出ている`);
+      // 商品詳細は「上部の抽選日バッジ」と「下の店舗行の締切」が同じ画面に並ぶ面。
+      // 2026-08-16 に実際に食い違っていたのはここ（上=🔥本日／下=〜明日 22:00）。
+      for (const msg of renderedDateProblems(text, today))
+        flag(`/items/${r.id}`, "日付の食い違い（画面）", msg);
+      const itemCardDates = cardDateProblems($, today);
+      badgesSeen += itemCardDates.badges;
+      for (const msg of itemCardDates.problems) flag(`/items/${r.id}`, "日付の食い違い（画面）", msg);
       $("ul, ol").each((_, ul) => {
         const items = $(ul)
           .children("li")
@@ -191,9 +239,18 @@ async function main() {
 
   // 「指摘0件」が“ちゃんと見た上での0件”なのか“何も見ていない0件”なのかを区別するため、
   // 実際に検査した物量を必ず出す。セレクタが壊れると0枚になり、静かに素通りするのを防ぐ。
-  console.log(`検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件`);
+  console.log(
+    `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
+      `カウントダウンのバッジ ${badgesSeen}枚`
+  );
   if (checked > 0 && cardsSeen === 0) {
     flag("(全体)", "検査が空振り", "商品カードを1枚も検出できていない（セレクタが壊れた疑い）");
+  }
+  // 日付バッジの突合は「見た枚数」を出さないと 0件の意味が決まらない。
+  // 実測: 最初の版はテキストの隣接で判定していて、本番の描画では**1枚も突き合わせていなかった**
+  // （バッジと日付が別要素で、テキストにすると作品名と繋がるため）。
+  if (checked > 0 && badgesSeen === 0) {
+    flag("(全体)", "検査が空振り", "カウントダウンのバッジを1枚も検出できていない（日付の突合が動いていない）");
   }
   if (findings.length === 0) {
     console.log("\n==== 描画監査: 指摘 0件 ====");

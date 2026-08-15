@@ -13,6 +13,8 @@
     "audit:page": "node --env-file-if-exists=.env --import tsx scripts/auditRendered.ts",
     "audit:selftest": "node --import tsx scripts/auditSelftest.ts",
     "audit:tomorrow": "node --env-file-if-exists=.env --import tsx scripts/auditTomorrow.ts",
+    "audit:clock": "node --import tsx scripts/auditClock.ts",
+    "audit:clocklint": "node --import tsx scripts/clockScan.ts",
     "sweep:dump": "node --env-file-if-exists=.env --import tsx scripts/sweepDump.ts",
     "audit:facts": "node --env-file-if-exists=.env --import tsx scripts/auditFacts.ts",
     "reenrich:collabo": "node --env-file-if-exists=.env --import tsx scripts/reenrichCollabo.ts",

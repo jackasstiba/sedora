@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml } from "./util";
 import { stripTags } from "./aggregatorUtil";
 
@@ -69,7 +70,7 @@ export function parseOnePieceProducts(html: string): OnePieceProduct[] {
 }
 
 /** 掲載判定＋行の組み立て（純関数・selftest対象）。 */
-export function buildOnePieceItem(p: OnePieceProduct, reference = new Date()): ScrapedItem | null {
+export function buildOnePieceItem(p: OnePieceProduct, reference = todayJst()): ScrapedItem | null {
   if (p.date) {
     const age = (reference.getTime() - p.date.getTime()) / 86_400_000;
     if (age > RECENT_DAYS) return null;

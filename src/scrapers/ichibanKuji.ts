@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { jstYearMonth } from "../lib/date";
 import { extractKujiFee, extractKujiPrizes, extractKujiStores, formatKujiHighlights } from "./ichibanKujiEnrich";
 import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 
@@ -19,9 +20,10 @@ const MAX_MONTHS = 12;
 const STOP_AFTER_EMPTY = 2;
 
 function monthUrl(offset: number): string {
-  const now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth() + offset, 1);
-  return `${BASE}?sale_month=${d.getMonth() + 1}&sale_year=${d.getFullYear()}`;
+  // 月は必ず日本時間で決める。ローカル時刻で作ると、UTCの箱で回した場合に
+  // 毎月1日の JST 00:00〜08:59 だけ前月のページを取りに行き、その月の新商品を丸ごと落とす。
+  const { year, month } = jstYearMonth(offset);
+  return `${BASE}?sale_month=${month}&sale_year=${year}`;
 }
 
 export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {

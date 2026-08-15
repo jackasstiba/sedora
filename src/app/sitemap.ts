@@ -1,6 +1,7 @@
 import type { MetadataRoute } from "next";
 import { getSitemapItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
 import { getTcgTitleCounts } from "@/lib/tcg";
+import { nowInstant } from "@/lib/date";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -12,7 +13,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     getTcgTitleCounts(),
   ]);
 
-  const now = new Date();
+  const now = nowInstant();
 
   const entries: MetadataRoute.Sitemap = [
     { url: base, lastModified: now, changeFrequency: "daily", priority: 1 },

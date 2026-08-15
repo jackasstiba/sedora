@@ -1,4 +1,5 @@
 import { ScrapedItem } from "./types";
+import { todayJst } from "../lib/date";
 import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import { cleanStoreUrl, stripTags } from "./aggregatorUtil";
 
@@ -46,7 +47,7 @@ function decodeNumericEntities(s: string): string {
 const NON_OFFICIAL_LINK = /twitter\.com|x\.com|facebook\.com|line\.me|b\.hatena|getpocket\.com|wordpress\.org|google\.com|kujimap\.com/i;
 
 /** サイトマップ index から直近 RECENT_MONTHS ヶ月のページ用サイトマップURLを選ぶ。 */
-export function pickRecentPageSitemaps(indexXml: string, reference = new Date()): string[] {
+export function pickRecentPageSitemaps(indexXml: string, reference = todayJst()): string[] {
   const urls = [...indexXml.matchAll(/<loc>(https:\/\/kujimap\.com\/sitemap-pt-page-p\d+-(\d{4})-(\d{2})\.xml)<\/loc>/g)];
   const refYm = reference.getUTCFullYear() * 12 + reference.getUTCMonth();
   return urls
@@ -131,7 +132,7 @@ export function parseKujiDetail(html: string): KujiDetail | null {
 export function buildKujimapItem(
   url: string,
   detail: KujiDetail,
-  reference = new Date()
+  reference = todayJst()
 ): ScrapedItem | null {
   const m = url.match(DETAIL_PATH_RE);
   if (!m) return null;

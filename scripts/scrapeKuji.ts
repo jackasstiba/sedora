@@ -1,6 +1,7 @@
 import { prisma } from "../src/lib/prisma";
 import { scrapeIchibanKuji } from "../src/scrapers/ichibanKuji";
 import { cleanTitle } from "../src/scrapers/util";
+import { nowInstant } from "../src/lib/date";
 
 // 一番くじだけを対象に再収集し、各賞ラインナップ（highlights）と hasLottery を付与する
 // 差分更新スクリプト。全13ソースを回す `npm run scrape` を待たずに、抽選賞品の深掘りだけを
@@ -28,7 +29,7 @@ async function main() {
         highlights: item.highlights ?? null,
         hasLottery: item.hasLottery ?? null,
         prizes: item.prizes ?? null,
-        scrapedAt: new Date(),
+        scrapedAt: nowInstant(),
       },
     });
   }

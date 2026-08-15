@@ -1,3 +1,5 @@
+import { todayJst } from "../lib/date";
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
@@ -72,7 +74,7 @@ export function parseSlashMonthDay(text: string, baseYear: number, baseMonth: nu
  * **基準日は記事の投稿日を渡すこと**（呼び出し側の責任）。今日を基準にすると、
  * 古い記事の日付が「まだ来ていない日」に見えてしまう。
  */
-export function resolveMonthDay(month: number, day: number, reference = new Date()): Date {
+export function resolveMonthDay(month: number, day: number, reference = todayJst()): Date {
   const base = reference.getUTCFullYear();
   let best = calDate(base, month, day);
   for (const y of [base - 1, base + 1]) {
@@ -102,9 +104,9 @@ export function extractDateAndEventFromText(
   }
   const month = Number(dateMatch[1]);
   const day = Number(dateMatch[2]);
-  const ref = reference ? new Date(reference) : new Date();
+  const ref = reference ? new Date(reference) : todayJst();
   return {
-    date: resolveMonthDay(month, day, Number.isNaN(ref.getTime()) ? new Date() : ref),
+    date: resolveMonthDay(month, day, Number.isNaN(ref.getTime()) ? todayJst() : ref),
     eventType: eventMatch ? eventMatch[1] : null,
     dateText: dateMatch[0],
   };

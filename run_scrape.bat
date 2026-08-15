@@ -29,6 +29,12 @@ rem are kept. To revive, put the three "call :step" lines back. See run_scrape.m
 
 rem --- 2. checks ---
 call :step "audit selftest"    "npm run audit:selftest"     || exit /b 1
+rem "audit clock" replays the same Japan-time day at different wall-clock times (JST 00:00 /
+rem 06:39 / 08:59 / 09:00 / 23:59, plus month- and year-boundaries) and in three timezones,
+rem and fails if any date-related output differs. Added 2026-08-16 after the deadlines were
+rem stored one day early: the bug only appeared when the crawl ran before 09:00 JST, so it
+rem could not be reproduced by hand at noon and no existing check could see it.
+call :step "audit clock"       "npm run audit:clock"        || exit /b 1
 call :step "audit"             "npm run audit"              || exit /b 1
 call :step "audit facts"       "npm run audit:facts"        || exit /b 1
 rem "audit tomorrow" replays today's data with the calendar moved forward (+1 / +7 days)

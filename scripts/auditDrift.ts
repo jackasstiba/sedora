@@ -20,6 +20,7 @@ import path from "node:path";
 import { cleanListTitle, __debugSegments } from "../src/lib/title";
 import { displayEventType, eventDateLabel } from "../src/lib/date";
 import { accumulateUnexplained } from "../src/lib/pageLoss";
+import { nowInstant } from "../src/lib/date";
 
 const PROFILE_PATH = path.join(process.cwd(), "audit-profile.json");
 const MIRROR_SOURCES = new Set(["channeltono", "rarecheck", "x_watch"]);
@@ -328,12 +329,12 @@ export function runDrift(
   );
 
   const profile: Profile = {
-    updatedAt: update ? new Date().toISOString() : prev?.updatedAt ?? new Date().toISOString(),
+    updatedAt: update ? nowInstant().toISOString() : prev?.updatedAt ?? nowInstant().toISOString(),
     sources: update ? now : prev?.sources ?? now,
     pages: advancePages ? pageCounts : prev?.pages,
     pageIds: carriedPageIds,
     unexplainedSince: nextUnexplained,
-    pagesRunAt: advancePages ? new Date().toISOString() : prev?.pagesRunAt,
+    pagesRunAt: advancePages ? nowInstant().toISOString() : prev?.pagesRunAt,
     pagesFingerprint: advancePages ? fingerprint : prev?.pagesFingerprint,
   };
   fs.writeFileSync(PROFILE_PATH, JSON.stringify(profile, null, 2) + "\n");
