@@ -128,6 +128,10 @@ const TRAILING_LOCATION = new RegExp(
 /** タイトルから日付告知・編集タグを取り除いて商品名として読みやすくする */
 export function cleanTitle(raw: string): string {
   let t = raw.trim();
+  // NBSP(U+00A0)等の特殊空白は普通の空白に。見た目は同じだが、楽天検索URLに %C2%A0 が
+  // 乗り検索を狂わせ、重複突合のキーも揺らす（実測: SNKRS「コービー 5」のNBSP）。
+  // 全角スペース(U+3000)は日本語タイトルの区切りとして意味を持つので触らない。
+  t = t.replace(/[   ]/g, " ").replace(/ {2,}/g, " ");
   t = t.replace(NOISE_TAGS, "");
   t = t.replace(LEADING_DATE, "");
   t = t.replace(TRAILING_DATE, "");

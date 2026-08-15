@@ -86,6 +86,16 @@ function extractLiveSection(html: string): string | null {
   return j < 0 ? rest : rest.slice(0, j);
 }
 
+/** 記事本文の「応募受付終了（過去の抽選・予約一覧…）」節を切り出す。無ければ null。 */
+function extractEndedSection(html: string): string | null {
+  const marker = "応募受付終了";
+  const i = html.indexOf(marker);
+  if (i < 0) return null;
+  const rest = html.slice(i + marker.length);
+  const j = rest.search(/<h2[\s>]/);
+  return j < 0 ? rest : rest.slice(0, j);
+}
+
 /** ストアブロック(h3の後ろ)から公式・抽選ページURLを1つ選ぶ。 */
 function pickStoreUrl(blockHtml: string): string | null {
   const links = [...blockHtml.matchAll(/<a[^>]+href="(https?:\/\/[^"]+)"[^>]*>([\s\S]*?)<\/a>/g)]
@@ -94,7 +104,8 @@ function pickStoreUrl(blockHtml: string): string | null {
   if (links.length === 0) return null;
   // 「詳細ページ」「応募ページ」「商品ページ」等、明示的な導線を優先。
   const preferred = links.find((l) => /(詳細|応募|商品|抽選|購入|予約)ページ/.test(l.text));
-  return cleanStoreUrl((preferred ?? links[0]).href);
+  // cleanStoreUrl は行き先を取り出せないアフィリラッパーを "" にする＝導線なし扱い。
+  return cleanStoreUrl((preferred ?? links[0]).href) || null;
 }
 
 /** 応募条件（購入履歴・会員登録など＝当落を左右する“せどりの肝”）を短く取り出す。 */
@@ -155,6 +166,127 @@ type Store = {
   date: Date | null;
 };
 
+// ── 受付終了（実績）の取り込み ─────────────────────────────────────────
+//
+// 【2026-08-15 拡張】受付中ストアが 0 のまとめ記事は従来まるごと掲載対象外だった。
+// その結果、受付窓が短い商材（酒・ソフビ・家電）はスクレイプの瞬間に窓が閉じていると
+// 恒常的に 0 件になる（実測: chusen 41記事中、受付中ありは5記事のみ）。
+// → 直近 RECENT_ENDED_DAYS 日以内に抽選実績がある記事は「受付終了（直近 M/D）」として
+//   掲載する。**受付中とは言わない**（highlights も「実績」と明記）。stores は埋めない
+//   （詳細ページの受付中ストア節に終了分が混ざらないように）。
+// LABUBU のように直近実績が数ヶ月前まで枯れている記事は従来どおり掲載しない。
+
+export const RECENT_ENDED_DAYS = 60;
+
+export type EndedStore = { name: string; url: string | null; form: string | null; date: Date | null };
+
+/**
+ * 年の無い「M月D日」を、基準日から見て**最も近い過去**の日付に解決する。
+ * 受付終了節の日付は必ず過去（終了した抽選が未来に開始していることはない）なので、
+ * resolveMonthDay の「最も近い年」規則を使うと「9月19日」が来月に化ける。
+ */
+export function resolvePastMonthDay(month: number, day: number, reference = new Date()): Date {
+  const base = reference.getUTCFullYear();
+  const cand = new Date(Date.UTC(base, month - 1, day));
+  return cand.getTime() <= reference.getTime()
+    ? cand
+    : new Date(Date.UTC(base - 1, month - 1, day));
+}
+
+/** 受付終了節のストアブロックを解析する。並びは新しい順（サイト仕様）を前提に、
+ *  年無し日付の解決が前のブロックより未来に出たら年を1つ戻して単調非増加を保つ。 */
+export function parseEndedStores(sectionHtml: string, reference = new Date()): EndedStore[] {
+  const blocks = sectionHtml.split(/<h3[^>]*>/).slice(1);
+  const out: EndedStore[] = [];
+  let prevTime = Infinity;
+  for (const b of blocks) {
+    const end = b.indexOf("</h3>");
+    if (end < 0) continue;
+    const name = stripTags(b.slice(0, end));
+    if (!name || name.length > 40) continue;
+    const after = b.slice(end + 5);
+    const vis = stripTags(after);
+    // 終了ブロックは「抽選形式」、受付中ブロックは「販売形式」の表記ゆれがある。
+    const formM = vis.match(/(?:抽選形式|販売形式)\s*([^\s]{1,16})/);
+    // 当選発表は年付き（例: 2025年11月19日）のことがあり、最も信頼できる。
+    const yFull = vis
+      .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+      .match(/当[選落]発表\s*(\d{4})年(\d{1,2})月(\d{1,2})日/);
+    let date: Date | null = null;
+    if (yFull) {
+      date = new Date(Date.UTC(Number(yFull[1]), Number(yFull[2]) - 1, Number(yFull[3])));
+    } else {
+      const md = vis
+        .replace(/[０-９]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+        .match(/(?:終了日|開始日|応募期間|受付期間)\s*(\d{1,2})月(\d{1,2})日/);
+      if (md) date = resolvePastMonthDay(Number(md[1]), Number(md[2]), reference);
+    }
+    // 新しい順の並びに反する解決（前のブロックより未来）は年を1つ戻す。
+    if (date && date.getTime() > prevTime) {
+      date = new Date(Date.UTC(date.getUTCFullYear() - 1, date.getUTCMonth(), date.getUTCDate()));
+    }
+    if (date) prevTime = date.getTime();
+    out.push({ name, url: pickStoreUrl(after), form: formM ? formM[1].trim() : null, date });
+  }
+  return out;
+}
+
+const isLotteryFormText = (f: string | null) => !!f && /抽選|抽籤|招待|エントリー|応募/.test(f);
+
+/**
+ * 受付中0件の記事から「実績あり・受付終了」行を組み立てる。掲載しない場合は null。
+ * 条件: ①直近の実績が RECENT_ENDED_DAYS 日以内 ②抽選実績（形式に抽選系の語）がある
+ *       ③公式ページURLが取れている（nyuka_now の url は「公式ページ」と表示されるため必須）。
+ */
+export function buildRecentEndedItem(
+  articleId: string,
+  articleTitle: string,
+  ended: EndedStore[],
+  reference = new Date()
+): ScrapedItem | null {
+  const product = cleanProductName(articleTitle);
+  if (!product) return null;
+
+  const dated = ended.filter((s): s is EndedStore & { date: Date } => !!s.date);
+  if (dated.length === 0) return null;
+  const newest = dated.reduce((a, b) => (a.date.getTime() >= b.date.getTime() ? a : b));
+  const ageDays = (reference.getTime() - newest.date.getTime()) / 86_400_000;
+  if (ageDays < 0 || ageDays > RECENT_ENDED_DAYS) return null;
+
+  // 直近窓内に抽選実績が無い（先着・予約だけ）なら、受付終了後に伝える価値が薄いので載せない。
+  const recent = dated.filter((s) => (reference.getTime() - s.date.getTime()) / 86_400_000 <= RECENT_ENDED_DAYS);
+  if (!recent.some((s) => isLotteryFormText(s.form))) return null;
+
+  // 応募フォーム(Google Forms等)は締切後に開いても何も分からないので、通常の商品/告知ページを優先。
+  const isForm = (u: string) => /docs\.google\.com|forms\.gle/i.test(u);
+  const withUrl = recent.filter((s) => !!s.url);
+  const url = (withUrl.find((s) => !isForm(s.url!)) ?? withUrl[0])?.url ?? null;
+  if (!url) return null;
+
+  const md = (d: Date) => `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+  const summary = recent
+    .slice(0, 3)
+    .map((s) => `${s.name}（${md(s.date)}）`)
+    .join("・");
+
+  return {
+    source: "nyuka_now",
+    sourceId: articleId,
+    title: product,
+    genre: classifyAggregatorGenre(product),
+    subGenre: null,
+    eventType: "抽選",
+    eventDate: null, // 過去日を入れると表示から落ちる。表記は eventDateText で行う。
+    eventDateText: `受付終了（直近 ${md(newest.date)}）`,
+    price: null,
+    url, // 直近抽選の公式ページ（終了後も商品・店の一次情報として有効）
+    imageUrl: null,
+    highlights: `直近の抽選・予約実績：${summary}`,
+    hasLottery: true,
+    stores: null,
+  };
+}
+
 function parseStores(sectionHtml: string): Store[] {
   const blocks = sectionHtml.split(/<h3[^>]*>/).slice(1);
   const stores: Store[] = [];
@@ -190,9 +322,16 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
     await sleep(400); // 配信元への負荷に配慮
 
     const section = extractLiveSection(html);
-    if (!section) continue; // 受付中のストアが無い＝掲載しない
-    const stores = parseStores(section);
-    if (stores.length === 0) continue;
+    const stores = section ? parseStores(section) : [];
+    if (stores.length === 0) {
+      // 受付中が無くても、直近に抽選実績があれば「受付終了（直近 M/D）」として載せる。
+      const endedSec = extractEndedSection(html);
+      if (endedSec) {
+        const row = buildRecentEndedItem(a.id, a.title, parseEndedStores(endedSec, today), today);
+        if (row) items.push(row);
+      }
+      continue;
+    }
 
     const product = cleanProductName(a.title);
     if (!product) continue;

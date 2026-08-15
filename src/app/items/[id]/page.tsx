@@ -8,7 +8,7 @@ import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
-import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabel, eventPeriodText, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { groupStoresByLabel, parseStoresJson, storeSectionCopy } from "@/lib/stores";
@@ -62,6 +62,8 @@ export default async function ItemPage({ params }: Props) {
   const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "long");
   // 月精度のものは合成した月初へのカウントダウンになるので出さない。
   const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
+  // 受付期間・締切・時刻（収集元の文言のまま。暦日だけの言い換えなら null）。
+  const periodText = eventPeriodText(item.eventDate, item.eventDateText);
   // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。
   // ※ 楽天検索へのリンクだけは生タイトルを使う経路が別にある（検索語は情報量が多い方が当たる）。
   const displayTitle = cleanListTitle(item.source, item.title);
@@ -195,6 +197,15 @@ export default async function ItemPage({ params }: Props) {
                     </span>
                   )}
                 </dd>
+              </>
+            )}
+            {/* 受付期間・締切・時刻。「今から間に合うか」は仕入れ判断の生命線なのに、
+                eventDateText に入っていても暦日ラベルに負けて出ていなかった（観点B 2026-08-15）。
+                収集元の文言をそのまま出す＝精度を足さない。 */}
+            {periodText && (
+              <>
+                <dt className="text-neutral-500 dark:text-neutral-400">受付・時刻</dt>
+                <dd className="text-neutral-800 dark:text-neutral-100">{periodText}</dd>
               </>
             )}
             {item.price && (

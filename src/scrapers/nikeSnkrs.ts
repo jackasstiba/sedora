@@ -83,6 +83,20 @@ function hasRealTime(iso: string): boolean {
   return d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0 || d.getUTCSeconds() !== 0;
 }
 
+// 大人版とキッズ版は SNKRS 上で**同じ日本語タイトル**のことがある（実測: GS版「コービー 5」
+// ¥15,620 と大人版「コービー 5 "Hyper Royal"」¥22,000 が同一 launch URL・同一画像で並び、
+// キッズと分かる表記がどこにも無かった＝大人靴と誤解して応募し得る）。
+// subtitle（「ジュニア バスケットボールシューズ」等）と genders(KIDS) から区別を作り、
+// タイトルに付ける。subtitle の語をそのまま使う（勝手な言い換えをしない）。
+export function kidsLabel(subtitle: unknown, genders: unknown): string | null {
+  const sub = typeof subtitle === "string" ? subtitle : "";
+  const g = Array.isArray(genders) ? genders : [];
+  const m = sub.match(/(リトルキッズ|ベビー|ジュニア|キッズ)/);
+  if (m) return m[1];
+  if (g.includes("KIDS")) return "キッズ";
+  return null;
+}
+
 function formatYen(price: unknown, currency: unknown): string | null {
   if (typeof price !== "number" || !isFinite(price)) return null;
   if (currency && currency !== "JPY") return `${price.toLocaleString("ja-JP")} ${currency}`;
@@ -138,8 +152,10 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
       eventDateText = `${isDraw ? "抽選" : "先着販売"} ${c.mo}/${c.d}${time}`;
     }
 
-    const title: string = (p.title ?? "").trim();
+    let title: string = (p.title ?? "").trim();
     if (!title) continue;
+    const kids = kidsLabel(p.subtitle, p.genders);
+    if (kids && !title.includes(kids)) title = `${title}（${kids}）`;
 
     const styleColor: string | undefined = p.styleColor;
     const slug = slugMap[productId];

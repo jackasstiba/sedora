@@ -265,3 +265,29 @@ export function displayEventDateText(eventDateText: string | null): string | nul
   if (/投稿日|掲載日|更新日/.test(eventDateText)) return null;
   return eventDateText;
 }
+
+/**
+ * 日付ラベルとは**別に**出す「受付期間・締切・時刻」の補足。
+ *
+ * 観点B実使用（2026-08-15）: 一番くじONLINE再販の受付は「8/17 11:00〜8/20 23:59」の4日間、
+ * SNKRS抽選は「応募締切 8/15 9:10」——**今から間に合うかを決める情報**が eventDateText に
+ * 入っているのに、eventDate があると日付ラベルに負けて一切表示されていなかった。
+ * 収集元の文言をそのまま出す（精度を足さない・言い換えない）。
+ *
+ * 出す条件: 時刻・期間・締切のいずれかを含む＝暦日だけの言い換えには出さない
+ * （「2026年8月17日」を二度書くのはノイズ）。「発送予定」は eventDateHeading が
+ * 見出しごと切り替えるのでここでは扱わない。
+ */
+export function eventPeriodText(
+  eventDate: Date | string | null,
+  eventDateText: string | null
+): string | null {
+  if (!eventDateText) return null;
+  if (!eventDate) return null; // 日付が無い行は eventDateLabel がテキストをそのまま出す
+  if (/投稿日|掲載日|更新日|発送予定/.test(eventDateText)) return null;
+  const hasTime = /\d{1,2}[:：]\d{2}/.test(eventDateText);
+  const hasRange = /[〜~～].*\d|\d.*[〜~～]/.test(eventDateText) && /月|\//.test(eventDateText);
+  const hasDeadline = /締切|期間|受付|応募|先着/.test(eventDateText);
+  if (!hasTime && !hasRange && !hasDeadline) return null;
+  return eventDateText.trim();
+}

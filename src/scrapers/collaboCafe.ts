@@ -33,6 +33,13 @@ const LISTING_URLS = [
   "https://collabo-cafe.com/events/category/shop-tieup/",
   "https://collabo-cafe.com/events/category/cafe/",
   "https://collabo-cafe.com/events/category/hololive/",
+  // 2026-08-15 追加: 物販のある未巡回カテゴリ（実測でサイトは13カテゴリ持ち、6つしか
+  // 巡回していなかった）。fashion=アパレルコラボ（しまむら/UT型＝転売対象）、
+  // event=期間限定イベント物販、theme-park/原画展=会場限定グッズ。
+  "https://collabo-cafe.com/events/category/fashion/",
+  "https://collabo-cafe.com/events/category/event/",
+  "https://collabo-cafe.com/events/category/theme-park/",
+  "https://collabo-cafe.com/events/category/gengaten-tenjikai/",
 ];
 
 // article class の event-category-* から拾う種別スラッグ → 表示ラベル
@@ -45,6 +52,7 @@ const TYPE_LABELS: Record<string, string> = {
   "gengaten-tenjikai": "原画展",
   "theme-park": "テーマパーク",
   event: "イベント",
+  fashion: "ファッション",
 };
 
 const ARTICLE_RE = /<article class="post-list[\s\S]*?<\/article>/g;

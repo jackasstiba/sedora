@@ -1,5 +1,6 @@
 import { matchFranchises } from "../lib/franchise";
 import { normalizeForSearch } from "../lib/itemFilter";
+import { cleanStoreUrl } from "./aggregatorUtil";
 
 // コラボイベント記事の「本文」から、せどらーが最も欲しい情報＝抽選/ランダム/数量限定の
 // 有無と、注目賞品（タオル・アクスタ等）を抽出する純関数。
@@ -148,7 +149,10 @@ export function extractOfficialUrl(
   // href の値は HTML なのでエンティティのまま（`&amp;`）。デコードせずに保存すると
   // クエリ名が `amp;utm_source` になった URL を「公式ページ」として提示することになる
   // （実測: 表示中 335件のうち 119件が `&amp;` を含んでいた）。
-  return score(best) > 0 ? decodeEntities(best) : null;
+  // さらにトラッキングを除去する。収集元記事のリンクは utm_source=collabo_cafe_dot_com の
+  // ように**収集元の名前がクエリに焼き込まれている**（実測 #58615）。そのまま配ると
+  // 「公式ページで見る」がソース非公開方針を自分で破る。
+  return score(best) > 0 ? cleanStoreUrl(decodeEntities(best)) || null : null;
 }
 
 /**

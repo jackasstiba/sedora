@@ -22,13 +22,39 @@ export const NOISE_LINK =
 
 // アフィリエイト/トラッキングのクエリ。特に Amazon アソシエイトタグ（tag=... 等）を必ず落とす。
 const TRACK_PARAM =
-  /^(tag|aod|ref|ref_|linkcode|creative|creativeasin|camp|ascsubtag|_encoding|th|psc|smid|utm_[a-z]+|yclid|gclid|fbclid|dib|dib_tag|content-id|qid|sr|keywords|m|rk|__mk_ja_jp)$/i;
+  /^(tag|aod|ref|ref_|linkcode|creative|creativeasin|camp|ascsubtag|_encoding|th|psc|smid|utm_[a-z]+|yclid|gclid|fbclid|dib|dib_tag|content-id|qid|sr|keywords|m|rk|__mk_ja_jp|af_id|ch|ch_id)$/i;
+
+// アフィリエイトの「リダイレクトラッパー」ホスト。クエリに本来の行き先URLを持ち、
+// そのまま載せると収集元のアフィリID（af_id=nnow-001 等）ごとユーザーに配ってしまう。
+// クエリ除去では消えない（ホスト自体がアフィリ）ので、行き先URLを取り出して置き換える。
+// 実測: 入荷Now の DMM リンクが al.dmm.com/?lurl=<本来のURL>&af_id=nnow-001 型だった。
+export const AFFILIATE_REDIRECT = /(^|\.)(al\.dmm\.com|px\.a8\.net|h\.accesstrade\.net|ck\.jp\.ap\.valuecommerce\.com|hb\.afl\.rakuten\.co\.jp)$/i;
+const REDIRECT_URL_PARAM = /^(lurl|url|pc|m|vc_url|rd)$/i;
 
 /** 外部URLからアフィリ/トラッキングを除去し、Amazon は /dp/{ASIN} の素URLに正規化する。 */
 export function cleanStoreUrl(raw: string): string {
-  const href = raw.replace(/&#0?38;/g, "&").replace(/&amp;/g, "&");
+  let href = raw.replace(/&#0?38;/g, "&").replace(/&amp;/g, "&");
+  // collabo-cafe は既にクエリを持つURLへも「?utm_source=…」を盲目的に連結するため、
+  // 「…?id=115888&?utm_source=…」のように ? が2つある不正URLになる。URLとして
+  // パースすると2つ目以降が**値の一部**として温存される（%3Futm_source%3D… に化けて
+  // 収集元名が残った実測 #55731）。2つ目の ? から先はトラッキングなので落とす。
+  const q1 = href.indexOf("?");
+  if (q1 >= 0) {
+    const q2 = href.indexOf("?", q1 + 1);
+    if (q2 >= 0) href = href.slice(0, q2).replace(/[&?]$/, "");
+  }
+  // ? を介さずパス末尾に直接連結された変種（実測 #10562: …/utm_source=collabo_cafe…）。
+  href = href.replace(/\/utm_[a-z]+=[^/]*$/i, "/");
   try {
     const u = new URL(href);
+    // アフィリラッパーは行き先URLを取り出して、それをあらためて掃除する（1段だけ再帰）。
+    if (AFFILIATE_REDIRECT.test(u.hostname)) {
+      for (const [k, v] of u.searchParams) {
+        if (REDIRECT_URL_PARAM.test(k) && /^https?:\/\//.test(v)) return cleanStoreUrl(v);
+      }
+      // 行き先が取り出せないラッパーは導線として使えない（ラッパーのまま配るよりは落とす）。
+      return "";
+    }
     if (/(^|\.)amazon\.co\.jp$/i.test(u.hostname)) {
       const asin = u.pathname.match(/\/(?:dp|gp\/product|gp\/aw\/d)\/([A-Z0-9]{10})/i);
       if (asin) return `https://www.amazon.co.jp/dp/${asin[1].toUpperCase()}`;
@@ -94,6 +120,11 @@ export function classifyAggregatorGenre(text: string): string {
     )
   ) {
     return "トレカ";
+  }
+
+  // ポケモン（カードはトレカ判定が先に拾う。ここはグッズ・コラボ商品＝pokemon_goodsと同じジャンル）
+  if (/ポケモン|pokemon|ポケセン|ピカチュウ/i.test(t)) {
+    return "ポケモン";
   }
 
   // スニーカー

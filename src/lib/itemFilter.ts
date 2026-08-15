@@ -19,6 +19,7 @@ export const GENRE_ORDER = [
   "スニーカー",
   "プラモ",
   "一番くじ",
+  "くじ", // 一番くじ以外のくじブランド（セガ ラッキーくじ/フリューくじ/タイトー等）2026-08-15新設
   "コラボ",
   "ポケモン",
   "ソフビ・アートトイ",
@@ -59,6 +60,9 @@ const SOURCE_LABELS: Record<string, string> = {
   tenbaiquest: "抽選情報",
   // raffle_kuji は一次くじプラットフォーム（応募ページに直リンク）。ブランド名は出さず中立ラベル。
   raffle_kuji: "オンラインくじ",
+  // kujimap は非公式アグリを収集元にするが名は出さない（url は各くじの公式LPに直リンク）。
+  kujimap: "くじ情報",
+  onepiece_card: "ワンピースカード公式",
 };
 
 export function sourceLabel(source: string): string {
@@ -124,6 +128,9 @@ type DedupeItem = {
   marketSource?: string | null;
   hasLottery?: boolean | null;
   highlights?: string | null;
+  // 「公式ページで見る」の遷移先。URLベースの重複突合（dedupeSameProductUrlCrossSource）が
+  // 見る。持たない呼び出しにも無害（任意）。
+  officialUrl?: string | null;
 };
 
 /** 落とす重複 `from` が持つ相場/抽選/賞品情報を、残す代表 `keep` が欠くなら引き継ぐ。
@@ -301,6 +308,74 @@ export function dedupeSneakerCrossSource<T extends DedupeItem>(items: T[]): T[] 
 }
 
 /**
+ * url / officialUrl が指す「個別商品ページ」を突合キーに正規化する。商品ページでなければ null。
+ * 判定は collaboEnrich.isSingleProductUrl と同じ（あちらは itemFilter を import しているため、
+ * こちらから import すると循環になる＝ローカル実装。変えるときは両方見る）。
+ */
+export function productUrlKey(u: string | null | undefined): string | null {
+  if (!u) return null;
+  try {
+    const p = new URL(u);
+    const seg = p.pathname.split("/").filter(Boolean);
+    if (!(seg.length === 2 && /^(products?|item|items|goods)$/i.test(seg[0]))) return null;
+    let slug = seg[1].toLowerCase();
+    // 1kuji.com は再販売ページを「<商品コード>_2」のように版数付きで切る（実測:
+    // kimetsu30=店頭販売 / kimetsu30_2=オンライン再販売）。版数を落として同じくじとして
+    // 突合する。他ホストの命名規則は知らないので適用しない（知らないものに断定を足さない）。
+    if (/(^|\.)1kuji\.com$/i.test(p.hostname)) slug = slug.replace(/_\d+$/, "");
+    return `${p.hostname.toLowerCase()}/${seg[0].toLowerCase()}/${slug}`;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 「同じ個別商品ページを指しているのに、タイトルの書き方が違って畳めない」クロスソース重複を
+ * URL で解消する。
+ *
+ * 実測（2026-08-15 観点B）: collabo_cafe「ハンターハンター × 一番くじ グリードアイランド編」の
+ * officialUrl と ichiban_kuji「一番くじ HUNTER×HUNTER GREED ISLAND ②」の url が完全に同じ
+ * 1kuji.com/products/hxh11 なのに、タイトル正規化ベースの dedupe は全て素通りして同じくじの
+ * カードが2枚並んでいた（鬼滅 上弦の弐 再販も同型）。タイトルは書き手の数だけあるが、
+ * 個別商品ページURLは商品の同一性を最も強く主張する。
+ *
+ * 誤マージの安全弁: **同じ暦日**のものだけ畳む（同じ商品コードでも 店頭販売(7/30) と
+ * オンライン再販(8/17) は別イベント＝別カードが正しい）。日付が無い行は触らない。
+ */
+function dedupeSameProductUrlCrossSource<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    if (!it.eventDate) continue;
+    const day = dayISO(it.eventDate);
+    const keys = new Set(
+      [productUrlKey(it.url), productUrlKey(it.officialUrl)].filter((k): k is string => !!k)
+    );
+    for (const k of keys) {
+      const kk = `${k}|${day}`;
+      (groups.get(kk) ?? groups.set(kk, []).get(kk)!).push(it);
+    }
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    const alive = g.filter((x) => !drop.has(x.id));
+    if (alive.length < 2) continue;
+    if (new Set(alive.map((x) => x.source)).size < 2) continue; // 同一ソースのみ→残す
+    let best = alive[0];
+    for (const it of alive) {
+      if (it === best) continue;
+      const d = repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of alive) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/**
  * 同一ソースが同じ商品を別投稿で二重掲載するケースを解消する。
  * 例: ちゃんねらー速報が同じ商品を別コメントで再投稿し、実況コメントを剥がした整形後
  * タイトルが一致（生タイトルは違うので dedupeCrossSource では拾えない）。
@@ -421,7 +496,9 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
   return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
     dedupeSneakerCrossSource(
       dedupeSameSourceExact(
-        dedupeWordOrderCrossSource(dedupeCrossSource(dedupeIdenticalTitle(items)))
+        dedupeWordOrderCrossSource(
+          dedupeCrossSource(dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(items)))
+        )
       )
     )
   )));

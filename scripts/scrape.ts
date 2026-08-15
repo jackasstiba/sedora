@@ -4,6 +4,7 @@ import type { ScrapeContext } from "../src/scrapers/types";
 import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 import { mergePrizeEnrichment } from "../src/lib/prizes";
+import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now"]);
@@ -84,6 +85,9 @@ async function main() {
   }
 
   console.log(`合計 ${total} 件を保存しました`);
+
+  // 巡回窓（一覧3ページ）から流れた抽選行の応募先を、記事再訪で埋める（定常経路）。
+  await backfillChanneltonoRaffleUrls(prisma);
 
   checkHealth(results);
 

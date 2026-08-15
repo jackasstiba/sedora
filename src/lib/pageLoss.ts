@@ -24,6 +24,20 @@
  */
 
 import { isStalePlan } from "./date";
+import { productUrlKey } from "./itemFilter";
+
+/** URL重複の突合キー（商品ページURL＋暦日）。ページ内の表示行と消えた行で同じ物差しを使う。 */
+export function productMergeKeys(r: {
+  url?: string | null;
+  officialUrl?: string | null;
+  eventDate: Date | string | null;
+}): string[] {
+  if (!r.eventDate) return [];
+  const day = new Date(r.eventDate).toISOString().slice(0, 10);
+  return [productUrlKey(r.url), productUrlKey(r.officialUrl)]
+    .filter((k): k is string => !!k)
+    .map((k) => `${k}|${day}`);
+}
 
 /** そのページが「過去日の商品を載せない」設計か。 */
 export function pageExcludesPast(name: string): boolean {
@@ -43,6 +57,9 @@ export type LostRow = {
    * `/genre/フィギュア` の43件がこの型で「説明のつかない消失」に化けた（暦が進んだだけ）。
    */
   eventDateText?: string | null;
+  /** URL重複の突合（productMergeKeys）に使う。渡せる呼び出しだけ渡せばよい（任意）。 */
+  url?: string | null;
+  officialUrl?: string | null;
 };
 
 export type PageLoss = {
@@ -50,13 +67,23 @@ export type PageLoss = {
   gone: number;
   /** 日付が過ぎて自然に抜けた（過去日を載せないページのみ）。 */
   expired: number;
+  /** 同じ商品ページを指す別カードに畳まれた（URL重複の解消＝カードは今もページにある）。 */
+  merged: number;
   /** 説明がつかない＝掲載基準・重複解消・コード変更が削った id。 */
   unexplained: number[];
 };
 
-export function classifyPageLoss(page: string, removed: LostRow[], today: Date): PageLoss {
+export function classifyPageLoss(
+  page: string,
+  removed: LostRow[],
+  today: Date,
+  /** そのページに**今表示されている**行の productMergeKeys の集合。消えた行のキーが
+   *  ここにあれば「代表に畳まれた」＝商品はまだページにある（2026-08-15 のURL重複解消で、
+   *  負け側5件が「説明のつかない消失」と誤って鳴った型への対処）。 */
+  displayedMergeKeys?: Set<string>
+): PageLoss {
   const excludesPast = pageExcludesPast(page);
-  const out: PageLoss = { gone: 0, expired: 0, unexplained: [] };
+  const out: PageLoss = { gone: 0, expired: 0, merged: 0, unexplained: [] };
   for (const r of removed) {
     if (!r.inDb) {
       out.gone++;
@@ -70,6 +97,10 @@ export function classifyPageLoss(page: string, removed: LostRow[], today: Date):
     // 判定は掲載基準と同じ関数を使う＝**外す側と説明する側で別の物差しを持たない**。
     if (excludesPast && isStalePlan(r.eventDate ?? null, r.eventDateText ?? null, today)) {
       out.expired++;
+      continue;
+    }
+    if (displayedMergeKeys?.size && productMergeKeys(r).some((k) => displayedMergeKeys.has(k))) {
+      out.merged++;
       continue;
     }
     out.unexplained.push(r.id);

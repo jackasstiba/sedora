@@ -23,15 +23,16 @@ import path from "node:path";
 import { prisma } from "../src/lib/prisma";
 import { displayEventDateText, eventDateLabel, isMonthPrecision, isStalePromise, todayJst } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
-import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch } from "../src/lib/itemFilter";
+import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
-import { classifyPageLoss, isReportableLoss, isReportableVanish } from "../src/lib/pageLoss";
+import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { getSitemapItemRefs } from "../src/lib/seo";
 
 type Row = DisplayedPage["rows"][number];
@@ -207,6 +208,30 @@ async function main() {
     }
     report("dup_cross", "同じページにクロスソース重複が残っている", "error", crossBad, baseline);
     report("dup_exact", "同じページに同一ソース・同一タイトルが二重掲載", "error", sameBad, baseline);
+
+    // タイトルの書き方が違っても、同じ個別商品ページを指す2枚は同じ商品（観点B 2026-08-15:
+    // 1kuji.com/products/hxh11 を指す collabo_cafe と ichiban_kuji のカードが2枚並んでいた。
+    // タイトル正規化ベースの dup_cross は語彙が違いすぎて素通りした）。URLで突合する。
+    const urlBad: string[] = [];
+    for (const p of pages) {
+      const byUrl = new Map<string, Row[]>();
+      for (const it of p.rows) {
+        if (!it.eventDate) continue;
+        const keys = new Set(
+          [productUrlKey(it.url), productUrlKey(it.officialUrl)].filter((k): k is string => !!k)
+        );
+        for (const k of keys) {
+          const kk = `${k}|${new Date(it.eventDate).toISOString().slice(0, 10)}`;
+          (byUrl.get(kk) ?? byUrl.set(kk, []).get(kk)!).push(it);
+        }
+      }
+      for (const [k, arr] of byUrl) {
+        if (arr.length < 2) continue;
+        if (new Set(arr.map((x) => x.source)).size < 2) continue;
+        urlBad.push(`${p.name}: ${k} ` + arr.map((x) => `${x.source}#${x.id}`).join("  ||  "));
+      }
+    }
+    report("dup_same_product_url", "同じページに同一商品URLのカードが複数ある", "error", urlBad, baseline);
   }
 
   // (3) 抽選まわりの断定。裏取りできていない表示は出さない（原則: 確認済みのみ約束）。
@@ -635,6 +660,10 @@ async function main() {
           if (!s?.name) bad.push(`#${r.id} ストアの name 欠落`);
           else if (s.url != null && !/^https?:\/\//.test(s.url))
             bad.push(`#${r.id} 不正なストアURL ${s.url}`);
+          else if (s.url != null && (AFFILIATE_REDIRECT.test(new URL(s.url).hostname) || /[?&]af_id=/.test(s.url)))
+            // 観点B実使用(2026-08-15)で発見: 入荷NowのDMMリンクが al.dmm.com/?lurl=…&af_id=nnow-001 の
+            // ラッパーのまま配られていた。収集元のアフィリIDをユーザーに配る＝ソース非公開方針の違反。
+            bad.push(`#${r.id} ストアURLにアフィリラッパーが残存 ${s.url.slice(0, 70)}`);
         }
       } catch {
         bad.push(`#${r.id} stores の JSON が壊れている`);
@@ -748,8 +777,12 @@ async function main() {
         inDb: inDbById.has(id),
         eventDate: inDbById.get(id)?.eventDate ?? null,
         eventDateText: inDbById.get(id)?.eventDateText ?? null,
+        url: inDbById.get(id)?.url ?? null,
+        officialUrl: inDbById.get(id)?.officialUrl ?? null,
       }));
-    if (removed.length) lossByPage.set(name, classifyPageLoss(name, removed, today));
+    // 今表示されている行の商品URLキー。消えた行がここに畳まれたなら「まだページにある」。
+    const mergeKeys = new Set((nowRows ?? []).flatMap((r) => productMergeKeys(r)));
+    if (removed.length) lossByPage.set(name, classifyPageLoss(name, removed, today, mergeKeys));
   }
   // 説明のつかない消失の**累計**（基準を受け入れてから今日まで）。
   // (14) は数日〜数週間前の基準と比べるので、1回の実行の内訳だけでは足りない。
@@ -826,14 +859,14 @@ async function main() {
       if (isReportableVanish(true, loss.unexplained.length)) {
         vanished.push(
           `${head}。**説明のつかない消失 ${loss.unexplained.length}件**` +
-            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}）例: ${loss.unexplained
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}）例: ${loss.unexplained
               .slice(0, 5)
               .map((id) => `#${id}`)
               .join(" ")}`
         );
       } else {
         explainedVanish.push(
-          `${name}: 全${prevIds.length}件が日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}`
+          `${name}: 全${prevIds.length}件が日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}`
         );
       }
     }
@@ -873,19 +906,19 @@ async function main() {
       comparedPages++;
       const loss = lossByPage.get(p.name);
       if (!loss) continue; // 消えた行が無い
-      const removed = loss.expired + loss.gone + loss.unexplained.length;
+      const removed = loss.expired + loss.gone + loss.merged + loss.unexplained.length;
       const n = isReportableLoss(prevIds.length, p.rows.length, loss.unexplained.length);
       if (n > 0) {
         bad.push(
           `${p.name} が ${prevIds.length}→${p.rows.length}件。うち **説明のつかない消失 ${loss.unexplained.length}件**` +
-            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone}）例: ${loss.unexplained
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}）例: ${loss.unexplained
               .slice(0, 5)
               .map((id) => `#${id}`)
               .join(" ")}`
         );
       } else if (removed) {
         explained.push(
-          `${p.name}: -${removed}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 説明なし ${loss.unexplained.length}）`
+          `${p.name}: -${removed}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 説明なし ${loss.unexplained.length}）`
         );
       }
     }

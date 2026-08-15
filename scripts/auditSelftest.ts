@@ -11,7 +11,7 @@
  * 実際にこのテストは、書いた直後の displayEventType のバグを1つ捕まえた:
  * 未知の「エントリー受付中」まで「予約終了」に書き換えていた（予約ではないのに予約と断定）。
  */
-import { displayEventType, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
+import { displayEventType, eventPeriodText, isStalePromise, isStalePlan, plannedDateFromText } from "../src/lib/date";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
   accumulateUnexplained,
@@ -22,10 +22,16 @@ import {
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee } from "../src/lib/margin";
-import { eventDateHeading } from "../src/lib/itemFilter";
+import { dedupeItems, eventDateHeading, productUrlKey } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
+import { kidsLabel } from "../src/scrapers/nikeSnkrs";
+import { extractRaffleUrl } from "../src/scrapers/channeltono";
+import { buildRecentEndedItem, parseEndedStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
+import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
+import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 
 // 実物と同じ並び（記事末尾に通販の商品リンクが来る）を再現した最小の記事HTML。
@@ -129,6 +135,29 @@ const cases: Case[] = [
   { name: "/premium は過去日を載せるページ", fn: () => pageExcludesPast("/premium"), want: false },
   { name: "/release/* も過去日を載せるページ", fn: () => pageExcludesPast("/release/2026-08"), want: false },
   { name: "/genre/* は過去日を載せないページ", fn: () => pageExcludesPast("/genre/トレカ"), want: true },
+  {
+    // URL重複の解消で代表に畳まれた行は「商品はまだページにある」＝説明済み（2026-08-15）。
+    name: "URL重複で畳まれた行は『説明済み』",
+    fn: () =>
+      classifyPageLoss(
+        "/genre/一番くじ",
+        [{ id: 1, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 29)), officialUrl: "https://1kuji.com/products/hxh11" }],
+        today,
+        new Set(["1kuji.com/products/hxh11|2026-08-29"])
+      ).merged,
+    want: 1,
+  },
+  {
+    name: "表示側に同じ商品キーが無い消失は従来どおり説明がつかない",
+    fn: () =>
+      classifyPageLoss(
+        "/genre/一番くじ",
+        [{ id: 1, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 29)), officialUrl: "https://1kuji.com/products/hxh11" }],
+        today,
+        new Set()
+      ).unexplained.length,
+    want: 1,
+  },
   {
     name: "収集元から消えた行は『説明済み』",
     fn: () => classifyPageLoss("/genre/トレカ", [{ id: 1, inDb: false, eventDate: null }], today).gone,
@@ -385,6 +414,285 @@ const cases: Case[] = [
         "もうすぐ8月3日16時よりS.H.Figuarts 呪術廻戦 脹相や伏黒甚爾 再販さらに　五条悟-呪術高専- 再販や夏油傑-呪術高専- 再販が予約開始！即完売注意！ショップまとめ"
       ),
     want: "S.H.Figuarts 呪術廻戦 脹相や伏黒甚爾",
+  },
+
+  // ── ストアURLのアフィリラッパー（観点B実使用 2026-08-15 で発見） ──────────
+  // 入荷Now の DMM リンクが al.dmm.com/?lurl=<行き先>&af_id=nnow-001 のまま配られていた。
+  // ラッパーは行き先URLに展開する（収集元のアフィリIDをユーザーに配らない）。
+  {
+    name: "al.dmm.com ラッパーは行き先URLに展開する",
+    fn: () =>
+      cleanStoreUrl(
+        "https://al.dmm.com/?lurl=https%3A%2F%2Fwww.dmm.com%2Fmono%2Fhobby%2F-%2Flist%2F%3D%2Farticle%3Dkeyword%2Fid%3D308378%2F&af_id=nnow-001&ch=link_tool&ch_id=link"
+      ),
+    want: "https://www.dmm.com/mono/hobby/-/list/=/article=keyword/id=308378/",
+  },
+  {
+    name: "行き先を取り出せないラッパーは導線として使わない（空）",
+    fn: () => cleanStoreUrl("https://al.dmm.com/?af_id=nnow-001&ch=link_tool"),
+    want: "",
+  },
+  {
+    name: "通常ホストの af_id クエリは除去する",
+    fn: () => cleanStoreUrl("https://example.com/lottery?af_id=nnow-001&page=2"),
+    want: "https://example.com/lottery?page=2",
+  },
+  {
+    name: "Amazon の /dp 正規化は従来どおり",
+    fn: () => cleanStoreUrl("https://www.amazon.co.jp/gp/product/B0DDWZWW1Z?tag=abc-22&th=1"),
+    want: "https://www.amazon.co.jp/dp/B0DDWZWW1Z",
+  },
+
+  // ── 個別商品ページURLによる重複突合（観点B実使用 2026-08-15 で発見） ──────────
+  // collabo_cafe の officialUrl と ichiban_kuji の url が同じ 1kuji.com/products/hxh11 なのに
+  // タイトル正規化ベースの dedupe を全て素通りして同じくじのカードが2枚並んでいた。
+  { name: "商品ページURL: クエリ・大小・末尾スラッシュを吸収", fn: () => productUrlKey("https://1kuji.com/products/HXH11/?utm_source=x"), want: "1kuji.com/products/hxh11" },
+  { name: "1kuji の再販売ページ(_2)は同じくじに畳む", fn: () => productUrlKey("https://1kuji.com/products/kimetsu30_2"), want: "1kuji.com/products/kimetsu30" },
+  { name: "1kuji 以外のホストの _2 は触らない", fn: () => productUrlKey("https://example.com/products/foo_2"), want: "example.com/products/foo_2" },
+  { name: "商品ページでないURLはキーにしない（誤マージ防止）", fn: () => productUrlKey("https://www.kfc.co.jp/campaign/umamusume"), want: null },
+  {
+    name: "URL一致＋同日ならクロスソースの2枚を1枚に畳む",
+    fn: () =>
+      dedupeItems([
+        { id: 1, source: "collabo_cafe", title: "ハンターハンター × 一番くじ グリードアイランド編", url: "https://collabo-cafe.com/events/x/", officialUrl: "https://1kuji.com/products/hxh11", eventDate: new Date(Date.UTC(2026, 7, 29)), price: null, imageUrl: "a.jpg" },
+        { id: 2, source: "ichiban_kuji", title: "一番くじ HUNTER×HUNTER GREED ISLAND ②", url: "https://1kuji.com/products/hxh11", officialUrl: null, eventDate: new Date(Date.UTC(2026, 7, 29)), price: "1回 850円（税込）", imageUrl: "b.jpg" },
+      ]).map((x) => x.id).join(","),
+    want: "2", // 価格・商品ページを持つ ichiban_kuji 側が代表として残る
+  },
+  {
+    name: "同じ商品コードでも別日（店頭→再販）なら畳まない",
+    fn: () =>
+      dedupeItems([
+        { id: 1, source: "collabo_cafe", title: "鬼滅の刃 一番くじ 上弦の弐", url: "https://collabo-cafe.com/events/y/", officialUrl: "https://1kuji.com/products/kimetsu30", eventDate: new Date(Date.UTC(2026, 6, 30)), price: null, imageUrl: null },
+        { id: 2, source: "ichiban_kuji", title: "一番くじ 鬼滅の刃 ～上弦の弐～（再販売）", url: "https://1kuji.com/products/kimetsu30_2", officialUrl: null, eventDate: new Date(Date.UTC(2026, 7, 17)), price: "1回 850円（税込）", imageUrl: null },
+      ]).length,
+    want: 2,
+  },
+  {
+    name: "?が2重の不正URL（既存クエリ＋?utm_連結）もトラッキングを剥がす",
+    fn: () => cleanStoreUrl("https://www.animate-onlineshop.jp/contents/fair_event/detail.php?id=115888&?utm_source=collabo_cafe_dot_com&utm_medium=collabo_cafe_dot_com"),
+    want: "https://www.animate-onlineshop.jp/contents/fair_event/detail.php?id=115888",
+  },
+  {
+    name: "?無しでパス末尾に連結された utm も剥がす",
+    fn: () => cleanStoreUrl("https://www.sanrio.co.jp/news/goods/pc-ap-atarikuji-20260723/utm_source=collabo_cafe_dot_com&utm_medium=collabo_cafe_dot_com"),
+    want: "https://www.sanrio.co.jp/news/goods/pc-ap-atarikuji-20260723/",
+  },
+  {
+    name: "officialUrl のトラッキングを剥がす（収集元露見の防止）",
+    fn: () =>
+      extractOfficialUrl(
+        '<div id="single__container"><a href="https://1kuji.com/products/kimetsu30?utm_source=collabo_cafe_dot_com&amp;utm_id=collabo_cafe_dot_com">公式</a></div>'
+      ),
+    want: "https://1kuji.com/products/kimetsu30",
+  },
+
+  // ── 受付期間・締切の補足表示（観点B実使用 2026-08-15: 「今から間に合うか」が出ていなかった） ──
+  {
+    name: "一番くじONLINEの予約販売期間は補足に出す",
+    fn: () => eventPeriodText(new Date(Date.UTC(2026, 7, 17)), "【予約販売期間】2026年08月17日(月)11:00～2026年08月20日(木)23:59"),
+    want: "【予約販売期間】2026年08月17日(月)11:00～2026年08月20日(木)23:59",
+  },
+  { name: "SNKRSの応募締切（時刻付き）は補足に出す", fn: () => eventPeriodText(new Date(Date.UTC(2026, 7, 15)), "抽選応募締切 8/15 9:10"), want: "抽選応募締切 8/15 9:10" },
+  { name: "暦日だけの言い換えは二度書きしない", fn: () => eventPeriodText(new Date(Date.UTC(2026, 7, 17)), "2026年8月17日"), want: null },
+  { name: "発送予定は見出し側が扱うので補足に出さない", fn: () => eventPeriodText(new Date(Date.UTC(2026, 9, 1)), "2026年10月発送予定"), want: null },
+  { name: "投稿日は商品の日付ではないので出さない", fn: () => eventPeriodText(new Date(Date.UTC(2026, 7, 15)), "投稿日: 2026-08-12"), want: null },
+  { name: "日付が無い行は既存の日付ラベル経路に任せる", fn: () => eventPeriodText(null, "抽選応募締切 8/15 9:10"), want: null },
+
+  // ── タイトルのNBSP正規化（観点B実使用 2026-08-15: 「コービー 5」のNBSPが楽天検索URLに %C2%A0 で乗った） ──
+  { name: "NBSPは普通の空白にする", fn: () => cleanTitle("コービー 5"), want: "コービー 5" },
+  { name: "narrow NBSP・連続空白も1つの空白へ", fn: () => cleanTitle("エア ジョーダン  1"), want: "エア ジョーダン 1" },
+
+  // ── Xミラー抽選記事の応募先抽出（観点B実使用 2026-08-15: 行き止まりカードの解消） ──────────
+  {
+    name: "記事内の既知抽選プラットフォームリンクを応募先にする（ラッパーは展開）",
+    fn: () =>
+      extractRaffleUrl(
+        '<a href="https://www.amazon.co.jp/dp/B000000000?tag=blog-22">商品</a>' +
+          '<a href="https://al.dmm.com/?lurl=https%3A%2F%2Fwww.dmm.com%2Fmono%2Fhobby%2F-%2Flist%2F%3D%2Farticle%3Dkeyword%2Fid%3D308378%2F&af_id=xx-001">DMM</a>'
+      ),
+    want: "https://www.dmm.com/mono/hobby/-/list/=/article=keyword/id=308378/",
+  },
+  {
+    name: "知らないホストしか無い記事には応募先を付けない（断定しない）",
+    fn: () => extractRaffleUrl('<a href="https://www.amazon.co.jp/dp/B000000000">A</a><a href="https://example.com/lottery">B</a>'),
+    want: null,
+  },
+
+  // ── SNKRSのキッズ版判別（観点B実使用 2026-08-15 で発見） ──────────
+  // GS版「コービー 5」¥15,620 が大人版と同名・同URL・同画像で、キッズと分かる表記が無かった。
+  { name: "ジュニア subtitle → ジュニア", fn: () => kidsLabel("ジュニア バスケットボールシューズ", ["BOYS", "GIRLS", "KIDS"]), want: "ジュニア" },
+  { name: "リトルキッズ subtitle → リトルキッズ", fn: () => kidsLabel("リトルキッズ バスケットボールシューズ", ["KIDS"]), want: "リトルキッズ" },
+  { name: "subtitle に語が無くても genders=KIDS で拾う", fn: () => kidsLabel("バスケットボールシューズ", ["KIDS"]), want: "キッズ" },
+  { name: "大人（MEN）には付けない", fn: () => kidsLabel("バスケットボールシューズ", ["MEN"]), want: null },
+
+  // ── 入荷Now 受付終了（実績）行（2026-08-15 新設） ──────────
+  // 受付窓の短い商材（酒/ソフビ/家電）が「スクレイプの瞬間に窓が閉じている」だけで
+  // 恒常的に0件になる穴への対処。基準日は 2026-08-08 固定。
+  // 終了した抽選の日付は必ず過去＝「9月19日」を来月に化けさせない（resolveMonthDay とは別規則）。
+  { name: "終了日の年無し日付は過去に解決する", fn: () => ymd(resolvePastMonthDay(9, 19, today)), want: "2025-09-19" },
+  { name: "1ヶ月前の終了日は今年", fn: () => ymd(resolvePastMonthDay(7, 7, today)), want: "2026-07-07" },
+  { name: "当日は今年（未来ではない）", fn: () => ymd(resolvePastMonthDay(8, 8, today)), want: "2026-08-08" },
+  {
+    name: "直近60日以内の抽選実績 → 受付終了行を出す（受付中とは言わない）",
+    fn: () => {
+      const row = buildRecentEndedItem("1", "【8月8日更新】ニッカウイスキー各種の抽選・予約情報まとめ",
+        [{ name: "やまや", url: "https://example.com/l/1", form: "WEB抽選", date: new Date(Date.UTC(2026, 6, 7)) }], today);
+      return row ? `${row.title}|${row.eventDateText}|${row.hasLottery}|${row.stores}` : null;
+    },
+    want: "ニッカウイスキー|受付終了（直近 7/7）|true|null",
+  },
+  {
+    name: "直近実績が60日より古い（LABUBU型・枯れた記事）は載せない",
+    fn: () => buildRecentEndedItem("1", "POP MART LABUBU各種の抽選・予約情報まとめ",
+      [{ name: "POP MART", url: "https://example.com/l/2", form: "WEB抽選", date: new Date(Date.UTC(2025, 10, 14)) }], today),
+    want: null,
+  },
+  {
+    name: "直近窓内が先着・予約だけ（抽選実績なし）は載せない",
+    fn: () => buildRecentEndedItem("1", "ジェラートピケ各種の抽選・予約情報まとめ",
+      [{ name: "店舗", url: "https://example.com/l/3", form: "先着販売", date: new Date(Date.UTC(2026, 6, 20)) }], today),
+    want: null,
+  },
+  {
+    name: "公式URLが1本も無い実績は載せない（公式ページ表示の約束を守る）",
+    fn: () => buildRecentEndedItem("1", "ニッカウイスキー各種の抽選・予約情報まとめ",
+      [{ name: "やまや", url: null, form: "WEB抽選", date: new Date(Date.UTC(2026, 6, 20)) }], today),
+    want: null,
+  },
+  {
+    name: "受付終了節のパース: 抽選形式・年付き当選発表を読む",
+    fn: () => {
+      const html = '<h3>やまや</h3><p>対象商品 山崎12年 抽選形式 WEB抽選 開始日 7月1日(水)10:00 当選発表 2026年7月7日 12:00</p><a href="https://example.com/lottery">詳細ページ</a>';
+      const s = parseEndedStores(html, today)[0];
+      return s ? `${s.name}|${s.form}|${s.date ? ymd(s.date) : null}|${s.url}` : null;
+    },
+    want: "やまや|WEB抽選|2026-07-07|https://example.com/lottery",
+  },
+  {
+    name: "新しい順の並びに反する年解決は1年戻す（単調非増加）",
+    fn: () => parseEndedStores(
+      '<h3>A店</h3><p>抽選形式 WEB抽選 開始日 7月7日</p><a href="https://example.com/a">詳細ページ</a>' +
+      '<h3>B店</h3><p>抽選形式 WEB抽選 開始日 8月1日</p><a href="https://example.com/b">詳細ページ</a>',
+      today
+    ).map((s) => (s.date ? ymd(s.date) : null)).join(","),
+    want: "2026-07-07,2025-08-01",
+  },
+
+  // ── kujimap（一番くじ以外のくじブランド・2026-08-15新設） ──────────
+  {
+    name: "kujimap: 日精度の開催予定と賞内訳を読む",
+    fn: () => {
+      const html =
+        '</head><h1>セガ ラッキーくじ「テスト」</h1>' +
+        '<table><thead><tr><th colspan="2">2026年08月20日開催予定</th><th colspan="2">1セット（72本）内訳</th></tr></thead>' +
+        "<tbody><tr><td>S賞</td><td>ぬいぐるみ</td><td>2</td><td>全1種</td></tr>" +
+        "<tr><td>A賞</td><td>パネル</td><td>4</td><td>全2種</td></tr></tbody></table>" +
+        '<a href="https://twitter.com/share">Tweet</a><a href="https://segaplaza.jp/lp/test/">公式</a>';
+      const d = parseKujiDetail(html);
+      return d ? `${d.name}|${d.date ? ymd(d.date) : null}|${d.lotSize}|${d.prizes.length}|${d.officialUrl}` : null;
+    },
+    want: "セガ ラッキーくじ「テスト」|2026-08-20|72|2|https://segaplaza.jp/lp/test/",
+  },
+  {
+    name: "kujimap: アフィリラッパーの通販検索リンクを公式ページと呼ばない",
+    fn: () =>
+      parseKujiDetail(
+        '</head><h1>FFXくじ</h1><table><thead><tr><th>2026年09月12日開催予定</th></tr></thead></table>' +
+          '<a href="https://ck.jp.ap.valuecommerce.com/servlet/referral?sid=1&pid=2&vc_url=https%3A%2F%2Fsearch.shopping.yahoo.co.jp%2Fsearch%3Fp%3Dtest">通販</a>'
+      )?.officialUrl ?? null,
+    want: null,
+  },
+  {
+    name: "kujimap: 発売日が7日以上過去のくじは載せない（古ページのlastmod更新対策）",
+    fn: () =>
+      buildKujimapItem(
+        "https://kujimap.com/segaluck/sega_old",
+        { name: "古いくじ", date: new Date(Date.UTC(2026, 5, 1)), monthText: null, lotSize: null, prizes: [], officialUrl: "https://segaplaza.jp/lp/old/" },
+        today
+      ),
+    want: null,
+  },
+  {
+    name: "kujimap: 月精度は月末まで有効・eventDateは合成しない（精度の捏造防止）",
+    fn: () => {
+      const row = buildKujimapItem(
+        "https://kujimap.com/minkuji/min_1",
+        { name: "フリューくじ テスト", date: null, monthText: "2026年8月開催予定", lotSize: null, prizes: [{ label: "A賞", name: "ぬいぐるみ", count: null }], officialUrl: "https://furyuprize.com/kuji/lineup/1" },
+        today
+      );
+      return row ? `${row.eventDate}|${row.eventDateText}|${row.genre}|${row.hasLottery}` : null;
+    },
+    want: "null|2026年8月開催予定|くじ|true",
+  },
+  {
+    name: "kujimap: 公式LPが無いくじは載せない（『公式ページ』表示の約束）",
+    fn: () =>
+      buildKujimapItem(
+        "https://kujimap.com/others/x_kuji",
+        { name: "X", date: new Date(Date.UTC(2026, 8, 1)), monthText: null, lotSize: null, prizes: [], officialUrl: null },
+        today
+      ),
+    want: null,
+  },
+  // ── ワンピースカード公式（2026-08-15新設） ──────────
+  {
+    name: "onepiece: 商品ブロックから名前・日付・価格・画像を読む",
+    fn: () => {
+      const html =
+        '<a href="/products/boosters/op17/" class="linkListColItem"><img class="lazy" data-src="/img/item.webp">' +
+        '<span class="linkListColCat">ブースター</span><h4 class="linkListColTitle">ブースターパック 世界最強の戦士【OP-17】</h4>' +
+        '<p class="linkListColPrice"><span class="head">メーカー希望小売価格</span><span class="data">240円(税込)</span></p>' +
+        '<time class="newsDate" datetime="2026-08-22">2026.08.22(土)</time></a>';
+      const p = parseOnePieceProducts(html)[0];
+      return p ? `${p.title}|${p.date ? ymd(p.date) : null}|${p.price}|${p.imageUrl}` : null;
+    },
+    want: "ブースターパック 世界最強の戦士【OP-17】|2026-08-22|240円|https://www.onepiece-cardgame.com/img/item.webp",
+  },
+  {
+    // 実測: 表示は「2026.10」なのに datetime="2026-10-01" と**サイト側が日を合成**している。
+    // 属性でなく表示文言で精度を決める（ミス15「分かっている精度でしか書かない」）。
+    name: "onepiece: 表示が月精度なら datetime の合成日を信じない",
+    fn: () => {
+      const p = parseOnePieceProducts(
+        '<a href="/products/eb05/" class="linkListColItem"><h4 class="linkListColTitle">EB-05</h4><time class="newsDate" datetime="2026-10-01">2026.10</time></a>'
+      )[0];
+      const row = p ? buildOnePieceItem(p, today) : null;
+      return row ? `${row.eventDate}|${row.eventDateText}` : null;
+    },
+    want: "null|2026年10月発売予定",
+  },
+  {
+    name: "onepiece: 発売30日超の過去商品は載せない（全期間一覧のため）",
+    fn: () => {
+      const p = parseOnePieceProducts(
+        '<a href="/products/old/" class="linkListColItem"><h4 class="linkListColTitle">旧弾</h4><time class="newsDate" datetime="2026-06-01">2026.06.01</time></a>'
+      )[0];
+      return p ? buildOnePieceItem(p, today) : "no-parse";
+    },
+    want: null,
+  },
+  {
+    name: "onepiece: 発売日の無い行は載せない",
+    fn: () => {
+      const p = parseOnePieceProducts(
+        '<a href="/products/sleeve/" class="linkListColItem"><h4 class="linkListColTitle">スリーブ16</h4></a>'
+      )[0];
+      return p ? buildOnePieceItem(p, today) : "no-parse";
+    },
+    want: null,
+  },
+  {
+    name: "kujimap: サイトマップは直近月のページファイルだけ読む",
+    fn: () =>
+      pickRecentPageSitemaps(
+        "<loc>https://kujimap.com/sitemap-pt-page-p1-2026-08.xml</loc>" +
+          "<loc>https://kujimap.com/sitemap-pt-page-p1-2026-05.xml</loc>" +
+          "<loc>https://kujimap.com/sitemap-pt-page-p1-2018-03.xml</loc>" +
+          "<loc>https://kujimap.com/sitemap-pt-post-p1-2026-08.xml</loc>",
+        today
+      ).length,
+    want: 2,
   },
 ];
 

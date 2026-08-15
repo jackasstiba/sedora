@@ -254,6 +254,10 @@ export async function getSitemapItemRefs() {
       eventDate: true,
       eventDateText: true,
       url: true,
+      // URLベースの重複突合（dedupeSameProductUrlCrossSource）は officialUrl も見る。
+      // ここに無いと sitemap だけ畳まれず表示範囲とズレる（実測 2026-08-15: 5件の
+      // 負け側が sitemap に残り sitemap_scope_drift が発火＝invariant が先に捕まえた）。
+      officialUrl: true,
       price: true,
       imageUrl: true,
     },
