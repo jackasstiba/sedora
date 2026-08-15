@@ -5,6 +5,7 @@ import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 import { mergePrizeEnrichment } from "../src/lib/prizes";
 import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
+import { isGenericImageUrl } from "../src/scrapers/imagePick";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now"]);
@@ -30,8 +31,17 @@ async function main() {
     }
 
     for (const raw of items) {
-      // 配信元タイトルの日付告知・編集タグを落として商品名として読みやすくする
-      const item = { ...raw, title: cleanTitle(raw.title) };
+      // 配信元タイトルの日付告知・編集タグを落として商品名として読みやすくする。
+      // あわせて「収集元が画像なしの代わりに配る定型画像」（no-image.png / empty.png / ロゴ）を
+      // ここで落とす。**imageUrl が埋まっていると「画像あり」に数えられる**ので、他所サイトの
+      // 灰色タイルが商品画像の顔をして並び、監査にも掛からなかった（実測 2026-08-15:
+      // トレカ速報40件が no-image_150x150.png、トレカマップ8件が empty.png）。
+      // 各スクレイパーに同じ判定を書かせない＝新しいソースでも自動で効かせるために保存側に置く。
+      const item = {
+        ...raw,
+        title: cleanTitle(raw.title),
+        imageUrl: raw.imageUrl && !isGenericImageUrl(raw.imageUrl) ? raw.imageUrl : null,
+      };
       // 各賞の二次相場は別スクリプト（scrape:kuji:prices）が後付けするので、
       // 巡回で取り直した prizes をそのまま書くと毎回消える。賞ラベルで突合して引き継ぐ。
       let prizes = item.prizes ?? null;

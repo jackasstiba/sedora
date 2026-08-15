@@ -94,6 +94,22 @@ async function pageText(url: string): Promise<string | null> {
 
 type Finding = { kind: string; detail: string };
 
+/** 画像URLが表示できない理由（表示できるなら null）。取得できない＝判定不能は null に倒す。 */
+async function deadImageReason(url: string): Promise<string | null> {
+  try {
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (compatible; SedoriRadar-audit/1.0)" },
+      signal: AbortSignal.timeout(15000),
+    });
+    if (res.status >= 400) return `HTTP ${res.status}`;
+    const ct = res.headers.get("content-type") ?? "";
+    if (ct && !ct.startsWith("image/")) return `画像ではない（${ct.slice(0, 30)}）`;
+    return null;
+  } catch {
+    return null; // ネットワーク側の一時失敗を「画像が死んだ」と言わない
+  }
+}
+
 async function main() {
   const rows = (await loadDisplayedItems()).filter((r) => !ONLY_SOURCE || r.source === ONLY_SOURCE);
   const bySource = new Map<string, typeof rows>();
@@ -104,6 +120,7 @@ async function main() {
   let unusable = 0;
   let dateHit = 0;
   let dateTotal = 0;
+  let imageChecked = 0;
 
   console.log(`== ハツコレ 一次情報の突合 == (ソースごと ${PER_SOURCE}件)`);
 
@@ -112,6 +129,19 @@ async function main() {
     const step = Math.max(1, Math.floor(arr.length / PER_SOURCE));
     const sample = arr.filter((_, i) => i % step === 0).slice(0, PER_SOURCE);
     for (const r of sample) {
+      // (0) 画像が今も表示できるか。**画像は静かに腐る**（収集元がURLを変える・消す）。
+      //     表示側では「画像なし」と見分けがつかないので、抜き取りで外から確かめる。
+      //     判定は GET の結果だけで行う（HEAD を拒むCDNがあり、過去に HEAD/GET の違いで誤報した）。
+      if (r.imageUrl) {
+        imageChecked++;
+        const bad = await deadImageReason(r.imageUrl);
+        if (bad)
+          findings.push({
+            kind: "画像が表示できない",
+            detail: `[${source} #${r.id}] ${bad} ${r.imageUrl.slice(0, 80)}`,
+          });
+      }
+
       const text = await pageText(r.url);
       if (!text) {
         unusable++;
@@ -161,7 +191,7 @@ async function main() {
   }
 
   console.log(
-    `突合できたページ ${checked}件 / 本文を取れず判定不能 ${unusable}件 / ` +
+    `突合できたページ ${checked}件 / 本文を取れず判定不能 ${unusable}件 / 画像を確かめた ${imageChecked}件 / ` +
       `日付が本文に見つかった割合 ${dateTotal ? Math.round((dateHit / dateTotal) * 100) : 0}%（参考・判定には使わない）`
   );
 

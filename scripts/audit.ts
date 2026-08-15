@@ -33,6 +33,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
+import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { getSitemapItemRefs } from "../src/lib/seo";
 
 type Row = DisplayedPage["rows"][number];
@@ -785,21 +786,9 @@ async function main() {
     console.log(`(参考) 最終更新は ${Math.round(hours)}時間前`);
   }
 
-  // (13) 画像の付与状況（無い＝カードが灰色になる。率で見張る）
-  {
-    const noImg = shown.filter((r) => !r.imageUrl);
-    const badUrl = shown.filter((r) => r.imageUrl && !/^https?:\/\//.test(r.imageUrl));
-    report("image_bad_url", "画像URLが不正", "error", badUrl.map((r) => `#${r.id} ${r.imageUrl}`), baseline);
-    const rate = shown.length ? noImg.length / shown.length : 0;
-    report(
-      "image_missing_rate",
-      `画像が無い割合が高い（${Math.round(rate * 100)}%）`,
-      "warn",
-      rate > 0.4 ? [`${noImg.length}/${shown.length}件に画像が無い`] : [],
-      baseline
-    );
-    console.log(`(参考) 画像なし ${noImg.length}/${shown.length}件（${Math.round(rate * 100)}%）`);
-  }
+  // ※ 画像の検査は (16d) に集約した。ここには「画像なし率が40%を超えたら鳴る」検査があったが、
+  //   実測8%（103件）では**一度も鳴らないまま**放置された＝しきい値が緩すぎる検査は無いのと同じ。
+  //   率のしきい値をやめ、件数のラチェット＋ソース単位＋中身の正しさで見る形に変えた。
 
   // ── ページから消えた行の理由分け（(14)(14a)(14b) が共通で使う） ────────────────
   //
@@ -1134,6 +1123,92 @@ async function main() {
       refs.length
     );
     console.log(`(参考) sitemap の商品URL ${refs.length}件（表示中 ${allowed.size}件＋直近に終了した分）`);
+  }
+
+  // (16d) **画像**。一覧はカードの並びなので、画像の有無と正しさが体験のほぼ全部を決める。
+  //
+  // 2026-08-15 に本人指摘（「画像がないのが多数ある」）で判明した2つの型。どちらも
+  // 「imageUrl が入っているか」しか見ていなかったので、監査は一度も鳴っていなかった:
+  //  ① **後付けの対象外だったソースは、永久に画像ゼロ**。backfillImages.ts が
+  //     channeltono/rarecheck 決め打ちで、一覧完結型の新しいソース（nyuka_now 39件・
+  //     tenbaiquest 26件・kujimap 16件）は 100% 画像なしのまま誰も触らなかった。
+  //  ② **収集元の「画像なし」画像が、画像ありとして保存されていた**（トレカ速報40件が
+  //     no-image_150x150.png、トレカマップ8件が empty.png）。件数の上では画像ありなので、
+  //     NoImage タイルより悪い見た目（他所サイトの灰色画像）が並んでいた。
+  // → 「入っているか」ではなく **「商品ごとに違う、商品の画像か」** を検査する。
+  //
+  // ※ drift（判定しない観測）は画像付与率の**変化**を出すが、①は最初から0%で変化しないので
+  //   一度も出なかった。**ずっと悪いまま**は差分では見えない。だからここで水準を検査する。
+  {
+    const withImg = shown.filter((r) => r.imageUrl);
+
+    // ①-a 商品画像ではないと分かっている画像（no-image/ロゴ/共通バナー/広告配信）。
+    //     保存側（scrape.ts）とバックフィルで落としているので、ここは0であるべき。
+    const generic = withImg
+      .filter((r) => isGenericImageUrl(r.imageUrl!))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 30)} → ${r.imageUrl!.slice(0, 70)}`);
+    report("image_generic", "商品画像でない画像（no-image/ロゴ）が保存されている", "error", generic, baseline, withImg.length);
+
+    // ①-c URLの形が壊れている（相対パス・http）。https のサイトに http 画像を埋めると
+    //      ブラウザに遮断されて、画面上は「画像なし」と見分けがつかない。
+    const badUrl = withImg
+      .filter((r) => !/^https:\/\//.test(r.imageUrl!))
+      .map((r) => `[${r.source} #${r.id}] ${r.imageUrl}`);
+    report("image_bad_url", "画像URLが https の絶対URLでない", "error", badUrl, baseline, withImg.length);
+
+    // ①-b 同じ画像の使い回し＝サイト共通バナー。3件以上を異常とする（2件は同一イベントの
+    //      重複掲載でも起きるため、そちらは重複解消の検査の担当）。
+    const imgFreq = new Map<string, Row[]>();
+    for (const r of withImg) (imgFreq.get(r.imageUrl!) ?? imgFreq.set(r.imageUrl!, []).get(r.imageUrl!)!).push(r);
+    const shared = [...imgFreq.entries()]
+      .filter(([, a]) => a.length >= 3)
+      .map(([u, a]) => `${a.length}件が同じ画像: ${u.slice(0, 80)}（${a[0].source} #${a[0].id} 他）`);
+    report("image_shared", "同じ画像が3件以上で使い回されている", "error", shared, baseline, withImg.length);
+
+    // ② 画像が無い件数。ラチェットで「増えたら ERROR」。
+    const missing = shown.filter((r) => !r.imageUrl);
+    const rate = shown.length ? missing.length / shown.length : 0;
+    report(
+      "image_missing",
+      `画像が無い商品がある（${Math.round(rate * 100)}%）`,
+      "warn",
+      missing.map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`),
+      baseline,
+      shown.length
+    );
+
+    // ③ **ソース丸ごと画像ゼロ**＝今回の型そのもの。新しいスクレイパーを足したのに
+    //    画像の取り方を用意し忘れると、全体の率では薄まって見えないのでソース単位で見る。
+    const bySrcImg = new Map<string, { n: number; withImage: number }>();
+    for (const r of shown) {
+      const e = bySrcImg.get(r.source) ?? { n: 0, withImage: 0 };
+      e.n++;
+      if (r.imageUrl) e.withImage++;
+      bySrcImg.set(r.source, e);
+    }
+    const zero: string[] = [];
+    const dropped: string[] = [];
+    for (const [src, e] of bySrcImg) {
+      const now = e.withImage / e.n;
+      if (e.n >= 10) {
+        metrics[`image_rate:${src}`] = Math.round(now * 100) / 100;
+        if (e.withImage === 0)
+          zero.push(`${src}: 表示${e.n}件すべて画像なし（画像の取り方が用意されていない）`);
+        const prev = baseline.metrics?.[`image_rate:${src}`];
+        if (prev != null && prev >= 0.5 && now < prev * 0.5)
+          dropped.push(`${src}: 画像のある率 ${Math.round(prev * 100)}%→${Math.round(now * 100)}%（${e.withImage}/${e.n}件）`);
+      }
+    }
+    report("image_source_zero", "ソース丸ごと画像が1枚も無い", "error", zero, baseline, bySrcImg.size);
+    report("image_rate_dropped", "ソース単位で画像が失われた", "error", dropped, baseline, bySrcImg.size);
+
+    console.log(
+      `(参考) 画像 ${withImg.length}/${shown.length}件（${Math.round((1 - rate) * 100)}%）  ` +
+        [...bySrcImg.entries()]
+          .filter(([, e]) => e.withImage < e.n)
+          .map(([s, e]) => `${s}=${e.withImage}/${e.n}`)
+          .join(" ")
+    );
   }
 
   // (17) **仕組みそのものの検査**（データではなく、更新を回している足回りを見る）。

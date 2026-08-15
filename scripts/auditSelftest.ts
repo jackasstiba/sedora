@@ -34,6 +34,7 @@ import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/s
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
+import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 
 // 実物と同じ並び（記事末尾に通販の商品リンクが来る）を再現した最小の記事HTML。
 const EVENT_ARTICLE_HTML =
@@ -757,6 +758,99 @@ const cases: Case[] = [
         today
       ).length,
     want: 2,
+  },
+
+  // ── 画像の選び方（2026-08-15。「画像がないのが多数ある」の修正で入れた判定） ──────
+  // 間違った画像を出すのは、画像が無いより悪い。**採らない側**の条件を固定する。
+  {
+    name: "画像: 収集元の「画像なし」画像は商品画像ではない",
+    fn: () => isGenericImageUrl("https://ota-goods.info/tcg/wp-content/themes/matome/images/no-image_150x150.png"),
+    want: true,
+  },
+  {
+    name: "画像: empty.png（トレカマップの画像なし）も落とす",
+    fn: () => isGenericImageUrl("https://d26vgo7frmwa7l.cloudfront.net/common/no-image/master-packs/empty.png"),
+    want: true,
+  },
+  {
+    name: "画像: サイト共通OGP・ロゴは商品画像ではない",
+    fn: () => isGenericImageUrl("https://www.mugiwara-store.com/ogp.png") && isGenericImageUrl("https://iyec.itoyokado.co.jp/img/usr/common/sitelogo.png"),
+    want: true,
+  },
+  {
+    name: "画像: Xのプロフィール画像は使わない（商品でなく、巡回先が割れる）",
+    fn: () => isGenericImageUrl("https://pbs.twimg.com/profile_images/1944434211164938240/0KSemXlR_200x200.jpg"),
+    want: true,
+  },
+  {
+    // 実測: 拡張子の有無を「汎用画像か」の判定に混ぜていたため、公式の正しい商品画像を
+    // 掃除で消しかけた。**消す判定と、新規採用の判定は別物**。
+    name: "画像: 拡張子の無い正しい商品画像を汎用画像扱いしない",
+    fn: () => isGenericImageUrl("https://www.onepiece-cardgame.com/products/2026/06/18/YyRrZjwZ2Sq8xBaP"),
+    want: false,
+  },
+  {
+    name: "画像: 正しい商品画像は落とさない",
+    fn: () =>
+      isGenericImageUrl("https://m.media-amazon.com/images/I/71KCnUBF3FL._AC_SL1500_.jpg") ||
+      isGenericImageUrl("https://segaplaza.jp/images-v2/lottery/a121381_67557a/large/a121381_01.webp"),
+    want: false,
+  },
+  {
+    name: "画像: og:image を優先して拾う",
+    fn: () =>
+      pickPageImage(
+        '<meta property="og:image" content="https://example.com/uploads/item.jpg">',
+        "https://example.com/p/1"
+      )?.url ?? null,
+    want: "https://example.com/uploads/item.jpg",
+  },
+  {
+    name: "画像: og が共通ロゴなら本文の投稿画像に落ちる",
+    fn: () =>
+      pickPageImage(
+        '<meta property="og:image" content="https://example.com/ogp.png">' +
+          '<img src="/images/common/h_logo.svg"><img src="/mgr/wp-content/uploads/2026/06/keyvisual.jpg">',
+        "https://example.com/topics/kuji/"
+      )?.url ?? null,
+    want: "https://example.com/mgr/wp-content/uploads/2026/06/keyvisual.jpg",
+  },
+  {
+    // 実測: 「INSTINCTOY SHOW TOKYO 2026」の楽天検索1位は菅田将暉のBlu-rayだった。
+    name: "画像: 検索結果の1位でも商品名が合わなければ借りない",
+    fn: () =>
+      productNameMatches(
+        "INSTINCTOY SHOW TOKYO 2026",
+        "菅田将暉 LIVE 2026 in 東京ガーデンシアター 2026.01.25(完全生産限定盤)【Blu-ray】"
+      ),
+    want: false,
+  },
+  {
+    name: "画像: 表記が縮んだ同一商品は借りてよい（ポケモンカードゲーム→ポケモンカード）",
+    fn: () =>
+      productNameMatches(
+        "ポケモンカードゲーム MEGA 拡張パック “30th CELEBRATION”",
+        "【レビューキャンペーン実施中】ポケモンカード 30th CELEBRATION MEGA 拡張パック 30周年 カードゲーム"
+      ),
+    want: true,
+  },
+  {
+    name: "画像: 付属品（スリーブ等）の出品からは借りない",
+    fn: () =>
+      productNameMatches("ONE PIECE カードゲーム 4th Anniversary Set", "ONE PIECE カードゲーム 4th Anniversary Set 専用スリーブ 100枚"),
+    want: false,
+  },
+  {
+    // JANは一意識別子。存在しないJANでも楽天は無関係な商品を返すので、
+    // 「JANがURL/画像URLに入っていること」を確認できたものだけ使う（＝この関数の一意性判定）。
+    name: "画像: 記事に商品コードが2つ以上あるときは特定しない",
+    fn: () => extractSoleJan("JAN 4580886840045 と 4582770058406 の2商品"),
+    want: null,
+  },
+  {
+    name: "画像: 記事の商品コードが1つなら特定する",
+    fn: () => extractSoleJan("<a href='https://example.com/search?q=4580886840045'>購入</a> JAN:4580886840045"),
+    want: "4580886840045",
   },
 ];
 
