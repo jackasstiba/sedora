@@ -683,6 +683,13 @@ const cases: Case[] = [
     want: null,
   },
   {
+    // 実測: PINGU&#8217;S がカード名に生のまま本番表示された（stripTags は数値エンティティを戻さない）
+    name: "kujimap: 数値エンティティを実文字に戻す",
+    fn: () =>
+      parseKujiDetail("</head><h1>セガ ラッキーくじ PINGU™ ～PINGU&#8217;S Donut Shop～</h1>")?.name ?? null,
+    want: "セガ ラッキーくじ PINGU™ ～PINGU’S Donut Shop～",
+  },
+  {
     name: "kujimap: サイトマップは直近月のページファイルだけ読む",
     fn: () =>
       pickRecentPageSitemaps(

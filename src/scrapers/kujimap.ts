@@ -34,6 +34,14 @@ const BRANDS: Record<string, string> = {
 
 const DETAIL_PATH_RE = /^https:\/\/kujimap\.com\/(segaluck|minkuji|online_kuji|others|specialkuji)\/([^/]+)$/;
 
+/** stripTags は &amp;/&nbsp; しか戻さない。数値エンティティ（&#8217; 等）を実文字に戻す。
+ *  実測: PINGU&#8217;S がカード名に生のまま表示された。 */
+function decodeNumericEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)));
+}
+
 // 公式リンクとして使えないもの（SNS・共有・インフラ）
 const NON_OFFICIAL_LINK = /twitter\.com|x\.com|facebook\.com|line\.me|b\.hatena|getpocket\.com|wordpress\.org|google\.com|kujimap\.com/i;
 
@@ -70,7 +78,7 @@ export type KujiDetail = {
 /** くじ詳細ページを解析する。日付・賞内訳は wp-table-reloaded のヘッダ/行から。 */
 export function parseKujiDetail(html: string): KujiDetail | null {
   const h1 = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/);
-  const name = h1 ? stripTags(h1[1]) : "";
+  const name = h1 ? decodeNumericEntities(stripTags(h1[1])) : "";
   if (!name) return null;
 
   const body = html.slice(html.indexOf("</head>"));
@@ -90,7 +98,9 @@ export function parseKujiDetail(html: string): KujiDetail | null {
   // 賞の行: <tr>…<td>S賞</td><td>名称</td><td>2</td><td>全1種</td>…（列数はページで揺れる）
   const prizes: KujiDetail["prizes"] = [];
   for (const tr of body.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/g)) {
-    const cells = [...tr[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((c) => stripTags(c[1]));
+    const cells = [...tr[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/g)].map((c) =>
+      decodeNumericEntities(stripTags(c[1]))
+    );
     if (cells.length < 2) continue;
     const label = cells[0];
     if (!/^(?:[A-Z]{1,2}賞|ラスト\S*賞?|ダブルチャンス)/.test(label)) continue;

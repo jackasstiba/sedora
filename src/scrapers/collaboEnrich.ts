@@ -412,8 +412,11 @@ const decodeEnt = (s: string): string =>
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')
-    .replace(/&#0?39;/g, "'")
-    .replace(/&nbsp;/g, " ");
+    .replace(/&nbsp;/g, " ")
+    // 数値エンティティ全般（WordPressは & を &#038; と書く。実測: 店名「cafe&#038;space」が
+    // stores JSON に生のまま入り本番カードに露出した）
+    .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+    .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)));
 
 /** 「アクセス・地図」の地図URL（Googleマップ）。無ければ null。 */
 export function extractMapUrl(html: string): string | null {

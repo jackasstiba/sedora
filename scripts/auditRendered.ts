@@ -89,6 +89,10 @@ async function main() {
     for (const bad of ["&amp;", "&nbsp;", "&quot;", "<br", "</p>"]) {
       if (text.includes(bad)) flag(p.name, "エスケープ漏れ", `本文に「${bad}」が出ている`);
     }
+    // 数値エンティティ（&#8217; 等）。実測: kujimap の PINGU&#8217;S がカード名に生で出た
+    // （固定文字列のリストでは新しい型を拾えない）。
+    const numEnt = text.match(/&#x?[0-9a-fA-F]{2,6};/);
+    if (numEnt) flag(p.name, "エスケープ漏れ", `本文に「${numEnt[0]}」が出ている`);
 
     // (3) 見出しの件数・「もっと見る（残りN件）」・実際の描画枚数の三者が噛み合っているか。
     //     一覧は120件ずつの段階表示なので「見出し＝描画枚数」ではない。ただし
@@ -167,6 +171,8 @@ async function main() {
       for (const bad of ["&amp;", "&nbsp;", "&quot;", "<br", "</p>"]) {
         if (text.includes(bad)) flag(`/items/${r.id}`, "エスケープ漏れ", `本文に「${bad}」が出ている`);
       }
+      const numEnt2 = text.match(/&#x?[0-9a-fA-F]{2,6};/);
+      if (numEnt2) flag(`/items/${r.id}`, "エスケープ漏れ", `本文に「${numEnt2[0]}」が出ている`);
       $("ul, ol").each((_, ul) => {
         const items = $(ul)
           .children("li")
