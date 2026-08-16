@@ -86,7 +86,8 @@ export function isUsableImageCandidate(url: string): boolean {
   return /media-amazon\.com|image\.rakuten\.co\.jp|\.shopify\.com|cloudfront|imgix|\/image\b/i.test(url);
 }
 
-export type ImageCandidate = { url: string; via: string };
+/** `key` は「同一商品だと証明できる識別子」（JAN）。複数行が同じ画像になったときの判定に使う。 */
+export type ImageCandidate = { url: string; via: string; key?: string };
 
 /** JSON-LD から「単体商品ページの Product.image」だけを取る（ItemList＝検索結果は採らない）。 */
 export function pickJsonLdProductImage(html: string): string | null {
@@ -188,7 +189,23 @@ function rawTokens(s: string): string[] {
 // 一致の条件から外す。実測: 「…【ST-30】（再販分）」「…【OP-17】購入権チケット」は
 // こちらの注記で、正しい商品の出品には当然入っていない。
 const NON_IDENTITY_TOKEN =
-  /^(再販|再販分|購入権|購入権チケット|抽選|抽選受付中|受付中|予約|予約受付中|応募|など|など多数|新品|中古|未開封|送料無料|正規品|即納)$/;
+  /^(再販|再販分|再入荷|再入荷分|追加入荷|追加入荷分|入荷分|購入権|購入権チケット|購入権抽選|抽選|抽選販売|抽選受付中|受付中|予約|予約販売|予約受付中|応募|数量限定|など|など多数|新品|中古|未開封|送料無料|正規品|即納)$/;
+
+/**
+ * 市場を検索するときの語。**販売条件の注記を落としてから投げる。**
+ * これを入れないと「ポケモンカードゲーム MEGA 拡張パック「アビスアイ」（再入荷分）」のように
+ * こちらが付けた注記ごと検索してヒット0になり、**商品は普通に売っているのに画像が取れない**
+ * （実測 2026-08-16: カード抽選12件がこれ。同じ商品が別ソースからは画像付きで載っていた）。
+ */
+export function searchQueryName(title: string): string {
+  return title
+    .replace(
+      /[（(【\[]?\s*(再販分|再販|再入荷分|再入荷|追加入荷分|追加入荷|購入権抽選|購入権チケット|購入権|抽選販売|予約販売|数量限定|1BOX|1box)\s*[)）】\]]?/g,
+      " "
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
 
 // 対象商品そのものではなく「その商品の付属品」を売る出品（画像が別物になる）。
 const ACCESSORY_RE = /スリーブ|プロテクター|ローダー|バインダー|デッキケース|収納ケース|保護|ホルダー|ポスター専用/;
@@ -213,10 +230,23 @@ export function productNameMatches(query: string, candidate: string): boolean {
   // 「30th」「celebration」のような特徴語が最低1つ要る（一般語だけの一致を防ぐ）。
   if (!tokens.some((t) => t.raw.length >= 4)) return false;
 
-  for (const t of tokens) {
+  // 収集元が商品名の**頭に付ける略号**（実測: ガンプラ再販カレンダーの「ACB アクションベース 8」
+  // ＝ACB、「30MS OP オプションパーツセット29」＝OP）は、店の商品名には入っていない。
+  // **先頭の英数ブロックにある3字以下の語1つ**に限り、一致しなくても許す。
+  // 位置を限るのが肝: 「ONEPIECE カードゲーム 4th Anniversary Set」の "Set" のように**後ろの**
+  // 短い語を許すと、攻略ガイド本を「Anniversary Set」の写真として借りてしまう（実測）。
+  const firstJp = tokens.findIndex((t) => /[ぁ-んァ-ヶ一-龠]/.test(t.n));
+  const leadEnd = firstJp === -1 ? 0 : firstJp;
+  let skippedLeadCode = false;
+
+  for (const [i, t] of tokens.entries()) {
     if (cand.includes(t.n)) continue;
     // 日本語の複合語は表記が縮む（ポケモンカードゲーム → ポケモンカード）。先頭4字での一致を許す。
     if (/[ぁ-んァ-ヶ一-龠]/.test(t.n) && t.raw.length >= 5 && cand.includes(t.n.slice(0, 4))) continue;
+    if (!skippedLeadCode && i < leadEnd && tokens.length >= 3 && /^[a-z0-9]{2,3}$/.test(t.n)) {
+      skippedLeadCode = true;
+      continue;
+    }
     return false;
   }
   return true;
@@ -262,7 +292,14 @@ export function pickListedImage(html: string, productName: string, limit = 8): I
  * 2つ以上あるページはどの商品のコードか決められないので null（＝使わない）。
  */
 export function extractSoleJan(html: string): string | null {
-  const found = new Set<string>();
-  for (const m of html.matchAll(/(?<![0-9])(4[59][0-9]{11})(?![0-9])/g)) found.add(m[1]);
-  return found.size === 1 ? [...found][0] : null;
+  const count = new Map<string, number>();
+  for (const m of html.matchAll(/(?<![0-9])(4[59][0-9]{11})(?![0-9])/g))
+    count.set(m[1], (count.get(m[1]) ?? 0) + 1);
+  if (count.size === 0) return null;
+  if (count.size === 1) return [...count.keys()][0];
+  // 複数あっても、**桁違いに多く出るもの**はその記事の商品（各通販への検索リンクが並ぶので
+  // 本文の商品コードは何度も出る）。関連記事やサイドバーのコードは1〜2回しか出ない。
+  // 実測 2026-08-16: トレカ速報・ちゃんねらー速報の記事で本文の商品コードが20回前後出ていた。
+  const [top, second] = [...count.entries()].sort((a, b) => b[1] - a[1]);
+  return top[1] >= 3 && top[1] >= second[1] * 2 ? top[0] : null;
 }

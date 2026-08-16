@@ -1333,7 +1333,12 @@ async function main() {
     //  ＝**片方の商品名がもう片方に丸ごと含まれるか**。含まれないなら別商品なので指摘する。
     const shared = [...imgFreq.entries()]
       .filter(([, a]) => a.length >= 3)
-      .filter(([, a]) => {
+      .filter(([u, a]) => {
+        // 画像URLに商品コード(JAN)が入っている＝**コードで特定した画像**なので、
+        // 同じ画像に集まった行は同じ商品（実測: ちゃんねらー速報の実況タイトル4件が
+        // どれも記事内コード 4582770058406 で、正しく同じ商品の写真だった）。
+        // タイトルは実況文なので、文字列としては一致しない＝ここを見ないと誤報になる。
+        if (/(?<![0-9])4[0-9]{12}(?![0-9])/.test(u)) return false;
         const names = a.map((r) => cleanListTitle(r.source, r.title));
         return !names.every((x, i) => names.every((y, j) => i === j || productNameMatches(x, y) || productNameMatches(y, x)));
       })

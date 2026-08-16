@@ -42,6 +42,7 @@ import {
   pickPageImage,
   parseRakutenItemList,
   productNameMatches,
+  searchQueryName,
   type ImageCandidate,
 } from "../src/scrapers/imagePick";
 
@@ -116,7 +117,7 @@ async function imageByJan(jan: string): Promise<ImageCandidate | null> {
   for (const p of parseRakutenItemList(html)) {
     if (!p.image.includes(jan) && !p.url.includes(jan)) continue; // 別商品の“おすすめ”を弾く
     if (isGenericImageUrl(p.image)) continue;
-    return { url: p.image, via: "jan" };
+    return { url: p.image, via: "jan", key: jan };
   }
   return null;
 }
@@ -200,7 +201,14 @@ async function main() {
   const missBySource: Record<string, number> = {};
   let done = 0;
 
-  for (const r of rows) {
+  /**
+   * 1行分の候補を探す。`skipPageImage` は2周目用＝**1周目にページ画像（og:image等）を採ったが、
+   * それが共有バナーとして落ちた**行を、別経路でもう一度探すため。
+   * これが無いと、バナーが良い候補（JAN経由の正しい商品画像）を塞いだまま終わる
+   * （実測 2026-08-16: ちゃんねらー速報は og:image がブログ共通バナーなので、
+   *  記事に商品コードが20回出ているのに JAN 経路まで進んでいなかった）。
+   */
+  async function findCandidate(r: (typeof rows)[number], skipPageImage = false): Promise<ImageCandidate | null> {
     let cand: ImageCandidate | null = null;
     const isSearch = SEARCH_PAGE_RE.test(r.url);
 
@@ -209,11 +217,14 @@ async function main() {
       await sleep(RATE_MS);
       if (html) {
         // A: リンク先が商品/記事ページなら、そのページの画像
-        if (!isSearch) cand = pickPageImage(html, r.url);
+        if (!isSearch && !skipPageImage) cand = pickPageImage(html, r.url);
         // C: リンク先が検索結果ページなら、商品名が全語一致する結果の画像だけ借りる
         if (!cand && isSearch) cand = pickListedImage(html, cleanListTitle(r.source, r.title));
-        // B: 画像が無い記事でも JAN が一意に取れれば、その商品の画像を楽天から引ける
-        if (!cand) {
+        // B: 画像が無い記事でも JAN が取れれば、その商品の画像を楽天から引ける。
+        //    **検索結果ページからは取らない**（そこに並ぶコードは「検索で出てきた何か」であって
+        //    この商品のコードではない。実測 2026-08-16: 「INSTINCTOY SHOW TOKYO 2026」の
+        //    楽天検索ページから拾ったコードは無関係な商品のものだった）。
+        if (!cand && !isSearch) {
           const jan = extractSoleJan(html);
           if (jan) cand = await imageByJan(jan);
         }
@@ -240,11 +251,18 @@ async function main() {
     //    「決め打ちの配列」を別の場所で繰り返すことになる（実測 2026-08-16: 新設の card_chusen
     //    28件が丸ごと素通りしていた）。安全を担保しているのは一覧ではなく**全語一致のゲート**で、
     //    文章タイトル（Xミラーの実況等）はそもそも一致しないので画像が付かないだけ。
-    if (!cand && !isSearch) {
+    //    掲載URLが既に検索ページのソース（tenbaiquest/gunpla_resale 等）でも、**検索語が違うなら**
+    //    もう一度投げる。掲載URLの検索語は商品名そのままで、販売条件の注記が入っているとヒット0に
+    //    なるため（実測: 「…「アビスアイ」（再入荷分）」で0件 → 注記を落とすと当たる）。
+    if (!cand) {
       const name = cleanListTitle(r.source, r.title);
-      const html = await fetchText(rakutenSearchUrl(name));
-      await sleep(RATE_MS);
-      if (html) cand = pickListedImage(html, name);
+      const query = searchQueryName(name);
+      const alreadyTried = isSearch && r.url.includes(encodeURIComponent(query));
+      if (!alreadyTried) {
+        const html = await fetchText(rakutenSearchUrl(query));
+        await sleep(RATE_MS);
+        if (html) cand = pickListedImage(html, name);
+      }
     }
 
     // ②サイト共通画像（トップと同じog:image）は不採用
@@ -252,7 +270,12 @@ async function main() {
       const common = await siteCommonImage(r.url);
       if (common && common === cand.url) cand = null;
     }
+    return cand;
+  }
 
+  const rowById = new Map(rows.map((r) => [r.id, r]));
+  for (const r of rows) {
+    const cand = await findCandidate(r);
     if (cand) {
       found.push({ id: r.id, source: r.source, title: r.title, cand });
       freq.set(cand.url, (freq.get(cand.url) ?? 0) + 1);
@@ -288,11 +311,53 @@ async function main() {
       rejected.add(url);
       continue;
     }
+    // 同じ JAN に解決した行どうしは、商品コードで**同一商品だと証明できている**
+    // （実測: ちゃんねらー速報は同じ商品の抽選を別記事で何度も出すので、同じJANの行が並ぶ）。
+    const keys = group.map((f) => f.cand.key);
+    if (keys.every((k) => k && k === keys[0])) continue;
+
     const names = group.map((f) => cleanListTitle(f.source, f.title));
     const sameProduct = names.every((a, i) =>
       names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a))
     );
     if (!sameProduct) rejected.add(url);
+  }
+
+  // ④ バナーとして落ちた行を、**ページ画像を飛ばして**もう一度探す。
+  //    バナーは「候補が見つかった」扱いで先に採用されてしまい、後続の経路（記事の商品コード→JAN）
+  //    まで進めていなかった（実測: ちゃんねらー速報は記事に商品コードが20回出ているのに、
+  //    og:image のブログ共通バナーで打ち止めになっていた）。
+  const retry = found.filter((f) => rejected.has(f.cand.url));
+  if (retry.length) {
+    console.log(`\n共有バナーで落ちた ${retry.length}件を、別経路でもう一度探します`);
+    for (const f of retry) {
+      const row = rowById.get(f.id);
+      if (!row) continue;
+      const alt = await findCandidate(row, true);
+      if (!alt || rejected.has(alt.url)) continue;
+      f.cand = alt;
+      viaCount[alt.via] = (viaCount[alt.via] ?? 0) + 1;
+      missBySource[f.source] = Math.max(0, (missBySource[f.source] ?? 0) - 0); // 内訳は下で数え直す
+    }
+    // 2周目で入れ替えた分を含めて、共有の判定をやり直す（同じJANなら通す規則もここで効く）。
+    const byUrl2 = new Map<string, Found[]>();
+    for (const f of found) (byUrl2.get(f.cand.url) ?? byUrl2.set(f.cand.url, []).get(f.cand.url)!).push(f);
+    for (const [url, group] of byUrl2) {
+      if (group.length <= SHARED_IMAGE_MAX) {
+        rejected.delete(url);
+        continue;
+      }
+      const keys = group.map((f) => f.cand.key);
+      if (keys.every((k) => k && k === keys[0])) {
+        rejected.delete(url);
+        continue;
+      }
+      const names = group.map((f) => cleanListTitle(f.source, f.title));
+      const same = names.every((a, i) => names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a)));
+      const bannerRoute = group.some((f) => f.cand.via !== "jan" && f.cand.via !== "listed");
+      if (same && !bannerRoute) rejected.delete(url);
+      else rejected.add(url);
+    }
   }
 
   let updated = 0;
