@@ -41,6 +41,7 @@ import {
   pickMeta,
   pickPageImage,
   parseRakutenItemList,
+  productNameMatches,
   type ImageCandidate,
 } from "../src/scrapers/imagePick";
 
@@ -264,15 +265,35 @@ async function main() {
     if (done % 20 === 0) console.log(`  ...${done}/${rows.length}（取得 ${found.length}件）`);
   }
 
-  // ③ 2件以上が同じ画像になったら、全員から外す。理由が2つある。
-  //    ・og:image/本文画像の場合＝サイト共通バナー（「予約開始！」の文字GIF等）。
-  //    ・検索から借りた場合＝**その一致が曖昧だった証拠**。商品名の全語一致は「候補が余分な語を
-  //      持っていてもよい」ので、こちらの商品名がより短いと**より詳しい別商品の出品**に当たる。
-  //      実測 2026-08-16: 「ENTRY GRADE ストライクガンダム[浮世絵パッケージVer.]」と
-  //      「〜ウイングガンダム〜」（別商品）が同じ出品画像を取り合った。
-  //      借りた画像を「同じ商品が2ソースから入っただけ」と見なして通すと、こういう取り違えを
-  //      そのまま出す。**曖昧なら付けない**（[[UIラベルは裏取り済みのみ約束]] と同じ立場）。
-  const rejected = new Set([...freq.entries()].filter(([, c]) => c > SHARED_IMAGE_MAX).map(([u]) => u));
+  // ③ 2件以上が同じ画像になったときの扱い。
+  //
+  //    同じ画像を複数行が取り合うのには、**正反対の2つの意味**がある:
+  //    (a) サイト共通バナー／一致が曖昧＝**別商品に同じ写真**を配ってしまう。
+  //        実測: 「ENTRY GRADE ストライクガンダム[浮世絵パッケージVer.]」と「〜ウイングガンダム〜」
+  //        が同じ出品画像を取り合った（商品名の全語一致は候補が余分な語を持つのを許すので、
+  //        こちらの商品名が短いと**より詳しい別商品**に当たる）。
+  //    (b) **同じ商品の別ロット**＝正しい写真。実測: カード抽選は同じパックを
+  //        「【再販】」「（追加入荷分）」「（購入権抽選）」と別行で何度も募集するので、
+  //        同じ商品に同じ写真が付くのが正解（本番トップの画像なし18件中14件がこれだった）。
+  //
+  //    (a)と(b)は「取り合っている行どうしの商品名」で分けられる。**片方の商品名がもう片方に
+  //    丸ごと含まれる**（＝一方が他方の詳しい表記）なら同じ商品。どちらでもないなら別商品。
+  const byUrl = new Map<string, Found[]>();
+  for (const f of found) (byUrl.get(f.cand.url) ?? byUrl.set(f.cand.url, []).get(f.cand.url)!).push(f);
+  const rejected = new Set<string>();
+  for (const [url, group] of byUrl) {
+    if (group.length <= SHARED_IMAGE_MAX) continue;
+    // バナーは検索由来ではない経路（og:image/本文画像）で出る。こちらは無条件に不採用。
+    if (group.some((f) => f.cand.via !== "jan" && f.cand.via !== "listed")) {
+      rejected.add(url);
+      continue;
+    }
+    const names = group.map((f) => cleanListTitle(f.source, f.title));
+    const sameProduct = names.every((a, i) =>
+      names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a))
+    );
+    if (!sameProduct) rejected.add(url);
+  }
 
   let updated = 0;
   let dead = 0;

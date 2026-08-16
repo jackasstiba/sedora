@@ -42,7 +42,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
-import { isGenericImageUrl } from "../src/scrapers/imagePick";
+import { isGenericImageUrl, productNameMatches } from "../src/scrapers/imagePick";
 import { getSitemapItemRefs } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
@@ -1326,10 +1326,19 @@ async function main() {
     //      重複掲載でも起きるため、そちらは重複解消の検査の担当）。
     const imgFreq = new Map<string, Row[]>();
     for (const r of withImg) (imgFreq.get(r.imageUrl!) ?? imgFreq.set(r.imageUrl!, []).get(r.imageUrl!)!).push(r);
+    // ただし **同じ商品の別ロット** は除く。カード抽選は同じパックを「【再販】」「（追加入荷分）」
+    // 「（購入権抽選）」と別行で何度も募集するので、同じ写真が付くのが正解
+    // （2026-08-16: ここを見落として、正しい付与でこの検査が誤報した＝観点K「機能を広げたら
+    //  その機能を見ている検査も同時に開く」）。同一商品かは backfillImages と同じ規則で見る
+    //  ＝**片方の商品名がもう片方に丸ごと含まれるか**。含まれないなら別商品なので指摘する。
     const shared = [...imgFreq.entries()]
       .filter(([, a]) => a.length >= 3)
+      .filter(([, a]) => {
+        const names = a.map((r) => cleanListTitle(r.source, r.title));
+        return !names.every((x, i) => names.every((y, j) => i === j || productNameMatches(x, y) || productNameMatches(y, x)));
+      })
       .map(([u, a]) => `${a.length}件が同じ画像: ${u.slice(0, 80)}（${a[0].source} #${a[0].id} 他）`);
-    report("image_shared", "同じ画像が3件以上で使い回されている", "error", shared, baseline, withImg.length);
+    report("image_shared", "別商品なのに同じ画像が3件以上で使い回されている", "error", shared, baseline, withImg.length);
 
     // ② 画像が無い件数。ラチェットで「増えたら ERROR」。
     const missing = shown.filter((r) => !r.imageUrl);
