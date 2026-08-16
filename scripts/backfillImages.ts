@@ -27,11 +27,12 @@
  *
  * `--dry` で書き込まずに結果だけ出す（新しい取り方を入れたら必ず目視してから流す）。
  */
+import { pathToFileURL } from "node:url";
 import { prisma } from "../src/lib/prisma";
 import { sleep } from "../src/scrapers/util";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { cleanListTitle } from "../src/lib/title";
-import { hasSearchableTitle, rakutenSearchUrl } from "../src/lib/outbound";
+import { rakutenSearchUrl } from "../src/lib/outbound";
 import {
   absolutize,
   extractSoleJan,
@@ -171,6 +172,19 @@ async function cleanupBadImages(): Promise<number> {
 
 type Found = { id: number; source: string; title: string; cand: ImageCandidate };
 
+/**
+ * 画像の掃除＋後付けを1回分回す。**`npm run scrape` の最後からも呼ばれる**（= 更新すれば画像も付く）。
+ *
+ * なぜ scrape に組み込むか: 以前は `scrape:images` が独立したステップで、`run_scrape.bat` を
+ * 通したときだけ走った。**`npm run scrape` を直に叩くと画像なしの新着がそのまま公開される**
+ * （実測 2026-08-16: 新ソース3種を足して scrape だけ回した結果、画像なしが 83→152件に増え、
+ *  本人から「更新した時も画像がないのが更新されたな」と指摘）。
+ * 人が2つ目のコマンドを覚えていることに依存させない。
+ */
+export async function runImageBackfill(): Promise<void> {
+  await main();
+}
+
 async function main() {
   console.log("== 保存済み画像の掃除（商品画像でないものを外す）==");
   const cleaned = await cleanupBadImages();
@@ -219,9 +233,13 @@ async function main() {
 
     // D: リンク先が商品画像を持たない記事のとき（実測: トレカ速報は自前の og:image が
     //    "no-image" 画像で、本文にも商品写真が無い）、商品名で市場を検索して**全語一致した
-    //    商品**の画像だけ借りる。タイトルが商品名として通用するソースに限る＝この判定は
-    //    購入導線と同じ hasSearchableTitle を使う（Xミラー・コラボ記事の文章タイトルは対象外）。
-    if (!cand && !isSearch && hasSearchableTitle(r.source)) {
+    //    商品**の画像だけ借りる。
+    //    **ソースは限定しない。** 以前は購入導線と同じ `hasSearchableTitle`（手書きのソース一覧）
+    //    に限っていたが、それだと**新しいソースは一覧に足すまで永久に対象外**＝今回直したばかりの
+    //    「決め打ちの配列」を別の場所で繰り返すことになる（実測 2026-08-16: 新設の card_chusen
+    //    28件が丸ごと素通りしていた）。安全を担保しているのは一覧ではなく**全語一致のゲート**で、
+    //    文章タイトル（Xミラーの実況等）はそもそも一致しないので画像が付かないだけ。
+    if (!cand && !isSearch) {
       const name = cleanListTitle(r.source, r.title);
       const html = await fetchText(rakutenSearchUrl(name));
       await sleep(RATE_MS);
@@ -246,7 +264,14 @@ async function main() {
     if (done % 20 === 0) console.log(`  ...${done}/${rows.length}（取得 ${found.length}件）`);
   }
 
-  // ③ 共有されすぎる画像＝サイト共通バナー
+  // ③ 2件以上が同じ画像になったら、全員から外す。理由が2つある。
+  //    ・og:image/本文画像の場合＝サイト共通バナー（「予約開始！」の文字GIF等）。
+  //    ・検索から借りた場合＝**その一致が曖昧だった証拠**。商品名の全語一致は「候補が余分な語を
+  //      持っていてもよい」ので、こちらの商品名がより短いと**より詳しい別商品の出品**に当たる。
+  //      実測 2026-08-16: 「ENTRY GRADE ストライクガンダム[浮世絵パッケージVer.]」と
+  //      「〜ウイングガンダム〜」（別商品）が同じ出品画像を取り合った。
+  //      借りた画像を「同じ商品が2ソースから入っただけ」と見なして通すと、こういう取り違えを
+  //      そのまま出す。**曖昧なら付けない**（[[UIラベルは裏取り済みのみ約束]] と同じ立場）。
   const rejected = new Set([...freq.entries()].filter(([, c]) => c > SHARED_IMAGE_MAX).map(([u]) => u));
 
   let updated = 0;
@@ -272,7 +297,18 @@ async function main() {
   if (miss.length) console.log("取れなかった: " + miss.map(([k, v]) => `${k}=${v}`).join(" "));
   if (rejected.size) for (const u of rejected) console.log(`  x${freq.get(u)} 共有画像として不採用: ${u}`);
   if (DRY) console.log("\n(--dry のため書き込みはしていません)");
-  await prisma.$disconnect();
 }
 
-main();
+// 単体実行（`npm run scrape:images`）のときだけ回して切断する。
+// scrape.ts から import されたときに走り出さないよう、入口を分ける
+// （import しただけで動くと、scrape の途中で prisma を切断してしまう）。
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().then(
+    () => prisma.$disconnect(),
+    async (e) => {
+      console.error(e);
+      await prisma.$disconnect();
+      process.exit(1);
+    }
+  );
+}

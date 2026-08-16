@@ -1413,6 +1413,24 @@ async function main() {
     report("report_items_truncated", "監査の件数が切り詰めた配列で数えられている", "error", bad, baseline, 1);
   }
   {
+    // **更新（scrape）そのものが画像を付けているか**をファイルで確認する。
+    // 実測 2026-08-16: 画像の後付けが `scrape:images` という別コマンドだったため、
+    // `npm run scrape` を直に叩いた更新では画像なしの新着がそのまま公開され、画像なしが
+    // 83→152件に増えた（本人指摘「更新した時も画像がないのが更新されたな」）。
+    // 「2つ目のコマンドを人が覚えている」に依存する設計に戻ったら、ここで落とす。
+    // ⚠️ **コメント行を除いてから**判定する。素の正規表現だと「呼び出しをコメントアウトした」
+    //    状態でも一致してしまい、検査が鳴らない（この検査を壊して試したとき実際に素通りした）。
+    const src = fs
+      .readFileSync(path.join(process.cwd(), "scripts", "scrape.ts"), "utf8")
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+    const bad = /^\s*await\s+runImageBackfill\s*\(/m.test(src)
+      ? []
+      : ["scripts/scrape.ts が画像の後付け（runImageBackfill）を呼んでいない。更新のたびに画像なしの新着が公開される"];
+    report("scrape_skips_images", "更新の経路から画像の後付けが外れている", "error", bad, baseline, 1);
+  }
+  {
     // (17b) **「今日」を読む行が src/lib/date.ts の外に無いか**（＝日付事故の再発防止の本体）。
     //
     // 2026-08-16 の事故（ミス24）は、cardChusen.ts が独自に `new Date()` の **UTC暦日**を

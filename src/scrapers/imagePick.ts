@@ -165,11 +165,30 @@ export function normalizeName(s: string): string {
     .replace(/[・･,、.。/\\|:：;；!！?？~〜ー\-—–_+*#@&＆]/g, "");
 }
 
-/** 商品名を「英数の語」と「日本語の語」に割る。 */
+/**
+ * 商品名を「英数の語」と「日本語の語」に割る。
+ * **語は候補名と同じ正規化を通す**（`normalizeName`）。ここを揃えないと、長音「ー」を落として
+ * 比較しているのに語だけ「ー」付きのままになり、**長音を含む語が全部外れる**
+ * （実測 2026-08-16: 「サンダース」「スカーレット」「カラー」等。ガンプラ再販44件は
+ *  検索1位が正解の商品だったのに1件も一致しなかった）。
+ */
 export function nameTokens(s: string): string[] {
-  const t = s.normalize("NFKC").toLowerCase();
-  return [...t.matchAll(/[a-z0-9]+|[ぁ-んァ-ヶー一-龠]+/g)].map((m) => m[0]).filter((w) => w.length >= 2);
+  return rawTokens(s).map((t) => normalizeName(t)).filter((w) => w.length >= 2);
 }
+
+/** 正規化前の語（長さの判定に使う。正規化は長音などを落とすので字数が変わる）。 */
+function rawTokens(s: string): string[] {
+  const t = s.normalize("NFKC").toLowerCase();
+  return [...t.matchAll(/[a-z0-9]+|[ぁ-んァ-ヶー一-龠]+/g)]
+    .map((m) => m[0])
+    .filter((w) => w.length >= 2 && !NON_IDENTITY_TOKEN.test(normalizeName(w)));
+}
+
+// 商品の同一性に関係しない語（こちらが付けた販売条件・告知、出品側の売り文句）。
+// 一致の条件から外す。実測: 「…【ST-30】（再販分）」「…【OP-17】購入権チケット」は
+// こちらの注記で、正しい商品の出品には当然入っていない。
+const NON_IDENTITY_TOKEN =
+  /^(再販|再販分|購入権|購入権チケット|抽選|抽選受付中|受付中|予約|予約受付中|応募|など|など多数|新品|中古|未開封|送料無料|正規品|即納)$/;
 
 // 対象商品そのものではなく「その商品の付属品」を売る出品（画像が別物になる）。
 const ACCESSORY_RE = /スリーブ|プロテクター|ローダー|バインダー|デッキケース|収納ケース|保護|ホルダー|ポスター専用/;
@@ -183,15 +202,21 @@ export function productNameMatches(query: string, candidate: string): boolean {
   if (!cand) return false;
   if (ACCESSORY_RE.test(candidate) && !ACCESSORY_RE.test(query)) return false;
 
-  const tokens = nameTokens(query);
-  if (tokens.length < 2) return false; // 語が1つしかない商品名は一致と言い切れない
+  // 長さ（＝どれだけ特徴的か）は**正規化前**で測り、一致は正規化後で見る。
+  // 正規化は長音などを落とすので、同じ語でも字数が変わる（「ギラーガ」4字→「ギラガ」3字）。
+  // 縮んだ字数で特徴語を判定すると、商品を一意に指す語まで「一般語」として捨ててしまう。
+  const tokens = rawTokens(query).map((raw) => ({ raw, n: normalizeName(raw) })).filter((t) => t.n.length >= 2);
+  // 語が1つのときは、それ自体が十分に特徴的（6字以上）なときだけ認める。
+  // 実測: 「君臨のヘッドライナー」は1語でも商品を一意に指す。「零式」だけでは指さない。
+  if (tokens.length === 0) return false;
+  if (tokens.length === 1 && tokens[0].raw.length < 6) return false;
   // 「30th」「celebration」のような特徴語が最低1つ要る（一般語だけの一致を防ぐ）。
-  if (!tokens.some((t) => t.length >= 4)) return false;
+  if (!tokens.some((t) => t.raw.length >= 4)) return false;
 
   for (const t of tokens) {
-    if (cand.includes(t)) continue;
+    if (cand.includes(t.n)) continue;
     // 日本語の複合語は表記が縮む（ポケモンカードゲーム → ポケモンカード）。先頭4字での一致を許す。
-    if (/[ぁ-んァ-ヶー一-龠]/.test(t) && t.length >= 5 && cand.includes(t.slice(0, 4))) continue;
+    if (/[ぁ-んァ-ヶ一-龠]/.test(t.n) && t.raw.length >= 5 && cand.includes(t.n.slice(0, 4))) continue;
     return false;
   }
   return true;

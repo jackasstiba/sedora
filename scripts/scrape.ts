@@ -7,6 +7,7 @@ import { mergePrizeEnrichment } from "../src/lib/prizes";
 import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
+import { runImageBackfill } from "./backfillImages";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 import { nowInstant } from "../src/lib/date";
 
@@ -113,6 +114,13 @@ async function main() {
   // 保存済みの表示文字列の修復（相対日付の凍結解除・月精度の補完）。巡回窓から流れた行は
   // 二度と上書きされないので、スクレイパー側の修正だけでは既存行に届かない。
   await backfillDisplayText(prisma);
+
+  // 画像の掃除＋後付けを**更新の一部として**回す。一覧完結型のスクレイパーは imageUrl=null を
+  // 返すので、ここを別コマンド（scrape:images）に分けていると **`npm run scrape` を直に叩いた
+  // 更新では画像なしの新着がそのまま公開される**（実測 2026-08-16: 新ソース3種を足して scrape
+  // だけ回した結果、画像なしが 83→152件に増えた）。「更新したら画像も付く」を人の記憶に委ねない。
+  console.log("\n== 画像の掃除＋後付け ==");
+  await runImageBackfill();
 
   checkHealth(results);
 
