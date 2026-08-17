@@ -30,8 +30,15 @@ export function MonthCalendar({
         {WEEKDAYS.map((w, i) => (
           <div
             key={w}
+            // 曜日の色は**ライトとダークの両方**を書く。片方だけ書くと、もう片方が地に沈む。
+            // 実測 2026-08-17: ライトを直すために 500→700 にしたら、dark: が無かったので
+            // ダークで 2.49〜3.21:1 に落ちた（直した側しか見ていないと、必ずこの往復になる）。
             className={`py-1 font-semibold ${
-              i === 0 ? "text-rose-700" : i === 6 ? "text-blue-700" : "text-neutral-600"
+              i === 0
+                ? "text-rose-700 dark:text-rose-400"
+                : i === 6
+                  ? "text-blue-700 dark:text-blue-300"
+                  : "text-neutral-600 dark:text-neutral-400"
             }`}
           >
             {w}
@@ -41,9 +48,15 @@ export function MonthCalendar({
           if (d === null) return <div key={`e${i}`} />;
           const count = counts[d] ?? 0;
           const dow = i % 7;
-          // 日曜/土曜の色は「文字の色」なので、明るい 500 を使うとライト時に読めない
-          // （実測 2026-08-17: rose-500 が生成りの地の上で 2.74:1・blue-500 が 3.55:1）。
-          const dayColor = dow === 0 ? "text-rose-700" : dow === 6 ? "text-blue-700" : "";
+          // 日曜/土曜の色。**必ずライト・ダークを対で持つ。**
+          // ライトだけ見て 500→700 にしたらダークが沈み、ダークだけ見て 500 に戻すと
+          // ライトが沈む（実測: rose-500 は生成りの上で 2.74:1、rose-700 は暗い地の上で 3.21:1）。
+          const dayColor =
+            dow === 0
+              ? "text-rose-700 dark:text-rose-400"
+              : dow === 6
+                ? "text-blue-700 dark:text-blue-300"
+                : "";
           if (count === 0) {
             return (
               <div

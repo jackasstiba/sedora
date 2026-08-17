@@ -961,12 +961,12 @@ async function main() {
         if (/textColorLint\.tsx?$/.test(rel)) continue;
         for (const hit of findLowContrastTextClasses(fs.readFileSync(f, "utf8"), palette, rel))
           bad.push(
-            `${path.relative(process.cwd(), f)}: ${hit.cls}(${hit.hex}) は ${hit.surface} の上で ${hit.worst}:1（AAは4.5:1）`
+            `${rel}: ${hit.cls}(${hit.hex}) は${hit.theme === "dark" ? "ダーク" : "ライト"}の ${hit.surface} の上で ${hit.worst}:1（AAは4.5:1）`
           );
       }
       report(
-        "text_color_unreadable_light",
-        "ライト表示で AA に届かない文字色クラスがソースに残っている",
+        "text_color_unreadable",
+        "AA に届かない文字色クラスがソースに残っている（dark: の無いクラスは両テーマで判定）",
         "error",
         bad,
         baseline,

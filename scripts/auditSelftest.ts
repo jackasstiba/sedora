@@ -1270,9 +1270,16 @@ const cases: Case[] = [
     want: 0,
   },
   {
-    name: "文字色: AAを満たす色は鳴らない（誤報しない側）",
+    // ライト・ダークを対で書いてあり、どちらの面でも AA を満たす＝鳴ってはいけない。
+    // ※ 当初この期待値は `"text-neutral-600 text-neutral-900"`（dark: 無し）で 0 と書いていたが、
+    //    検査をダーク面まで見るように広げた時点で**その期待値の方が誤り**になった。
+    //    期待値は、規約を変えた日に読み直す（[[System/rules]] 2026-08-16）。
+    name: "文字色: 両テーマを対で書いてあれば鳴らない（誤報しない側）",
     fn: () =>
-      findLowContrastTextClasses('<p className="text-neutral-600 text-neutral-900">x</p>', TAILWIND_TEXT_COLORS).length,
+      findLowContrastTextClasses(
+        '<p className="text-neutral-900 dark:text-neutral-50">x</p>',
+        TAILWIND_TEXT_COLORS
+      ).length,
     want: 0,
   },
   {
@@ -1301,6 +1308,36 @@ const cases: Case[] = [
     name: "文字色: 色見本に無いクラスは判定しない（誤報より取りこぼしを選ぶ）",
     fn: () => findLowContrastTextClasses('<p className="text-lime-400">x</p>', TAILWIND_TEXT_COLORS).length,
     want: 0,
+  },
+  {
+    // **鳴る側**: 2026-08-17 に自分で作った退行そのもの。ライトを直すために濃くしたが
+    // dark: を書かなかったので、ダークで 2.49:1 に沈んだ（本番で7件）。
+    name: "文字色: dark: の無い濃い色はダークで沈むので鳴る",
+    fn: () =>
+      findLowContrastTextClasses('"py-1 font-semibold text-neutral-600"', TAILWIND_TEXT_COLORS)
+        .map((h) => h.theme)
+        .join(","),
+    want: "dark",
+  },
+  {
+    name: "文字色: dark: を対で書けば鳴らない",
+    fn: () =>
+      findLowContrastTextClasses(
+        '"py-1 font-semibold text-neutral-600 dark:text-neutral-400"',
+        TAILWIND_TEXT_COLORS
+      ).length,
+    want: 0,
+  },
+  {
+    // 判定の単位はリテラル1つ。ファイル単位で「どこかに dark: があるか」を見る作りだと、
+    // 同じファイルの別の行の dark: に助けられて上の事故を見逃す（実際そうなっていた）。
+    name: "文字色: 同じファイルの別リテラルの dark: には助けられない",
+    fn: () =>
+      findLowContrastTextClasses(
+        '"text-neutral-700 dark:text-neutral-300" ... "py-1 text-neutral-600"',
+        TAILWIND_TEXT_COLORS
+      ).length,
+    want: 1,
   },
 ];
 

@@ -86,14 +86,56 @@ function sameFile(a: string, b: string): boolean {
   return norm(a).endsWith(norm(b));
 }
 
+/**
+ * ダーク表示で文字が乗る面。`dark:` の指定が無いクラスは**両方のテーマで使われる**ので、
+ * こちらでも AA を満たしていないといけない。
+ */
+export const DARK_SURFACES = [
+  "#0f0c0a", // 地色（ダークの body）
+  "#171717", // カード（dark:bg-neutral-900）
+] as const;
+
 /** 変種プレフィックス（dark:/hover: など）が付かない素の text-<色> だけを拾う。 */
 const BASE_TEXT_CLASS = /(?<![\w:-])text-((?:neutral|rose|blue|purple|amber|green|red|orange)-\d{2,3})\b/g;
+/** クラス名を含む文字列リテラル（"..." / '...' / `...`）。この単位で dark: の有無を見る。 */
+const CLASS_LITERAL = /"[^"]*"|'[^']*'|`[^`]*`/g;
 
-export type TextColorFinding = { cls: string; hex: string; worst: number; surface: string };
+export type TextColorFinding = {
+  cls: string;
+  hex: string;
+  worst: number;
+  surface: string;
+  theme: "light" | "dark";
+};
+
+function worstAgainst(hex: string, surfaces: readonly string[]): { worst: number; surface: string } {
+  let worst = Infinity;
+  let surface = "";
+  for (const bg of surfaces) {
+    const r = contrastHex(hex, bg);
+    if (r !== null && r < worst) {
+      worst = r;
+      surface = bg;
+    }
+  }
+  return { worst, surface };
+}
 
 /**
- * ソース1ファイル分から、ライト表示で AA に届かない素の文字色クラスを返す。
- * 例外は**そのファイルに限って**効く（`filePath` を渡さなければ例外は一切効かない）。
+ * ソース1ファイル分から、AA に届かない素の文字色クラスを返す。
+ *
+ * 判定の単位は**文字列リテラル1つ**（className の中身 / クラス名を持つ変数の代入）。
+ *  ・そのリテラルに `dark:text-*` がある → ライト面だけ見る（ダークは別クラスが担当する）
+ *  ・**無い** → そのクラスは両テーマで効くので、**ダーク面でも** AA を要求する
+ *
+ * なぜリテラル単位か（2026-08-17 実測）: ライトを直すために月カレンダーの曜日を
+ * 500→700 にしたところ、そこには `dark:` が無かったのでダークで 2.49〜3.21:1 に落ちた。
+ * ファイル単位で「どこかに dark: があるか」を見る作りだと、同じファイルの別の行の
+ * `dark:` に助けられて**この事故を見逃す**（実際 MonthCalendar には別の dark: があった）。
+ *
+ * 残る限界: `const c = cond ? "text-rose-700 dark:text-rose-400" : ""` のように変数へ
+ * 逃がしたクラスは、代入側のリテラルで判定する（＝そこに dark: を書けば通る）。
+ * 変数を跨いだ打ち消し（後勝ちの上書き）までは静的には追えない。
  */
 export function findLowContrastTextClasses(
   source: string,
@@ -101,24 +143,42 @@ export function findLowContrastTextClasses(
   filePath = ""
 ): TextColorFinding[] {
   const seen = new Map<string, TextColorFinding>();
-  for (const m of source.matchAll(BASE_TEXT_CLASS)) {
-    const name = m[1];
-    const cls = `text-${name}`;
-    if (TEXT_COLOR_EXCEPTIONS.some((e) => e.cls === cls && filePath && sameFile(filePath, e.file)))
+  for (const lit of source.match(CLASS_LITERAL) ?? []) {
+    if (!BASE_TEXT_CLASS.test(lit)) {
+      BASE_TEXT_CLASS.lastIndex = 0;
       continue;
-    const hex = palette[name];
-    if (!hex) continue; // 色見本に無い＝判定できない（黙って通す方が誤報より良い）
-    let worst = Infinity;
-    let surface = "";
-    for (const bg of LIGHT_SURFACES) {
-      const r = contrastHex(hex, bg);
-      if (r !== null && r < worst) {
-        worst = r;
-        surface = bg;
-      }
     }
-    if (worst < AA_NORMAL && !seen.has(cls))
-      seen.set(cls, { cls, hex, worst: Math.round(worst * 100) / 100, surface });
+    BASE_TEXT_CLASS.lastIndex = 0;
+    const hasDarkVariant = /dark:text-/.test(lit);
+    for (const m of lit.matchAll(BASE_TEXT_CLASS)) {
+      const name = m[1];
+      const cls = `text-${name}`;
+      if (TEXT_COLOR_EXCEPTIONS.some((e) => e.cls === cls && filePath && sameFile(filePath, e.file)))
+        continue;
+      const hex = palette[name];
+      if (!hex) continue; // 色見本に無い＝判定できない（黙って通す方が誤報より良い）
+
+      const light = worstAgainst(hex, LIGHT_SURFACES);
+      if (light.worst < AA_NORMAL && !seen.has(`${cls}|light`))
+        seen.set(`${cls}|light`, {
+          cls,
+          hex,
+          worst: Math.round(light.worst * 100) / 100,
+          surface: light.surface,
+          theme: "light",
+        });
+
+      if (hasDarkVariant) continue; // ダーク面は dark: 付きのクラスが担当する
+      const darkS = worstAgainst(hex, DARK_SURFACES);
+      if (darkS.worst < AA_NORMAL && !seen.has(`${cls}|dark`))
+        seen.set(`${cls}|dark`, {
+          cls,
+          hex,
+          worst: Math.round(darkS.worst * 100) / 100,
+          surface: darkS.surface,
+          theme: "dark",
+        });
+    }
   }
   return [...seen.values()];
 }
