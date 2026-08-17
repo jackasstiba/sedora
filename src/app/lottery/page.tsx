@@ -23,7 +23,7 @@ export default async function LotteryPage() {
 
   return (
     <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6">
-      <nav className="mb-2 text-xs text-neutral-500 dark:text-neutral-400">
+      <nav className="mb-2 text-xs text-neutral-600 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
           ハツコレ
         </Link>
@@ -48,7 +48,7 @@ export default async function LotteryPage() {
           ))}
         </div>
       ) : (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+        <p className="text-sm text-neutral-600 dark:text-neutral-400">
           いま受付中の抽選はありません。新しい抽選は順次掲載されます。
         </p>
       )}

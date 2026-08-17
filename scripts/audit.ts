@@ -44,6 +44,7 @@ import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { isGenericImageUrl, productNameMatches } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
+import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
@@ -923,6 +924,55 @@ async function main() {
       baseline,
       rows.length
     );
+  }
+
+  // (11e) ライト表示で読めない文字色クラスが**ソースに**残っていないか。
+  //
+  // なぜ画面を塗って測る検査と別に要るか（2026-08-17・自分の報告の誤りから出た）:
+  // ブラウザで測る方法は正しいが、**測ったページの分しか分からない**。トップページで
+  // 「ライト 177→0件」を見て「0件」と報告したが、実際には `/release/*`（カレンダーの
+  // 日曜 rose-500=2.74・土曜 blue-500=3.55・日付 neutral-400=2.44）と
+  // `/items/*`（見出し neutral-500=4.48）に残っていた。さらに ItemBrowser の
+  // 「該当する商品が見つかりませんでした。」は**絞り込みが0件のときしか描かれない**ので、
+  // どのページを開いても出会えない。クラス名を読めば、描かれない状態まで含めて全部数えられる。
+  {
+    {
+      const css = fs.readFileSync(path.join(process.cwd(), "src/app/globals.css"), "utf8");
+      const palette: Record<string, string> = { ...TAILWIND_TEXT_COLORS };
+      for (const m of css.matchAll(/--color-(rose-\d{2,3})\s*:\s*(#[0-9a-fA-F]{3,8})\s*;/g))
+        palette[m[1]] = m[2];
+
+      const files: string[] = [];
+      const walk = (dir: string) => {
+        for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+          const p = path.join(dir, e.name);
+          if (e.isDirectory()) walk(p);
+          else if (/\.tsx?$/.test(e.name)) files.push(p);
+        }
+      };
+      walk(path.join(process.cwd(), "src"));
+
+      const bad: string[] = [];
+      for (const f of files) {
+        const rel = path.relative(process.cwd(), f);
+        // 規約そのものを書いてあるファイルは対象外。例外リストにクラス名を**文字列として**
+        // 書くので、そのままだと検査が自分の定義に反応して必ず ERROR になる（実測: 初版がこれで
+        // 2件の自己言及を出した）。除外はここ1ファイルだけ＝他の .ts も対象のまま残す。
+        if (/textColorLint\.tsx?$/.test(rel)) continue;
+        for (const hit of findLowContrastTextClasses(fs.readFileSync(f, "utf8"), palette, rel))
+          bad.push(
+            `${path.relative(process.cwd(), f)}: ${hit.cls}(${hit.hex}) は ${hit.surface} の上で ${hit.worst}:1（AAは4.5:1）`
+          );
+      }
+      report(
+        "text_color_unreadable_light",
+        "ライト表示で AA に届かない文字色クラスがソースに残っている",
+        "error",
+        bad,
+        baseline,
+        files.length
+      );
+    }
   }
 
   // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。

@@ -71,7 +71,7 @@ export default async function MonthPage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
+      <nav className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
           ハツコレ
         </Link>

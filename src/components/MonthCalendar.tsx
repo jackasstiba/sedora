@@ -31,7 +31,7 @@ export function MonthCalendar({
           <div
             key={w}
             className={`py-1 font-semibold ${
-              i === 0 ? "text-rose-500" : i === 6 ? "text-blue-500" : "text-neutral-500"
+              i === 0 ? "text-rose-600" : i === 6 ? "text-blue-700" : "text-neutral-600"
             }`}
           >
             {w}
@@ -41,12 +41,14 @@ export function MonthCalendar({
           if (d === null) return <div key={`e${i}`} />;
           const count = counts[d] ?? 0;
           const dow = i % 7;
-          const dayColor = dow === 0 ? "text-rose-500" : dow === 6 ? "text-blue-500" : "";
+          // 日曜/土曜の色は「文字の色」なので、明るい 500 を使うとライト時に読めない
+          // （実測 2026-08-17: rose-500 が生成りの地の上で 2.74:1・blue-500 が 3.55:1）。
+          const dayColor = dow === 0 ? "text-rose-600" : dow === 6 ? "text-blue-700" : "";
           if (count === 0) {
             return (
               <div
                 key={d}
-                className={`rounded-md border border-transparent py-2 text-neutral-400 ${dayColor}`}
+                className={`rounded-md border border-transparent py-2 text-neutral-600 dark:text-neutral-400 ${dayColor}`}
               >
                 {d}
               </div>

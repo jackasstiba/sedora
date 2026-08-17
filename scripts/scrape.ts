@@ -7,7 +7,7 @@ import { mergePrizeEnrichment } from "../src/lib/prizes";
 import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
-import { POKEMON_GOODS_RECENT_DAYS, isRecentPokemonGoods } from "../src/scrapers/pokemonGoods";
+import { cleanupPokemonGoodsWindow } from "./cleanupRecentWindow";
 import { runImageBackfill } from "./backfillImages";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 import { nowInstant } from "../src/lib/date";
@@ -106,24 +106,10 @@ async function main() {
 
     // pokemon_goods は「直近30日の新着」だけを載せる設計（pokemonGoods.ts のコメント）。
     // その cutoff は**新しく入る行にしか効かない**ので、一度入った行は何日経っても残っていた。
-    // 実測（2026-08-17）: 掲載105件が全て過去日で、最古52日前・中央24日前。eventDate を
-    // 持たない設計なので「日付未定」の顔で今後の一覧に居座り、isStalePlan では 0/105 しか
-    // 落ちなかった。**取り込む条件と、載せ続ける条件を同じ物差しにする。**
-    // 巡回が失敗した回はここに来ない（catch 側）ので、取りこぼしで全消しにはならない。
-    if (source === "pokemon_goods") {
-      const today = todayJst();
-      const rows = await prisma.item.findMany({
-        where: { source },
-        select: { id: true, eventDateText: true },
-      });
-      const stale = rows.filter((r) => !isRecentPokemonGoods(r.eventDateText, today));
-      if (stale.length > 0) {
-        await prisma.item.deleteMany({ where: { id: { in: stale.map((r) => r.id) } } });
-        console.log(
-          `[${source}] 新着の窓（${POKEMON_GOODS_RECENT_DAYS}日）を過ぎた ${stale.length}件を削除`
-        );
-      }
-    }
+    // **取り込む条件と、載せ続ける条件を同じ物差しにする。** 中身と経緯は
+    // cleanupRecentWindow.ts（巡回を回さずに単体で呼べるように名前を付けて外に出してある）。
+    // ここは `if (error) continue` の後＝**巡回が成功した回だけ**通る。
+    if (source === "pokemon_goods") await cleanupPokemonGoodsWindow(prisma);
 
     console.log(`[${source}] ${items.length}件処理`);
   }

@@ -74,7 +74,7 @@ export function NoImage({ genre, title }: { genre: string; title?: string }) {
       <span className="text-4xl opacity-80" aria-hidden>
         {emoji}
       </span>
-      <span className="text-xs font-semibold text-neutral-500 dark:text-neutral-400">{genre}</span>
+      <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">{genre}</span>
     </div>
   );
 }

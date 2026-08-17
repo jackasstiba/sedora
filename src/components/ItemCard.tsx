@@ -135,7 +135,7 @@ export function ItemCard({ item }: { item: Item }) {
         )}
 
         {item.price && (
-          <div className="flex items-center justify-end text-xs text-neutral-500 dark:text-neutral-400">
+          <div className="flex items-center justify-end text-xs text-neutral-600 dark:text-neutral-400">
             <span className="font-medium text-neutral-700 dark:text-neutral-200">{formatPriceDisplay(item.price.split(" / ")[0])}</span>
           </div>
         )}

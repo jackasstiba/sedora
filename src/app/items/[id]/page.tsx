@@ -134,7 +134,7 @@ export default async function ItemPage({ params }: Props) {
         dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
       />
 
-      <nav className="mb-4 text-xs text-neutral-500 dark:text-neutral-400">
+      <nav className="mb-4 text-xs text-neutral-600 dark:text-neutral-400">
         <Link href="/" className="hover:underline">
           ハツコレ
         </Link>
@@ -179,7 +179,7 @@ export default async function ItemPage({ params }: Props) {
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
             {dateLabel && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText)}</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText)}</dt>
                 <dd className="font-semibold text-rose-600 dark:text-rose-400">
                   {dateLabel}
                   {cd && (
@@ -204,13 +204,13 @@ export default async function ItemPage({ params }: Props) {
                 収集元の文言をそのまま出す＝精度を足さない。 */}
             {periodText && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">受付・時刻</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">受付・時刻</dt>
                 <dd className="text-neutral-800 dark:text-neutral-100">{periodText}</dd>
               </>
             )}
             {item.price && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">価格</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">価格</dt>
                 <dd className="text-neutral-800 dark:text-neutral-100">{formatPriceDisplay(item.price)}</dd>
               </>
             )}
@@ -218,7 +218,7 @@ export default async function ItemPage({ params }: Props) {
                 1回いくら（価格）とセットで出す。収集元の平文をそのまま出す＝推測を足さない。 */}
             {item.salesChannel && (
               <>
-                <dt className="text-neutral-500 dark:text-neutral-400">取扱店</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">取扱店</dt>
                 <dd className="text-neutral-800 dark:text-neutral-100">{item.salesChannel}</dd>
               </>
             )}
@@ -336,7 +336,7 @@ export default async function ItemPage({ params }: Props) {
             {storeCopy.heading}（{storeGroups.length}
             {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${storeList.length}件`}）
           </h2>
-          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">{storeCopy.note}</p>
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">{storeCopy.note}</p>
           <ul className="grid gap-2 sm:grid-cols-2">
             {storeGroups.flatMap((g) =>
               g.entries.map((s, i) => {
@@ -353,7 +353,7 @@ export default async function ItemPage({ params }: Props) {
                     {/* 同じ店が別の応募ページを複数開くことがある。同じ行が2つ並ぶと区別が
                         つかないので、何口目かを事実として添える（推測は足さない）。 */}
                     {g.entries.length > 1 && item.source !== "collabo_cafe" && (
-                      <span className="ml-1 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                      <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
                         応募ページ {i + 1}/{g.entries.length}
                       </span>
                     )}
@@ -369,7 +369,7 @@ export default async function ItemPage({ params }: Props) {
                     </div>
                   )}
                   {s.note && (
-                    <p className="mt-1 text-xs leading-snug text-neutral-500 dark:text-neutral-400">
+                    <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
                       条件: {s.note}
                     </p>
                   )}
@@ -401,7 +401,7 @@ export default async function ItemPage({ params }: Props) {
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
             🎯 {prizesGraded ? "各賞ラインナップ" : "賞品ラインナップ"}（全{prizeGallery.length}種・くじ）
           </h2>
-          <p className="mb-3 text-xs text-neutral-500 dark:text-neutral-400">
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
             くじ（抽選）で当たる賞品です。
             {prizesGraded
               ? "A賞・ラストワン賞が本命（本数が最も少ない）。"

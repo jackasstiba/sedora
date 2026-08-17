@@ -62,6 +62,7 @@ import {
   readCssHexToken,
   relativeLuminance,
 } from "../src/lib/contrast";
+import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 
 // 観点H用: パレットは**実ファイルから読む**。ここに値をコピーすると、CSSを戻したときに
 // 検査だけが古い値で緑を出す（＝「誤りを正解として固定する」型・2026-08-16 に踏んだ）。
@@ -1235,6 +1236,64 @@ const cases: Case[] = [
     name: "観点H: CSSからトークンを読めなければ null（読めていないのに緑にしない）",
     fn: () => readCssHexToken("--color-rose-600: var(--x);", "color-rose-600"),
     want: null,
+  },
+
+  // ── 観点H その2: 「測ったページの分しか分からない」を塞ぐソース側の検査 ──
+  // 実測（2026-08-17）: トップページで 0件 を確認して「0件」と報告したが、/release/* と
+  // /items/* に残っていた。さらに ItemBrowser の「該当する商品が見つかりませんでした。」は
+  // 絞り込みが0件のときしか描かれないので、どのページを開いても出会えない。
+  {
+    name: "文字色: ライトで読めないクラスを見つける（鳴る側）",
+    fn: () =>
+      findLowContrastTextClasses('<p className="text-sm text-neutral-400">x</p>', TAILWIND_TEXT_COLORS)
+        .map((h) => h.cls)
+        .join(","),
+    want: "text-neutral-400",
+  },
+  {
+    name: "文字色: dark: 付きはダーク面で使うので対象外",
+    fn: () =>
+      findLowContrastTextClasses('<p className="dark:text-neutral-400">x</p>', TAILWIND_TEXT_COLORS).length,
+    want: 0,
+  },
+  {
+    name: "文字色: hover: 等の一時状態も対象外",
+    fn: () =>
+      findLowContrastTextClasses('<a className="hover:text-blue-500">x</a>', TAILWIND_TEXT_COLORS).length,
+    want: 0,
+  },
+  {
+    name: "文字色: AAを満たす色は鳴らない（誤報しない側）",
+    fn: () =>
+      findLowContrastTextClasses('<p className="text-neutral-600 text-neutral-900">x</p>', TAILWIND_TEXT_COLORS).length,
+    want: 0,
+  },
+  {
+    // 例外は「そのファイルに限って」効くこと。クラス名だけで例外にすると、
+    // いちばん多かった text-neutral-400 がどこに書いても永久に無視される。
+    name: "文字色: 例外は指定したファイルでだけ効く",
+    fn: () =>
+      findLowContrastTextClasses(
+        '<span className="text-neutral-400" />',
+        TAILWIND_TEXT_COLORS,
+        "src/components/FilterBar.tsx"
+      ).length,
+    want: 0,
+  },
+  {
+    name: "文字色: 同じクラスでも別ファイルなら鳴る（例外が広がっていない）",
+    fn: () =>
+      findLowContrastTextClasses(
+        '<span className="text-neutral-400" />',
+        TAILWIND_TEXT_COLORS,
+        "src/components/SiteFooter.tsx"
+      ).length,
+    want: 1,
+  },
+  {
+    name: "文字色: 色見本に無いクラスは判定しない（誤報より取りこぼしを選ぶ）",
+    fn: () => findLowContrastTextClasses('<p className="text-lime-400">x</p>', TAILWIND_TEXT_COLORS).length,
+    want: 0,
   },
 ];
 

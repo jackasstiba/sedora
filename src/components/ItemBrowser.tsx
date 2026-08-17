@@ -137,7 +137,7 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
 
       {filtered.length === 0 ? (
         <div className="py-16 text-center">
-          <p className="text-neutral-500">該当する商品が見つかりませんでした。</p>
+          <p className="text-neutral-600 dark:text-neutral-400">該当する商品が見つかりませんでした。</p>
           <button
             onClick={onClear}
             className="mt-4 inline-block rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-rose-400 hover:text-rose-600 dark:border-neutral-700 dark:text-neutral-200"
