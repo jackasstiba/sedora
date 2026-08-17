@@ -53,9 +53,21 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   { source: "sofvi", run: scrapeSofvi },
 ];
 
-export async function runAllScrapers(ctx: ScrapeContext): Promise<ScraperResult[]> {
+/** 登録されている収集元の名前（`--only=` の検証に使う）。 */
+export const SCRAPER_SOURCES = SCRAPERS.map((s) => s.source);
+
+/**
+ * 全ソースを巡回する。`only` を渡すとその収集元だけを回す。
+ *
+ * only を足した理由（2026-08-18）: 1ソースのスクレイパーを直しても、確かめるには
+ * **21ソース・1時間の巡回を丸ごと回すしかなかった**。動かすのに1時間かかる仕組みは、
+ * 直した日には一度も実行されない＝「仕組みで担保した」と書けてしまう
+ * （[[System/rules]] 2026-08-17「単体で呼べる形にする」と同じ型）。
+ */
+export async function runAllScrapers(ctx: ScrapeContext, only?: string[]): Promise<ScraperResult[]> {
+  const targets = only?.length ? SCRAPERS.filter((s) => only.includes(s.source)) : SCRAPERS;
   const results: ScraperResult[] = [];
-  for (const { source, run } of SCRAPERS) {
+  for (const { source, run } of targets) {
     try {
       const items = await run(ctx);
       results.push({ source, items, error: null });

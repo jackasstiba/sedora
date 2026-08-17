@@ -11,7 +11,13 @@ import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
-import { groupStoresByLabel, parseStoresJson, storeSectionCopy, storeWhenLabel } from "@/lib/stores";
+import {
+  groupStoresByLabel,
+  parseStoresJson,
+  splitStoresByDeadline,
+  storeSectionCopy,
+  storeWhenLabel,
+} from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
 
@@ -77,8 +83,13 @@ export default async function ItemPage({ params }: Props) {
   const prizesGraded = prizeGallery?.some((p) => /賞$/.test(p.label)) ?? false;
   // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募中」の商品の受付中ストア一覧（公式直リンク）。
   const storeList = parseStoresJson(item.stores);
+  // 「受付中」と書く以上、締切が過ぎた枠を混ぜない（2026-08-18 実測: 126店のうち30店が
+  // 昨日締切で、しかも締切の昇順＝**先頭30店が全部死んでいた**）。判定は純関数に置く。
+  const storeSplit = storeList ? splitStoresByDeadline(storeList, todayJst()) : null;
+  const openStores = storeSplit?.open ?? [];
+  const closedStoreCount = storeSplit?.closed.length ?? 0;
   // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
-  const storeGroups = storeList ? groupStoresByLabel(storeList) : [];
+  const storeGroups = groupStoresByLabel(openStores);
   // 節の見出し・説明・ボタン文言は中身に合わせる（コラボに「応募ページ」と書かない）。
   const storeCopy = storeSectionCopy(item.source);
 
@@ -334,9 +345,19 @@ export default async function ItemPage({ params }: Props) {
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
             {storeCopy.heading}（{storeGroups.length}
-            {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${storeList.length}件`}）
+            {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${openStores.length}件`}）
           </h2>
-          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">{storeCopy.note}</p>
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
+            {storeCopy.note}
+            {/* 落とした分は黙って消さず、事実として件数を書く（「情報が無い」と「情報を
+                隠した」を画面で区別できるようにする）。 */}
+            {closedStoreCount > 0 && `（締切が過ぎた ${closedStoreCount}件は表示していません）`}
+          </p>
+          {openStores.length === 0 && (
+            <p className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
+              受付中のストアはありません（{closedStoreCount}件はすべて締切済み）。
+            </p>
+          )}
           <ul className="grid gap-2 sm:grid-cols-2">
             {storeGroups.flatMap((g) =>
               g.entries.map((s, i) => {

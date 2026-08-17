@@ -69,6 +69,19 @@ export type PageLoss = {
   expired: number;
   /** 同じ商品ページを指す別カードに畳まれた（URL重複の解消＝カードは今もページにある）。 */
   merged: number;
+  /**
+   * このページからは消えたが、**サイトの別の面にはまだ出ている**＝ページ間の移動。
+   *
+   * 実測 2026-08-18: `/release/2026-11` が 57→54件で ERROR。中身はサントリーの
+   * ウイスキー抽選3件で、**受付中ストアが増えて最も近い日が11月→8/18に変わった**ため
+   * 8月の月ページへ移っただけだった（3件とも今も表示中）。情報は1件も失われていないのに
+   * 「説明のつかない消失」に入っていた＝**検査側の説明不足**（データは壊れていない）。
+   *
+   * 月ページの所属は eventDate から、ジャンルページの所属は genre から決まるので、
+   * その値が正当に変われば必ずこの形の「減少」が出る。**移動は消失ではない。**
+   * ただし黙って消さず件数で出す（全部が「移動」に化けたら、それ自体が異常の合図）。
+   */
+  moved: number;
   /** 説明がつかない＝掲載基準・重複解消・コード変更が削った id。 */
   unexplained: number[];
 };
@@ -80,10 +93,13 @@ export function classifyPageLoss(
   /** そのページに**今表示されている**行の productMergeKeys の集合。消えた行のキーが
    *  ここにあれば「代表に畳まれた」＝商品はまだページにある（2026-08-15 のURL重複解消で、
    *  負け側5件が「説明のつかない消失」と誤って鳴った型への対処）。 */
-  displayedMergeKeys?: Set<string>
+  displayedMergeKeys?: Set<string>,
+  /** サイトの**いずれかの面に今表示されている** id の集合（全ページの和集合）。
+   *  ここに居るなら、このページから消えたのは移動であって消失ではない。 */
+  stillDisplayedIds?: Set<number>
 ): PageLoss {
   const excludesPast = pageExcludesPast(page);
-  const out: PageLoss = { gone: 0, expired: 0, merged: 0, unexplained: [] };
+  const out: PageLoss = { gone: 0, expired: 0, merged: 0, moved: 0, unexplained: [] };
   for (const r of removed) {
     if (!r.inDb) {
       out.gone++;
@@ -101,6 +117,12 @@ export function classifyPageLoss(
     }
     if (displayedMergeKeys?.size && productMergeKeys(r).some((k) => displayedMergeKeys.has(k))) {
       out.merged++;
+      continue;
+    }
+    // 最後に見る。上の3つ（収集元から消えた／日付切れ／畳まれた）の方が理由として具体的なので、
+    // それらを「移動」で覆い隠さない。
+    if (stillDisplayedIds?.has(r.id)) {
+      out.moved++;
       continue;
     }
     out.unexplained.push(r.id);

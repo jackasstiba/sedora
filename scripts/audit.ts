@@ -1,4 +1,4 @@
-/**
+﻿/**
  * データ品質の常設監査（`npm run audit`）。
  *
  * 目的: 「人間なら一瞬で気付く表記/数字/日付の粗」を、その都度目視で探すのではなく、
@@ -1005,6 +1005,52 @@ async function main() {
     report("source_stale", "更新が止まっているソースがある", "error", stale, baseline);
     report("source_stale_by_design", "設計上更新されないソースの鮮度", "warn", staleByDesign, baseline);
 
+    // (12a2) **巡回は成功しているのに、サイトに1件も出ていないソース。**
+    //
+    // 鮮度(12)は「取得が止まったか」しか見ない。取得は毎回成功していて、その中身が
+    // 一件残らず掲載スコープの外、という壊れ方はここを通り抜ける（実測 2026-08-18:
+    // pokemoncard=DB8件・全部過去日／sofvi=DB2件・全部過去日／どちらも表示0件。
+    // ポケカ公式はコード上「トレカせどりの最重要イベント」と書いてあるソースなのに、
+    // 何ヶ月も1件も出していなかった。ERROR も WARN も一度も鳴っていない）。
+    // 画像の image_source_zero と同じ考え方を、掲載そのものに当てる。
+    //
+    // **理由まで書く**（判定を諦めて理由で分ける＝[[System/rules]] 2026-08-09）。
+    //  ・「これから」が0件 → 収集元が発売済みしか出していない＝スクレイパーの入口が違う
+    //  ・「これから」はあるのに0件 → 掲載基準・重複解消で落ちている＝こちらの問題
+    // どちらなのかで打ち手が正反対になるので、件数だけ出しても動けない。
+    //
+    // レベルは warn ＋ ラチェット（既知の死にソース数を audit-baseline.json に固定し、
+    // **増えたら ERROR**）。暦が進むだけで在籍の薄いソースが一時的に0になることはあるが、
+    // その「1つ増えた」は実際に見に行く価値がある事象なので黙らせない。
+    {
+      const shownBySrc = new Map<string, number>();
+      for (const r of shown) shownBySrc.set(r.source, (shownBySrc.get(r.source) ?? 0) + 1);
+      const dbBySrc = new Map<string, { n: number; upcoming: number }>();
+      for (const r of all) {
+        const e = dbBySrc.get(r.source) ?? { n: 0, upcoming: 0 };
+        e.n++;
+        if (!r.eventDate || r.eventDate >= today) e.upcoming++;
+        dbBySrc.set(r.source, e);
+      }
+      const zero: string[] = [];
+      for (const [src, e] of dbBySrc) {
+        if ((shownBySrc.get(src) ?? 0) > 0) continue;
+        zero.push(
+          e.upcoming === 0
+            ? `${src}: 表示0件 — DB${e.n}件が**すべて過去日**（収集元から「これから」を取れていない＝入口が違う）`
+            : `${src}: 表示0件 — DB${e.n}件のうち${e.upcoming}件は日付条件を満たすのに、掲載基準か重複解消で全部落ちている`
+        );
+      }
+      report(
+        "source_contributes_zero",
+        "巡回できているのに、サイトに1件も出ていないソースがある",
+        "warn",
+        zero,
+        baseline,
+        dbBySrc.size
+      );
+    }
+
     // (12b) **サイト全体の最終更新**。1ソースずつ見る (12) は「全部まとめて止まった」を
     // 取り逃がす（全ソースが同じ日に止まれば、どれも“相対的には”おかしくない）。
     //
@@ -1057,7 +1103,11 @@ async function main() {
       }));
     // 今表示されている行の商品URLキー。消えた行がここに畳まれたなら「まだページにある」。
     const mergeKeys = new Set((nowRows ?? []).flatMap((r) => productMergeKeys(r)));
-    if (removed.length) lossByPage.set(name, classifyPageLoss(name, removed, today, mergeKeys));
+    // 「サイトのどこかには今も出ている」id の集合。月ページ・ジャンルページの所属は
+    // eventDate / genre から決まるので、それが正当に変われば移動が起きる（消失ではない）。
+    const stillDisplayedIds = new Set(shown.map((r) => r.id));
+    if (removed.length)
+      lossByPage.set(name, classifyPageLoss(name, removed, today, mergeKeys, stillDisplayedIds));
   }
   // 説明のつかない消失の**累計**（基準を受け入れてから今日まで）。
   // (14) は数日〜数週間前の基準と比べるので、1回の実行の内訳だけでは足りない。
@@ -1134,14 +1184,14 @@ async function main() {
       if (isReportableVanish(true, loss.unexplained.length)) {
         vanished.push(
           `${head}。**説明のつかない消失 ${loss.unexplained.length}件**` +
-            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}）例: ${loss.unexplained
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 別ページへ移動 ${loss.moved}）例: ${loss.unexplained
               .slice(0, 5)
               .map((id) => `#${id}`)
               .join(" ")}`
         );
       } else {
         explainedVanish.push(
-          `${name}: 全${prevIds.length}件が日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}`
+          `${name}: 全${prevIds.length}件が日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 別ページへ移動 ${loss.moved}`
         );
       }
     }
@@ -1181,19 +1231,19 @@ async function main() {
       comparedPages++;
       const loss = lossByPage.get(p.name);
       if (!loss) continue; // 消えた行が無い
-      const removed = loss.expired + loss.gone + loss.merged + loss.unexplained.length;
+      const removed = loss.expired + loss.gone + loss.merged + loss.moved + loss.unexplained.length;
       const n = isReportableLoss(prevIds.length, p.rows.length, loss.unexplained.length);
       if (n > 0) {
         bad.push(
           `${p.name} が ${prevIds.length}→${p.rows.length}件。うち **説明のつかない消失 ${loss.unexplained.length}件**` +
-            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged}）例: ${loss.unexplained
+            `（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 別ページへ移動 ${loss.moved}）例: ${loss.unexplained
               .slice(0, 5)
               .map((id) => `#${id}`)
               .join(" ")}`
         );
       } else if (removed) {
         explained.push(
-          `${p.name}: -${removed}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 説明なし ${loss.unexplained.length}）`
+          `${p.name}: -${removed}（日付切れ ${loss.expired} / 収集元から消えた ${loss.gone} / 重複に畳まれた ${loss.merged} / 別ページへ移動 ${loss.moved} / 説明なし ${loss.unexplained.length}）`
         );
       }
     }

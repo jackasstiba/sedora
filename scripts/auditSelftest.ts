@@ -24,7 +24,14 @@ import {
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
-import { lastDeadline, soonestOpenDeadline, storeWhenLabel, type StoreEntry } from "../src/lib/stores";
+import { closedStoreRowProblem } from "../src/lib/renderedStores";
+import {
+  lastDeadline,
+  soonestOpenDeadline,
+  splitStoresByDeadline,
+  storeWhenLabel,
+  type StoreEntry,
+} from "../src/lib/stores";
 import { unfreezeStoreWhen } from "./backfillDisplayText";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
@@ -36,14 +43,14 @@ import {
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
-import { dedupeItems, eventDateHeading, liveStoreSummary, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
+import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
 import { extractRaffleUrl } from "../src/scrapers/channeltono";
-import { buildRecentEndedItem, cleanRestockName, parseEndedStores, parseRestockStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
+import { buildRecentEndedItem, cleanProductName, cleanRestockName, parseEndedStores, parseRestockStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
@@ -108,6 +115,8 @@ const merged = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_FRESH));
 const relabeled = parsePrizesJson(mergePrizeEnrichment(PRIZES_OLD, PRIZES_RELABELED));
 
 const today = new Date(Date.UTC(2026, 7, 8)); // 2026-08-08 固定（今日に依存させない）
+// 2026-08-18 の実データで検証したケース用（同じく固定）。
+const today8_18 = new Date(Date.UTC(2026, 7, 18));
 
 /** 締切日と種別だけを持つ応募先の配列を手早く作る（締切の幅に関する検査用）。 */
 const S = (rows: [at: string, kind: "締切" | "開始"][]): StoreEntry[] =>
@@ -218,6 +227,96 @@ const cases: Case[] = [
   {
     name: "日付未定のまま消えた行は説明がつかない",
     fn: () => classifyPageLoss("/genre/トレカ", [{ id: 1, inDb: true, eventDate: null }], today).unexplained.length,
+    want: 1,
+  },
+  // 同一ソース・同一表示名のまとめ記事は読む側に区別がつかない（2026-08-18）。
+  // 残すのは「応募先の件数が多い方」ではなく「今日にいちばん近い動きがある方」＝実データで検証済み。
+  {
+    name: "同名まとめ: 直近に動いている方を残す（件数が多い古いハブを残さない）",
+    fn: () => {
+      const mk = (id: number, dates: string[]) => ({
+        id,
+        source: "nyuka_now",
+        title: "ONE PIECE カードゲーム",
+        url: null,
+        eventDate: null,
+        price: null,
+        imageUrl: null,
+        stores: JSON.stringify(dates.map((at) => ({ name: `店${at}`, url: null, form: "抽選", when: `${at}〜`, note: null, at, kind: "開始" }))),
+      });
+      const kept = dedupeSameSourceSameName([mk(1, ["2026-08-15", "2026-08-07"]), mk(2, ["2026-06-16", "2026-05-01", "2026-05-08", "2026-03-29"])], today8_18);
+      return kept.map((r) => r.id).join(",");
+    },
+    want: "1",
+  },
+  {
+    name: "同名まとめ: 名前が違えば畳まない",
+    fn: () => {
+      const mk = (id: number, title: string) => ({
+        id, source: "nyuka_now", title, url: null, eventDate: null, price: null, imageUrl: null,
+        stores: JSON.stringify([{ name: "店", url: null, form: "抽選", when: "8/15〜", note: null, at: "2026-08-15", kind: "開始" }]),
+      });
+      return dedupeSameSourceSameName([mk(1, "ポケモンカード メガブレイブ"), mk(2, "ポケモンカード メガシンフォニア")], today8_18).length;
+    },
+    want: 2,
+  },
+  {
+    name: "同名まとめ: stores を持たない通常の商品行は触らない",
+    fn: () => {
+      const mk = (id: number) => ({ id, source: "figisland", title: "同じ名前のフィギュア", url: null, eventDate: null, price: null, imageUrl: null, stores: null });
+      return dedupeSameSourceSameName([mk(1), mk(2)], today8_18).length;
+    },
+    want: 2,
+  },
+  {
+    name: "同名まとめ: 収集元が違えば触らない（クロスソースは別の検査の仕事）",
+    fn: () => {
+      const mk = (id: number, source: string) => ({
+        id, source, title: "ONE PIECE カードゲーム", url: null, eventDate: null, price: null, imageUrl: null,
+        stores: JSON.stringify([{ name: "店", url: null, form: "抽選", when: "8/15〜", note: null, at: "2026-08-15", kind: "開始" }]),
+      });
+      return dedupeSameSourceSameName([mk(1, "nyuka_now"), mk(2, "card_chusen")], today8_18).length;
+    },
+    want: 2,
+  },
+
+  // 収集元のまとめ記事タイトル → 商品名（2026-08-18: 巡回範囲を広げたら書式が違う記事が届いた）
+  { name: "まとめ記事: 新しい書式（抽選予約・先着販売・…情報まとめ）から商品名を取り出す", fn: () => cleanProductName("【2026年8月17日更新】ポケモンカード メガブレイブの抽選予約・先着販売・在庫あり・再販入荷情報まとめ"), want: "ポケモンカード メガブレイブ" },
+  { name: "まとめ記事: 旧書式（各種の抽選・予約情報まとめ）も従来どおり", fn: () => cleanProductName("【2026年8月18日更新】POP MART LABUBU ラブブ各種の抽選・予約情報まとめ"), want: "POP MART LABUBU ラブブ" },
+  { name: "まとめ記事: 「まとめ」で終わらない見出しは商品名を削らない", fn: () => cleanProductName("【更新】ポケモンカード メガブレイブの抽選予約はこちら"), want: "ポケモンカード メガブレイブの抽選予約はこちら" },
+  { name: "まとめ記事: 更新日の【】だけの見出しでも壊れない", fn: () => cleanProductName("【2026年8月17日更新】Nintendo Switch 2の抽選予約・先着販売・在庫あり・再販入荷情報まとめ"), want: "Nintendo Switch 2" },
+
+  // ページ間の移動は消失ではない（2026-08-18 実測: 受付中ストアが増えて最も近い日が
+  // 11月→8/18に変わり、/release/2026-11 から /release/2026-08 へ移った3件が
+  // 「説明のつかない消失」で ERROR を出していた。データは1件も失われていない）。
+  {
+    name: "別ページへ移った行は消失ではない（移動として数える）",
+    fn: () =>
+      classifyPageLoss(
+        "/release/2026-11",
+        [{ id: 7, inDb: true, eventDate: new Date(Date.UTC(2026, 7, 18)) }],
+        today,
+        undefined,
+        new Set([7])
+      ).moved,
+    want: 1,
+  },
+  {
+    name: "サイトのどこにも出ていない行は、移動にせず説明なしのまま（鳴る側）",
+    fn: () =>
+      classifyPageLoss(
+        "/release/2026-11",
+        [{ id: 7, inDb: true, eventDate: new Date(Date.UTC(2026, 10, 20)) }],
+        today,
+        undefined,
+        new Set([99])
+      ).unexplained.length,
+    want: 1,
+  },
+  {
+    name: "移動の判定は、収集元から消えた理由を覆い隠さない",
+    fn: () =>
+      classifyPageLoss("/genre/トレカ", [{ id: 7, inDb: false, eventDate: null }], today, undefined, new Set([7])).gone,
     want: 1,
   },
   // 閾値: /premium 事件（63→36・説明なし27件）は鳴る／代表入れ替えの1〜2件は鳴らない
@@ -909,6 +1008,28 @@ const cases: Case[] = [
   { name: "締切: 開始日の枠は締切として数えない", fn: () => soonestOpenDeadline(S([["2026-08-20", "開始"]]), today)?.toISOString().slice(0, 10) ?? "null", want: "null" },
   { name: "締切: 暦日を持たない枠（調査中）は判断材料にしない", fn: () => soonestOpenDeadline([{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today)?.toISOString().slice(0, 10) ?? "null", want: "null" },
   { name: "期限: 最後の締切を載せてよい期限にする", fn: () => lastDeadline(S([["2026-08-08", "締切"], ["2026-08-26", "締切"], ["2026-08-21", "締切"]]))?.toISOString().slice(0, 10) ?? "null", want: "2026-08-26" },
+
+  // ── 「受付中」と書く節に、締切が過ぎた店を混ぜない（2026-08-18・観点B） ──
+  // 実測: /items/75417 の「受付中ストア（126店）」の先頭30店が昨日締切だった。
+  // 8/16 に直したのはカード要約と上部の抽選日だけで、詳細ページの一覧本体が残っていた。
+  // 落とす条件は soonestOpenDeadline と同じ＝**締切の暦日を知っている枠だけ**を終わったと言う。
+  { name: "受付中の仕分け: 過ぎた締切は closed へ", fn: () => { const r = splitStoresByDeadline(S([["2026-08-01", "締切"], ["2026-08-21", "締切"]]), today); return `${r.open.length}/${r.closed.length}`; }, want: "1/1" },
+  { name: "受付中の仕分け: 当日の締切はまだ open", fn: () => { const r = splitStoresByDeadline(S([["2026-08-08", "締切"]]), today); return `${r.open.length}/${r.closed.length}`; }, want: "1/0" },
+  { name: "受付中の仕分け: 受付開始待ちは落とさない（受付前として出す）", fn: () => { const r = splitStoresByDeadline(S([["2026-08-20", "開始"]]), today); return `${r.open.length}/${r.closed.length}`; }, want: "1/0" },
+  { name: "受付中の仕分け: 過去の開始日も落とさない（開始は締切ではない）", fn: () => { const r = splitStoresByDeadline(S([["2026-07-01", "開始"]]), today); return `${r.open.length}/${r.closed.length}`; }, want: "1/0" },
+  { name: "受付中の仕分け: 締切が分からない枠は落とさない", fn: () => { const r = splitStoresByDeadline([{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today); return `${r.open.length}/${r.closed.length}`; }, want: "1/0" },
+  { name: "受付中の仕分け: 開催店舗（kind なし）は落とさない", fn: () => { const r = splitStoresByDeadline([{ name: "会場", url: null, form: "東京都", when: null, note: null }], today); return `${r.open.length}/${r.closed.length}`; }, want: "1/0" },
+  { name: "受付中の仕分け: 全部過ぎたら open が0になる（節の文言を変える合図）", fn: () => { const r = splitStoresByDeadline(S([["2026-08-01", "締切"], ["2026-08-05", "締切"]]), today); return `${r.open.length}/${r.closed.length}`; }, want: "0/2" },
+
+  // 描画側の網。**この粗は巡回直後だけ消える**ので、本番を測った0件は直っている証拠にならない。
+  // だから判定を純関数にして、鳴る側と鳴らない側を合成データで固定する。
+  { name: "描画: 過ぎた締切が受付中の節に並んでいたら鳴る（鳴る側）", fn: () => !!closedStoreRowProblem("ビックカメラ柏店 抽選 〜8/1 19:00 条件: 会員 応募ページ →", today, parseDisplayedDate), want: true },
+  { name: "描画: まだ先の締切では鳴らない", fn: () => closedStoreRowProblem("ミント仙台店 抽選 〜8/21 12:00 応募ページ →", today, parseDisplayedDate), want: null },
+  { name: "描画: 当日の締切では鳴らない", fn: () => closedStoreRowProblem("HMV 抽選 〜8/8 23:59 応募ページ →", today, parseDisplayedDate), want: null },
+  { name: "描画: 「〜本日/明日」は表示時に作るので対象外", fn: () => closedStoreRowProblem("TCバトロコ 抽選 〜本日 12:00 応募ページ →", today, parseDisplayedDate), want: null },
+  { name: "描画: 受付開始の表記（8/20 00:00〜）は締切ではない", fn: () => closedStoreRowProblem("おもちゃのペリカン 抽選 8/1 00:00〜（受付前） 応募ページ →", today, parseDisplayedDate), want: null },
+  { name: "描画: 締切表記が無い行では鳴らない", fn: () => closedStoreRowProblem("Amazon.co.jp 抽選 締切時刻 調査中 応募ページ →", today, parseDisplayedDate), want: null },
+  { name: "描画: 年跨ぎ（基準日から見て最も近い年）を過去と誤判定しない", fn: () => closedStoreRowProblem("店 抽選 〜1/5 23:59 応募ページ →", today, parseDisplayedDate), want: null },
   { name: "期限: 締切の暦日が無ければ null（＝触らない）", fn: () => lastDeadline(S([["2026-08-20", "開始"]]))?.toISOString().slice(0, 10) ?? "null", want: "null" },
   // 詳細ページ側: 表示日だけ差し替え、落とさない（直リンク・検索流入の入口なので404にしない）
   { name: "詳細: 過去日の eventDate をまだ締切前の最短に直す", fn: () => { const r = withLiveStoreDeadline({ id: 1, source: "card_chusen", title: "x", url: null, eventDate: new Date("2026-08-01T00:00:00Z"), price: null, imageUrl: null, stores: JSON.stringify(S([["2026-08-01", "締切"], ["2026-08-21", "締切"]])) }, today); return (r.eventDate as Date).toISOString().slice(0, 10); }, want: "2026-08-21" },

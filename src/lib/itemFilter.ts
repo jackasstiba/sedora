@@ -479,6 +479,62 @@ function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
 }
 
 /**
+ * 同じ収集元の「まとめ記事」由来の行が、**同じ表示名で複数**並ぶのを解消する。
+ *
+ * 2026-08-18 実測: 抽選まとめの巡回範囲を8ページ→終端（17ページ）に広げたら、
+ * `nyuka_now` に「ONE PIECE カードゲーム」という**まったく同じ表示名の行が2つ**出た。
+ * まとめ記事の見出しが商品名になる設計なので、収集元が同じ名前の記事を複数持つと必ず起きる。
+ * 画面には同じ文字列のカードが2枚並ぶだけで、**読む側には区別がつかない**（受付中ストアの
+ * 「同じ表記が並ぶ」と同じ粗）。
+ *
+ * どちらを残すかは**測ってから決めた**（推測で畳まない）:
+ *   #23075 … 応募先6件・受付開始 8/15 / 8/13 / 8/7（＝今まさに動いている）
+ *   #91599 … 応募先12件だが中身は「交流会【7月開催】」「チャンピオンシップ2023」など
+ *            *イベント*で、直近の動きは 6/16（63日前）＝古い総合ハブ記事
+ * **応募先の件数で選ぶと古いハブが勝つ**ので、基準は「今日にいちばん近い動き」にする。
+ *
+ * 対象は `stores` を持つ行だけ（＝まとめ記事由来）。通常の商品行は別カラー・別弾があるので触らない。
+ */
+export function dedupeSameSourceSameName<T extends DedupeItem>(items: T[], today: Date): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    if (!it.stores) continue;
+    const key = dedupeKey(cleanListTitle(it.source, it.title));
+    if (key.length < 8) continue; // 短い名前の偶発一致で別商品を潰さない
+    const k = `${it.source}|${key}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  /** その行が持つ日付のうち、今日にいちばん近いものまでの日数（小さいほど「動いている」）。 */
+  const nearestMoveDays = (it: T): number => {
+    const stores = it.stores ? parseStoresJson(it.stores) : null;
+    if (!stores?.length) return Number.POSITIVE_INFINITY;
+    let best = Number.POSITIVE_INFINITY;
+    for (const s of stores) {
+      if (!s.at) continue;
+      const d = Math.abs(new Date(`${s.at}T00:00:00.000Z`).getTime() - today.getTime()) / 86_400_000;
+      if (d < best) best = d;
+    }
+    return best;
+  };
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    let best = g[0];
+    for (const it of g) {
+      if (it === best) continue;
+      const d = nearestMoveDays(best) - nearestMoveDays(it) || repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/**
  * 商品として成立していない投稿を一覧から外す。
  * Xミラー(channeltono)には「もうすぐあみあみで復活更新があるかと…」のような、商品名を一切
  * 含まない実況投稿が混ざる。整形しても商品名が出てこない＝何が買えるか特定できないので、
@@ -618,14 +674,17 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
   // 「過ぎた予定」を落とすので、先に表示日を today 基準へ作り直しておかないと、
   // 復活すべき行（まだ締切前の店がある商品）がそこで捨てられる。
   return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
-    dedupeSneakerCrossSource(
-      dedupeSameSourceExact(
-        dedupeWordOrderCrossSource(
-          dedupeCrossSource(
-            dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(applyLiveStoreDeadline(items)))
+    dedupeSameSourceSameName(
+      dedupeSneakerCrossSource(
+        dedupeSameSourceExact(
+          dedupeWordOrderCrossSource(
+            dedupeCrossSource(
+              dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(applyLiveStoreDeadline(items)))
+            )
           )
         )
-      )
+      ),
+      todayJst()
     )
   )));
 }

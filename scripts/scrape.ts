@@ -1,5 +1,5 @@
 import { prisma } from "../src/lib/prisma";
-import { runAllScrapers } from "../src/scrapers";
+import { runAllScrapers, SCRAPER_SOURCES } from "../src/scrapers";
 import type { ScrapeContext } from "../src/scrapers/types";
 import { checkHealth } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
@@ -15,7 +15,24 @@ import { nowInstant } from "../src/lib/date";
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
 const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen"]);
 
+// `--only=<source>[,<source>…]`: その収集元だけを巡回する（定例更新では使わない）。
+// スクレイパーを1つ直しただけで21ソース・1時間の巡回を回す必要をなくすための入口。
+// **健全性チェックもこの範囲だけ**になるので、定例更新には使わないこと。
+const ONLY = process.argv
+  .slice(2)
+  .filter((a) => a.startsWith("--only="))
+  .flatMap((a) => a.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean));
+
 async function main() {
+  if (ONLY.length) {
+    const unknown = ONLY.filter((s) => !SCRAPER_SOURCES.includes(s));
+    if (unknown.length) {
+      console.error(`未知の収集元: ${unknown.join(", ")}\n登録済み: ${SCRAPER_SOURCES.join(", ")}`);
+      process.exit(1);
+    }
+    console.log(`※ --only=${ONLY.join(",")} ＝この収集元だけを巡回します（健全性チェックもこの範囲だけ）\n`);
+  }
+
   // figisland_pb は詳細ページ取得型。「最後に詳細を取り直した時刻」を渡して古い順に一巡させる。
   // （scrapedAt は upsert のたびに更新されるので、詳細を取った回だけ進む＝そのまま最終取得時刻になる）
   const pbRows = await prisma.item.findMany({
@@ -26,7 +43,7 @@ async function main() {
     detailFetchedAt: new Map(pbRows.map((r) => [r.sourceId, r.scrapedAt.getTime()])),
   };
 
-  const results = await runAllScrapers(ctx);
+  const results = await runAllScrapers(ctx, ONLY);
   let total = 0;
 
   for (const { source, items, error } of results) {

@@ -122,6 +122,41 @@ function datedDeadlines(stores: StoreEntry[]): { at: string }[] {
 }
 
 /**
+ * 受付が生きている枠と、締切が過ぎた枠に分ける。
+ *
+ * 2026-08-18 実測（観点B＝せどらーとして実際に応募しようとして発見）: 商品詳細の
+ * 「🎯 抽選・予約 受付中ストア（126店・応募ページ 126件）／現在応募・予約を受付中の
+ * ストアです」の一覧に、**締切が昨日で終わった店が30店（絶対日付表記58件中30件）**
+ * 混ざっていた。しかも並びは締切の昇順なので、**先頭30店がすべて死んでいる**状態で、
+ * いちばん上から順に応募ページを開くという普通の使い方をすると全部空振りする。
+ *
+ * 2026-08-16 に直したのは *カードの要約*（liveStoreSummary）と *上部の抽選日*
+ * （withLiveStoreDeadline）だけで、**詳細ページの一覧そのものは素通りしていた**
+ * ＝同じ事故の「まだ直していなかった半分」。audit も audit:page も audit:facts も
+ * ERROR 0 のまま黙っていた（どれも「受付中」という**見出しの約束**と、その下に並ぶ
+ * 締切の**値**を突き合わせていなかった）。
+ *
+ * 判定の原則は datedDeadlines と同じ＝**締切の暦日を知っている枠だけを「終わった」と言う**。
+ * 締切時刻が「調査中」の枠、受付開始待ちの枠（kind="開始"）、開催店舗（kind なし）は、
+ * 知らないことを根拠に落とさない。
+ */
+export function splitStoresByDeadline(
+  stores: StoreEntry[],
+  today: Date
+): { open: StoreEntry[]; closed: StoreEntry[] } {
+  const open: StoreEntry[] = [];
+  const closed: StoreEntry[] = [];
+  for (const s of stores) {
+    const past =
+      s.kind === "締切" &&
+      !!s.at &&
+      new Date(`${s.at}T00:00:00.000Z`).getTime() < today.getTime();
+    (past ? closed : open).push(s);
+  }
+  return { open, closed };
+}
+
+/**
  * **まだ締切前の枠のうち、いちばん早い締切**（＝この商品で今いちばん急ぐ日）。
  * 締切付きの枠が1つも無い／全部過ぎている場合は null。
  *

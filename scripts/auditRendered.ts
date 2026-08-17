@@ -18,7 +18,8 @@
 import * as cheerio from "cheerio";
 import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
-import { countdownBadgeProblem, renderedDateProblems, todayJst } from "../src/lib/date";
+import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
+import { closedStoreRowProblem } from "../src/lib/renderedStores";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -79,6 +80,43 @@ function cardDateProblems($: cheerio.CheerioAPI, today: Date): { problems: strin
   return { problems, badges };
 }
 
+/**
+ * **見出しが「受付中」と約束している節に、締切が過ぎた店が並んでいないか。**
+ *
+ * 2026-08-18 実測（観点B）: `/items/75417` の「🎯 抽選・予約 受付中ストア（126店・応募ページ
+ * 126件）／現在応募・予約を受付中のストアです」の中に、**締切が昨日で終わった店が30店**
+ * 並んでいた。並びは締切の昇順なので**先頭30店がすべて死んでいる**＝上から順に応募ページを
+ * 開くという普通の使い方が全部空振りする。
+ *
+ * これが既存の検査で1つも鳴らなかった理由: audit はDBの値を見る（締切の値自体は正しい）、
+ * audit:facts は外部本文と突き合わせる（対象外）、audit:page の日付検査は「🔥本日バッジ↔
+ * 日付ラベル」というカード内の突合で、**見出しの約束と、その下に並ぶ締切**は誰も見ていなかった。
+ *
+ * 判定は画面の文字列だけで行う。締切表記（"〜8/17 20:00"）だけを見て、受付開始表記
+ * （"8/20 00:00〜"）は見ない。年は `parseDisplayedDate` の「基準日にいちばん近い年」規則で
+ * 解釈する（年跨ぎで 1/5 を過去と誤判定しないため。audit:clock が年またぎを回す）。
+ */
+function closedStoresShownAsOpen(
+  $: cheerio.CheerioAPI,
+  today: Date
+): { problems: string[]; examined: number } {
+  const problems: string[] = [];
+  let examined = 0;
+  $("section").each((_, sec) => {
+    if (!$(sec).find("h2").first().text().includes("受付中ストア")) return;
+    $(sec)
+      .find("li")
+      .each((_, li) => {
+        examined++;
+        // 判定そのものは純関数（合成データで両側を固定できる形）。この粗は巡回直後だけ
+        // 消えるので、**本番を測った0件は「直っている」証拠にならない**＝ src/lib/renderedStores.ts。
+        const p = closedStoreRowProblem($(li).text(), today, parseDisplayedDate);
+        if (p) problems.push(p);
+      });
+  });
+  return { problems, examined };
+}
+
 /** 商品カードの見出しテキストを取り出す（カードは /items/N へのリンク）。 */
 function cardTitles($: cheerio.CheerioAPI): string[] {
   const out: string[] = [];
@@ -99,6 +137,9 @@ async function main() {
   let listItemsSeen = 0;
   // 「🔥本日/明日/あとN日」のバッジを何枚見たか。0枚なら日付の突合は空振り（＝何も守っていない）。
   let badgesSeen = 0;
+  // 「受付中ストア」節の行を何行見たか。stores を持つ商品があるのに0行なら空振り。
+  let storeRowsSeen = 0;
+  let storeItemsCount = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -192,6 +233,7 @@ async function main() {
     const byId = new Map(all.map((r) => [r.id, r]));
     // 受付中ストアを持つ商品は全件見る（リスト表示の粗が実際に出た面なので抜き取りにしない）。
     const withStores = [...byId.values()].filter((r) => r.stores);
+    storeItemsCount = withStores.length;
     const withPrizes = [...byId.values()].filter((r) => !r.stores && r.prizes).slice(0, 15);
     const rich = [...withStores, ...withPrizes];
     const rest = [...byId.values()].filter((r) => !r.stores && !r.prizes);
@@ -221,6 +263,10 @@ async function main() {
       const itemCardDates = cardDateProblems($, today);
       badgesSeen += itemCardDates.badges;
       for (const msg of itemCardDates.problems) flag(`/items/${r.id}`, "日付の食い違い（画面）", msg);
+      // 見出しの約束（「受付中」）と、その下に並ぶ締切の突合。
+      const closed = closedStoresShownAsOpen($, today);
+      storeRowsSeen += closed.examined;
+      for (const msg of closed.problems) flag(`/items/${r.id}`, "受付終了の店を受付中として出している", msg);
       $("ul, ol").each((_, ul) => {
         const items = $(ul)
           .children("li")
@@ -241,8 +287,13 @@ async function main() {
   // 実際に検査した物量を必ず出す。セレクタが壊れると0枚になり、静かに素通りするのを防ぐ。
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
-      `カウントダウンのバッジ ${badgesSeen}枚`
+      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品）`
   );
+  // 「受付中ストア」の検査は母数が要る。stores を持つ商品があるのに1行も見ていないなら、
+  // それは「きれいだから0件」ではなく「何も見ていない0件」（セレクタ・見出し文言の変更）。
+  if (storeItemsCount > 0 && storeRowsSeen === 0) {
+    flag("(全体)", "検査が空振り", "「受付中ストア」の行を1行も検出できていない（締切の突合が動いていない）");
+  }
   if (checked > 0 && cardsSeen === 0) {
     flag("(全体)", "検査が空振り", "商品カードを1枚も検出できていない（セレクタが壊れた疑い）");
   }

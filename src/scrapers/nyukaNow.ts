@@ -25,7 +25,25 @@ const CATEGORY_BASE = "https://nyuka-now.com/archives/category/chusen";
 // 今在庫がある店舗テーブル（th=店名/td=商品リンク）を持つ＝「いま買える」速報そのもの。
 const RESTOCK_BASE = "https://nyuka-now.com/archives/category/restock";
 const ARTICLE_BASE = "https://nyuka-now.com/archives/";
-const MAX_PAGES = 8; // 実測3ページ。将来増えても取りこぼさないよう余裕を持たせる。
+/**
+ * カテゴリ一覧を何ページまで辿るかの**安全弁**（終端の判定は「新規が0になったら」＝下の
+ * collectArticles）。
+ *
+ * 2026-08-18 実測でここが実害を出していた: 「実測3ページ。将来増えても取りこぼさないよう
+ * 余裕を持たせる」と書いて 8 に置いていたが、抽選カテゴリは **17ページ・171記事**に育っており、
+ * **90記事（53%）を一度も見ていなかった**。取りこぼしていたのは 8/17更新の
+ * 「ポケモンカード メガブレイブ／メガシンフォニア／スタートデッキ100…の抽選予約まとめ」など
+ * **サイトの主力そのもの**。件数もエラーも出ないので、画面をいくら見ても分からない
+ * （＝[[System/rules]] 観点D「収集元にあるのにサイトに無い」）。
+ *
+ * ichiban_kuji が 2026-08-15 に同じ理由で「固定の先2ヶ月」→「空の月が2つ続くまで」に
+ * 変えたのと同型。**固定値はいつか収集元に追い越される＝窓ではなく終端を見る。**
+ * 追い越されたことに気付けるよう、上限に当たったまま新規記事が残っている場合は
+ * **例外にする**（黙って半分だけ取り込むより、そのソースを赤くして前回値を保つ方が安全＝
+ * 巡回失敗時は upsert も受付終了の削除も走らないので、既存データは壊れない。3日で
+ * audit の source_stale が ERROR を出す）。
+ */
+const MAX_PAGES = 40;
 
 type Article = { id: string; title: string };
 
@@ -64,14 +82,32 @@ async function collectArticles(base = CATEGORY_BASE): Promise<Article[]> {
       }
     }
     if (added === 0) break; // 新規が無くなったら終了
+    // 上限に当たったのに、まだ新規が出続けている＝窓が収集元に追い越された。
+    // 黙って続けると「半分だけ取り込んだ正常な巡回」に見える（実測でそうなっていた）。
+    if (p === MAX_PAGES)
+      throw new Error(
+        `${base}: ${MAX_PAGES}ページまで辿ってもまだ新規記事がある（累計${byId.size}件）。MAX_PAGES が収集元の規模に追い越されている`
+      );
     await sleep(400);
   }
   return [...byId.values()];
 }
 
-/** タイトル「【…更新】商品名（各種）の抽選・予約情報まとめ」から商品名だけを取り出す。 */
-function cleanProductName(title: string): string {
+/**
+ * タイトル「【…更新】商品名（各種）の抽選・予約情報まとめ」から商品名だけを取り出す。
+ *
+ * 2026-08-18: 巡回範囲を8ページ→終端まで広げたら、**新しく届いた記事の書式が違った**＝
+ * 「ポケモンカード メガブレイブ**の抽選予約・先着販売・在庫あり・再販入荷情報まとめ**」。
+ * 旧実装は `の抽選[・･]` のように「抽選」の直後が区切り記号であることを前提にしていたので
+ * 1文字も落とせず、記事見出しがそのまま商品名として画面に出ていた。
+ * → **「〜の抽選」で始まり「まとめ」で終わる末尾**を落とす形に一般化する
+ *   （末尾が「まとめ」であることを条件に付けて、商品名の途中を削らないようにする）。
+ */
+export function cleanProductName(title: string): string {
   let t = title.replace(/^【[^】]*】\s*/, "");
+  // 「…の抽選○○・…情報まとめ」型（末尾が「まとめ」のものだけ）
+  t = t.replace(/(?:各種)?の抽選[^【】]*まとめ\s*$/, "");
+  // 旧来の型（末尾が「まとめ」で終わらない場合の保険）
   t = t.replace(/各種の抽選[・･].*$/, "");
   t = t.replace(/の抽選[・･].*$/, "");
   t = t.replace(/各種\s*$/, "");
@@ -437,8 +473,10 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
     restockArticles = (await collectArticles(RESTOCK_BASE)).filter((a) =>
       /在庫あり|再販入荷/.test(a.title)
     );
-  } catch {
-    // restockカテゴリの取得失敗は chusen 分に影響させない
+  } catch (e) {
+    // restockカテゴリの取得失敗は chusen 分に影響させない。ただし**黙らない**:
+    // ここを空の catch にしていたので、restock 側が窓に追い越されても無音だった。
+    console.error(`[nyuka_now] restockカテゴリを取得できず: ${e instanceof Error ? e.message : String(e)}`);
   }
   for (const a of restockArticles) {
     let html: string;
