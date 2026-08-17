@@ -38,7 +38,7 @@ export default async function LotteryPage() {
           いま応募できる抽選・予約抽選を、締切の近い順に集約。スニーカー・一番くじ・トレカ・コラボ限定品に加え、
           Nintendo Switch 2 / GeForce RTX など家電・ゲーム機の抽選も掲載します。
         </p>
-        <p className="mt-2 text-xs text-neutral-400">受付中・予定 {items.length} 件</p>
+        <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">受付中・予定 {items.length} 件</p>
       </header>
 
       {items.length > 0 ? (
@@ -53,7 +53,7 @@ export default async function LotteryPage() {
         </p>
       )}
 
-      <p className="mt-8 text-xs text-neutral-400">
+      <p className="mt-8 text-xs text-neutral-600 dark:text-neutral-400">
         ※ 応募条件（購入履歴・会員登録など）・締切・在庫は各リンク先の公式ページで最新をご確認ください。
         本ページは情報提供が目的で、投機や高額転売を推奨するものではありません。
       </p>

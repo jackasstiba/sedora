@@ -53,6 +53,30 @@ import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
+import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
+import { readFileSync } from "node:fs";
+import {
+  AA_NORMAL,
+  contrastHex,
+  parseHex,
+  readCssHexToken,
+  relativeLuminance,
+} from "../src/lib/contrast";
+
+// 観点H用: パレットは**実ファイルから読む**。ここに値をコピーすると、CSSを戻したときに
+// 検査だけが古い値で緑を出す（＝「誤りを正解として固定する」型・2026-08-16 に踏んだ）。
+const GLOBALS_CSS = readFileSync(new URL("../src/app/globals.css", import.meta.url), "utf8");
+const BRAND_600 = readCssHexToken(GLOBALS_CSS, "color-rose-600");
+const BRAND_700 = readCssHexToken(GLOBALS_CSS, "color-rose-700");
+const BG_LIGHT = readCssHexToken(GLOBALS_CSS, "background"); // 最初の :root ＝ライト側の地色
+const CARD_WHITE = "#ffffff"; // カードは bg-white（ライト時）
+
+/** 小さい文字として AA を満たすか。トークンが読めなければ null（＝素通りさせない）。 */
+function aaOnBrand(fg: string | null, bg: string | null): boolean | null {
+  if (!fg || !bg) return null;
+  const r = contrastHex(fg, bg);
+  return r === null ? null : r >= AA_NORMAL;
+}
 
 // 実物と同じ並び（記事末尾に通販の商品リンクが来る）を再現した最小の記事HTML。
 const EVENT_ARTICLE_HTML =
@@ -1136,6 +1160,81 @@ const cases: Case[] = [
     name: "画像: 記事の商品コードが1つなら特定する",
     fn: () => extractSoleJan("<a href='https://example.com/search?q=4580886840045'>購入</a> JAN:4580886840045"),
     want: "4580886840045",
+  },
+
+  // ── 「直近◯日の新着」の窓（pokemon_goods）──
+  // 取り込み側と掲載側が同じ物差しを使うことを固定する。鳴らない側3件・鳴る側1件。
+  {
+    name: "新着の窓: 登場から30日ちょうどはまだ新着",
+    fn: () =>
+      isRecentPokemonGoods("登場 2026/07/18", new Date(Date.UTC(2026, 7, 17))),
+    want: true,
+  },
+  {
+    name: "新着の窓: 登場から31日は新着ではない（鳴る側）",
+    fn: () =>
+      isRecentPokemonGoods("登場 2026/07/17", new Date(Date.UTC(2026, 7, 17))),
+    want: false,
+  },
+  {
+    // 実測でいちばん古かった行（52日前）。構造的な掃除漏れはここに出る。
+    name: "新着の窓: 実測で最古だった52日前は新着ではない",
+    fn: () => isRecentPokemonGoods("登場 2026/06/26", new Date(Date.UTC(2026, 7, 17))),
+    want: false,
+  },
+  {
+    // 日付が読めないものを消すと、書式が変わった日にソースが丸ごと消える。
+    name: "新着の窓: 日付が読めない行は落とさない",
+    fn: () => isRecentPokemonGoods("登場 未定", new Date(Date.UTC(2026, 7, 17))),
+    want: true,
+  },
+  {
+    name: "新着の窓: 存在しない日付は読まない",
+    fn: () => parseAppearedDate("登場 2026/02/30"),
+    want: null,
+  },
+
+  // ── 観点H（見た目・可読性）: ブランド色のコントラストを CSS の実ファイルで固定する ──
+  //
+  // audit / audit:page / audit:facts はどれも「文字列」しか見ないので、*読めるか* は
+  // 原理的に素通りする。実測（2026-08-17・本番を実際に塗って測定）で、いちばん読ませたい
+  // カードの日付が 3.54:1（AA=4.5:1）だった。色を直すだけでは同じことが起きるので、
+  // **パレットの下限をここで機械化する**。下の4件は「鳴らない側」3件と「鳴る側」1件。
+  {
+    name: "観点H: ブランド色600は白いカードの上で AA(4.5:1) を満たす（カードの日付）",
+    fn: () => aaOnBrand(BRAND_600, CARD_WHITE),
+    want: true,
+  },
+  {
+    name: "観点H: ブランド色600は生成りの地の上でも AA を満たす（ロゴ・フッタのリンク）",
+    fn: () => aaOnBrand(BRAND_600, BG_LIGHT),
+    want: true,
+  },
+  {
+    name: "観点H: ブランド色600の面に白文字を載せて AA を満たす（🔥本日バッジ・検索ボタン）",
+    fn: () => aaOnBrand("#ffffff", BRAND_600),
+    want: true,
+  },
+  {
+    // **鳴る側**: 2026-08-17 まで実際に使っていた色。これが true を返すようになったら、
+    // この検査は「何も見ていない」状態に戻っている。
+    name: "観点H: 旧ブランド色 #ef5322 は AA を満たさない（検査が落ちられることの確認）",
+    fn: () => aaOnBrand("#ef5322", CARD_WHITE),
+    want: false,
+  },
+  {
+    name: "観点H: hover用の700は600より暗い（押した感じが出る）",
+    fn: () => {
+      const a = parseHex(BRAND_700 ?? "");
+      const b = parseHex(BRAND_600 ?? "");
+      return a !== null && b !== null && relativeLuminance(a) < relativeLuminance(b);
+    },
+    want: true,
+  },
+  {
+    name: "観点H: CSSからトークンを読めなければ null（読めていないのに緑にしない）",
+    fn: () => readCssHexToken("--color-rose-600: var(--x);", "color-rose-600"),
+    want: null,
   },
 ];
 

@@ -54,7 +54,7 @@ export async function SiteHeader() {
         <a
           href="/feed.xml"
           title="RSSで新着を購読"
-          className="shrink-0 rounded-md p-1.5 text-neutral-500 transition hover:bg-rose-50 hover:text-rose-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
+          className="shrink-0 rounded-md p-1.5 text-neutral-600 transition hover:bg-rose-50 hover:text-rose-600 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-rose-400"
         >
           <span className="sr-only">RSSで新着を購読</span>
           <svg

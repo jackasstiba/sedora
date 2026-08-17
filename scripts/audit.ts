@@ -43,6 +43,7 @@ import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { isGenericImageUrl, productNameMatches } from "../src/scrapers/imagePick";
+import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { getSitemapItemRefs } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
@@ -884,6 +885,43 @@ async function main() {
       undatedWithMonth,
       baseline,
       undated
+    );
+  }
+
+  // (11d) 「直近◯日の新着」と決めているソースが、その窓を超えた行を載せ続けていないか。
+  //
+  // 実測（2026-08-17）: pokemon_goods は「直近30日の新着だけを載せる」設計だったが、
+  // その cutoff は**取り込み側にしか無かった**ので、一度入った行は消えなかった。
+  // 掲載105件（サイト全体の7%）が全て過去日で、最古 52日前・中央 24日前。しかも
+  // eventDate を持たない設計なので「日付未定」の顔で今後の一覧に居座り、
+  // 期限切れを落とす isStalePlan では **0/105** しか落ちていなかった。
+  // ＝ミス13と同じ型（取り込み時のルールが、既に入っている行に届かない）。
+  //
+  // しきい値に猶予（+14日）を置く理由: 掃除は巡回のときにしか走らないので、
+  // 窓ちょうど（30日）で鳴らすと**更新が数日空いただけで関門が止まる**＝
+  // 「暦が進むだけで鳴る検査」になる（2026-08-11 に page_vanished で踏んだ型）。
+  // ここで捕まえたいのは「掃除の経路そのものが無い」構造的な失敗（実測52日）なので、
+  // 44日を超えたら ERROR にする。`audit:tomorrow` の +7日でも鳴らない。
+  {
+    const grace = POKEMON_GOODS_RECENT_DAYS + 14;
+    const rows = shown.filter((r) => r.source === "pokemon_goods");
+    const over: string[] = [];
+    for (const r of rows) {
+      const appeared = parseAppearedDate(r.eventDateText);
+      if (!appeared) continue;
+      const age = Math.round((today.getTime() - appeared.getTime()) / 86_400_000);
+      if (age > grace)
+        over.push(
+          `[pokemon_goods #${r.id}] 登場から${age}日（新着の窓は${POKEMON_GOODS_RECENT_DAYS}日）: ${r.title.slice(0, 50)}`
+        );
+    }
+    report(
+      "recent_window_overrun",
+      `「直近${POKEMON_GOODS_RECENT_DAYS}日の新着」と決めたソースが、窓を大きく超えた行を載せ続けている`,
+      "error",
+      over,
+      baseline,
+      rows.length
     );
   }
 

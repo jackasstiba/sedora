@@ -100,7 +100,7 @@ export default async function MonthPage({ params }: Props) {
             <section key={day} id={`day-${day}`} className="scroll-mt-4">
               <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
                 {Number(month.slice(5, 7))}月{day}日
-                <span className="ml-1 text-sm font-normal text-neutral-400">
+                <span className="ml-1 text-sm font-normal text-neutral-600 dark:text-neutral-400">
                   ({WEEKDAYS[dow]}) {dayItems.length}件
                 </span>
               </h2>

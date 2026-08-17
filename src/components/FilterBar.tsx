@@ -126,7 +126,7 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
         <div className="flex items-center gap-1.5">
-          <span className="text-neutral-500 dark:text-neutral-400">種別:</span>
+          <span className="text-neutral-600 dark:text-neutral-400">種別:</span>
           {STATUS_TABS.map((t) => (
             <button
               key={t.value}
@@ -138,7 +138,7 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
           ))}
         </div>
         <div className="flex items-center gap-1.5">
-          <span className="text-neutral-500 dark:text-neutral-400">時期:</span>
+          <span className="text-neutral-600 dark:text-neutral-400">時期:</span>
           {WHEN_TABS.map((t) => (
             <button
               key={t.value}
@@ -158,7 +158,7 @@ export function FilterBar({ genres, values, onChange, onClear }: Props) {
         {anyActive && (
           <button
             onClick={onClear}
-            className="rounded-md px-3 py-1.5 text-neutral-500 underline-offset-2 hover:text-rose-600 hover:underline dark:text-neutral-400 dark:hover:text-rose-400"
+            className="rounded-md px-3 py-1.5 text-neutral-600 underline-offset-2 hover:text-rose-600 hover:underline dark:text-neutral-400 dark:hover:text-rose-400"
           >
             条件をクリア
           </button>

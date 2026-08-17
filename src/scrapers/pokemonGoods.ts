@@ -9,7 +9,40 @@ import { fetchHtml, sleep } from "./util";
 // 直近 RECENT_DAYS 日分だけを新着として取り込む。
 const API = "https://www.pokemon.co.jp/api/goods/index/?limit=20&pokecen=0&page=";
 const MAX_PAGES = 4;
-const RECENT_DAYS = 30;
+
+/**
+ * 「新着」として載せ続けてよい日数。**取り込みと掲載の両方がこの1つの値を使う。**
+ *
+ * 実測（2026-08-17）: この cutoff は取り込み側にしか効いておらず、**一度入った行は
+ * 何日経っても消えなかった**。掲載中の pokemon_goods 105件は全部が過去日で、
+ * 最も古いものは **52日前**・中央値 24日前。eventDate を持たない設計（下記）のため
+ * 「日付未定」の顔をして今後の一覧に居座り、`isStalePlan` でも 1件も落ちていなかった
+ * （0/105）。＝ミス13と同じ型（取り込み時のルールが、既に入った行に届かない）。
+ */
+export const POKEMON_GOODS_RECENT_DAYS = 30;
+
+/** 「登場 2026/08/14」から登場日（暦日）を読む。読めなければ null。 */
+export function parseAppearedDate(eventDateText: string | null | undefined): Date | null {
+  const m = /(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(eventDateText ?? "");
+  if (!m) return null;
+  const d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+  return d.getUTCDate() === Number(m[3]) ? d : null;
+}
+
+/**
+ * まだ「新着」と言ってよいか（登場から RECENT_DAYS 日以内）。
+ * **日付が読めない行は true**＝落とさない。読めないことを理由に消すと、書式が変わった日に
+ * ソースが丸ごと消える（誤報より取りこぼしの方が静かで怖い）。
+ */
+export function isRecentPokemonGoods(
+  eventDateText: string | null | undefined,
+  today: Date,
+  days: number = POKEMON_GOODS_RECENT_DAYS
+): boolean {
+  const appeared = parseAppearedDate(eventDateText);
+  if (!appeared) return true;
+  return today.getTime() - appeared.getTime() <= days * 86_400_000;
+}
 
 type ApiItem = {
   id: number;
@@ -33,7 +66,7 @@ export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
   const items: ScrapedItem[] = [];
   // 「直近N日」の起点も日本時間の暦日から作る（ローカル時刻依存にしない）。
   const t = todayJst();
-  const cutoff = new Date(t.getTime() - RECENT_DAYS * 86_400_000);
+  const cutoff = new Date(t.getTime() - POKEMON_GOODS_RECENT_DAYS * 86_400_000);
 
   for (let page = 1; page <= MAX_PAGES; page++) {
     const json = JSON.parse(await fetchHtml(API + page)) as { results?: ApiItem[] };

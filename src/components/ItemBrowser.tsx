@@ -131,7 +131,7 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
       {anyFilter && (
         <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
           該当 <span className="font-semibold text-neutral-900 dark:text-neutral-50">{filtered.length}</span> 件
-          <span className="text-neutral-400">（全 {items.length} 件中）</span>
+          <span className="text-neutral-600 dark:text-neutral-400">（全 {items.length} 件中）</span>
         </p>
       )}
 
@@ -151,7 +151,7 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
             <section key={g.label}>
               <h2 className="mb-3 flex items-baseline gap-2 text-lg font-bold text-neutral-900 dark:text-neutral-50">
                 {g.label}
-                <span className="text-sm font-normal text-neutral-400">{g.items.length}</span>
+                <span className="text-sm font-normal text-neutral-600 dark:text-neutral-400">{g.items.length}</span>
               </h2>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {g.items.map((item) => (

@@ -322,7 +322,7 @@ export default async function ItemPage({ params }: Props) {
               </OutboundLink>
             )}
           </div>
-          <p className="text-xs text-neutral-400">
+          <p className="text-xs text-neutral-600 dark:text-neutral-400">
             ※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
           </p>
         </div>

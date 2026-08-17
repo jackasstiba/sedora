@@ -94,7 +94,7 @@ export default async function Home() {
         <p className="mt-1 text-sm text-neutral-600 dark:text-neutral-400">
           フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの、予約開始・発売・抽選の予定。
         </p>
-        <p className="mt-2 text-xs text-neutral-400">
+        <p className="mt-2 text-xs text-neutral-600 dark:text-neutral-400">
           {/* 掲載件数は重複解消後の表示リスト（items.length）と一致させる。 */}
           掲載 {items.length} 件
           {lastUpdated && (
@@ -140,7 +140,7 @@ export default async function Home() {
                   className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
                 >
                   {c.label}
-                  <span className="ml-1 text-xs text-neutral-400">{c.count}</span>
+                  <span className="ml-1 text-xs text-neutral-600 dark:text-neutral-400">{c.count}</span>
                 </Link>
               ))}
             </div>

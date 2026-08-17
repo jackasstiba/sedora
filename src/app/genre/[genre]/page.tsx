@@ -85,7 +85,7 @@ export default async function GenrePage({ params }: Props) {
                 className="rounded-full border border-neutral-300 bg-white px-3 py-1 text-sm text-neutral-700 hover:border-rose-400 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
               >
                 {c.label}
-                <span className="ml-1 text-xs text-neutral-400">{c.count}</span>
+                <span className="ml-1 text-xs text-neutral-600 dark:text-neutral-400">{c.count}</span>
               </Link>
             ))}
           </div>
