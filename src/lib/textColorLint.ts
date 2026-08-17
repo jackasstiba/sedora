@@ -15,8 +15,19 @@
  */
 import { AA_NORMAL, contrastHex } from "./contrast";
 
-/** ライト表示で文字が乗る2つの面。 */
-export const LIGHT_SURFACES = ["#fbf8f3", "#ffffff"] as const;
+/**
+ * ライト表示で文字が乗る面。**「地色と白」だけでは足りない。**
+ *
+ * 実測（2026-08-17・この検査を入れた直後に本番で取りこぼした）: 月カレンダーの
+ * 「その日に商品がある」セルは `bg-rose-50` の淡い色で塗ってあり、そこに乗る日曜の
+ * 日付が **4.46:1** だった。地色(#fbf8f3)と白(#ffffff)しか見ていなかったので、
+ * 検査は緑のまま素通りしていた。**塗った面を足すたびにここへ1行足す。**
+ */
+export const LIGHT_SURFACES = [
+  "#fbf8f3", // 地色（body）
+  "#ffffff", // カード（bg-white）
+  "#fff4ee", // 淡いブランド色の面（bg-rose-50。カレンダーの「商品がある日」など）
+] as const;
 
 /**
  * 判定に使う色見本。Tailwind の既定値だが、rose だけは globals.css で
