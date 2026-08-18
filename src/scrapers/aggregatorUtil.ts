@@ -71,6 +71,18 @@ export function cleanStoreUrl(raw: string): string {
     for (const k of [...u.searchParams.keys()]) {
       if (TRACK_PARAM.test(k)) u.searchParams.delete(k);
     }
+    // トラッキングは**フラグメントの中**にも入る（実測 #93668:
+    // `https://eeo.today/pr/…/#so?utm_source=collabo_cafe_dot_com&utm_medium=…`）。
+    // `#` 以降は URL のクエリではないので searchParams の掃除では1文字も消えず、
+    // 収集元の名前が付いたまま「公式ページを見る」に載っていた。アンカー（#so）は
+    // ページ内の位置なので残し、その後ろに繋がれた ?…= だけを落とす。
+    const qInHash = u.hash.indexOf("?");
+    if (qInHash >= 0) {
+      const params = new URLSearchParams(u.hash.slice(qInHash + 1));
+      for (const k of [...params.keys()]) if (TRACK_PARAM.test(k)) params.delete(k);
+      const rest = params.toString();
+      u.hash = u.hash.slice(0, qInHash) + (rest ? `?${rest}` : "");
+    }
     return u.toString();
   } catch {
     return href;

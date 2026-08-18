@@ -132,9 +132,15 @@ export function eventDateHeading(
 export function isLotteryItem(it: {
   eventType: string;
   title: string;
-  source: string;
+  /** 収集元。**クライアントへは渡さない**ので、その場合は代わりに `lottery` を渡す。 */
+  source?: string;
+  /** サーバー側で先に判定した結果（カードに渡す形＝CardItem はこちらを持つ）。 */
+  lottery?: boolean;
   hasLottery?: boolean | null;
 }): boolean {
+  // 収集元の名前はブラウザに送らない（名前自体が「どこを巡回しているか」を明かすため）。
+  // 送れないものに依存する判定は、サーバーで済ませてから真偽値だけ渡す。
+  if (typeof it.lottery === "boolean") return it.lottery;
   if (it.eventType === "抽選") return true;
   // コラボ記事本文から抽選/ランダム賞品を検出したイベント（例: ホロライブ×極楽湯の
   // ランダム配布タオル）も抽選タブで拾う。イベント自体は eventType=開催 だが中身は抽選。
@@ -949,7 +955,9 @@ type FilterableItem = {
   title: string;
   eventType: string;
   eventDate: Date | string | null;
-  source: string;
+  // どちらかがあればよい。ブラウザ側で動く絞り込みは `lottery`（事前計算）を使う。
+  source?: string;
+  lottery?: boolean;
 };
 
 const DAY = 24 * 60 * 60 * 1000;

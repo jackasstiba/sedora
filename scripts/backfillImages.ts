@@ -41,6 +41,7 @@ import {
   extractSoleJan,
   isGenericImageUrl,
   isStoreNoticeImage,
+  isUnlicensedImageHost,
   pickListedImage,
   productNameMatches,
   pickMeta,
@@ -188,13 +189,20 @@ async function cleanupBadImages(): Promise<number> {
     isStoreNoticeImage(r.imageUrl, r.stores ? parseStoresJson(r.stores) : null);
 
   const bad = rows.filter(
-    (r) => isGenericImageUrl(r.imageUrl!) || freq.get(r.imageUrl!)! >= CLEANUP_SHARED_MIN || noticeImage(r)
+    (r) =>
+      isGenericImageUrl(r.imageUrl!) ||
+      // 掲載する根拠が無いホスト（Amazon の商品画像）。一度入ると見直されないので掃除で落とす。
+      isUnlicensedImageHost(r.imageUrl!) ||
+      freq.get(r.imageUrl!)! >= CLEANUP_SHARED_MIN ||
+      noticeImage(r)
   );
   const why = new Map<string, number>();
   for (const r of bad) {
     const k = isGenericImageUrl(r.imageUrl!)
       ? "汎用画像"
-      : noticeImage(r)
+      : isUnlicensedImageHost(r.imageUrl!)
+        ? "掲載根拠の無いホスト"
+        : noticeImage(r)
         ? "応募先の告知バナー"
         : `共有 x${freq.get(r.imageUrl!)}`;
     why.set(`${k}: ${r.imageUrl!.slice(0, 80)}`, (why.get(`${k}: ${r.imageUrl!.slice(0, 80)}`) ?? 0) + 1);

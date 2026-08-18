@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
+import { toCardItem } from "@/lib/cardItem";
 import { getItemsByGenre, getGenreList } from "@/lib/seo";
 import { getTcgTitleCounts } from "@/lib/tcg";
 
@@ -94,7 +95,7 @@ export default async function GenrePage({ params }: Props) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} />
+          <ItemCard key={item.id} item={toCardItem(item)} />
         ))}
       </div>
 

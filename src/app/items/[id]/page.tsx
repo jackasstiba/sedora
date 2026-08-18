@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
+import { toCardItem } from "@/lib/cardItem";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
@@ -12,6 +13,9 @@ import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPa
 import { cleanListTitle, displaySubGenre, itemPageTitle, venueForTitle } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { productCategoryValue } from "@/lib/productCategory";
+import { absoluteImageUrl, proxiedImageUrl } from "@/lib/imageProxy";
+// 計測に収集元を載せるが、名前そのものは送らない（符号化してから渡す）。
+import { sourceCode } from "@/lib/sourceCode";
 import {
   groupStoresByLabel,
   parseStoresJson,
@@ -91,7 +95,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
       title,
       description,
       type: "article",
-      images: item.imageUrl ? [{ url: item.imageUrl }] : undefined,
+      // OGPもプロキシ経由の絶対URLにする（SNSのカードに収集元のホスト名を出さないため）。
+      images: absoluteImageUrl(SITE, item.id, item.imageUrl) ? [{ url: absoluteImageUrl(SITE, item.id, item.imageUrl)! }] : undefined,
     },
   };
 }
@@ -162,7 +167,8 @@ export default async function ItemPage({ params }: Props) {
     ? {
         "@type": "Product",
         name: displayTitle,
-        image: item.imageUrl ?? undefined,
+        // 構造化データもHTMLに出るので同じくプロキシ経由。
+        image: absoluteImageUrl(SITE, item.id, item.imageUrl),
         // 日本語のジャンル名をそのまま入れると Google は無効値とみなす。GPCが一意に決まる
         // ジャンルだけ CategoryCode を付け、決まらないジャンルは category ごと出さない。
         category: productCategoryValue(item.genre),
@@ -220,7 +226,7 @@ export default async function ItemPage({ params }: Props) {
         <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800">
           {item.imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={item.imageUrl} alt={item.title} className="h-full w-full object-cover" />
+            <img src={proxiedImageUrl(item.id, item.imageUrl)!} alt={item.title} className="h-full w-full object-cover" />
           ) : (
             <NoImage genre={item.genre} />
           )}
@@ -323,7 +329,7 @@ export default async function ItemPage({ params }: Props) {
                 ))}
               </ul>
               <p className="mt-1.5 text-xs text-purple-700/80 dark:text-purple-300/80">
-                くじ（抽選）で当たる賞品です。A賞・ラストワン賞は二次相場が付きやすいので要チェック。
+                くじ（抽選）で当たる賞品です。A賞・ラストワン賞は数が限られ、狙って買うことはできません。
               </p>
             </div>
           ) : storeList ? (
@@ -343,7 +349,7 @@ export default async function ItemPage({ params }: Props) {
                 <span className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
                 {item.hasLottery && (
                   <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
-                    抽選・ランダムで当たる賞品を含みます。転売相場が付きやすいので要チェック。
+                    抽選・ランダムで当たる賞品を含みます。欲しい賞品を選んで買うことはできません。
                   </p>
                 )}
               </div>
@@ -359,7 +365,7 @@ export default async function ItemPage({ params }: Props) {
               <OutboundLink
                 href={item.url}
                 kind="official"
-                source={item.source}
+                source={sourceCode(item.source)}
                 itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
@@ -373,7 +379,7 @@ export default async function ItemPage({ params }: Props) {
               <OutboundLink
                 href={item.officialUrl}
                 kind="official_secondary"
-                source={item.source}
+                source={sourceCode(item.source)}
                 itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
               >
@@ -387,7 +393,7 @@ export default async function ItemPage({ params }: Props) {
               <OutboundLink
                 href={rakutenSearchUrl(hasSearchableTitle(item.source) ? item.title : displayTitle)}
                 kind="rakuten"
-                source={item.source}
+                source={sourceCode(item.source)}
                 itemId={item.id}
                 className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-400 dark:text-rose-400 dark:hover:bg-rose-950"
               >
@@ -514,7 +520,7 @@ export default async function ItemPage({ params }: Props) {
                   <OutboundLink
                     href={s.url}
                     kind="official"
-                    source={item.source}
+                    source={sourceCode(item.source)}
                     itemId={item.id}
                     className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
                   >
@@ -537,9 +543,11 @@ export default async function ItemPage({ params }: Props) {
           </h2>
           <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
             くじ（抽選）で当たる賞品です。
+            {/* 「本命」「高額」＝どれが儲かるかの言い方だったのを、**なぜ手に入りにくいか**
+                （本数が少ない・狙って買えない）の言い方に揃える。上の lineup 側の一文と同じ形。 */}
             {prizesGraded
-              ? "A賞・ラストワン賞が本命（本数が最も少ない）。"
-              : "当選確率が低い賞（左上のバッジ）ほど本数が少なく高額の本命。"}
+              ? "A賞・ラストワン賞は本数が最も少なく、狙って買うことはできません。"
+              : "当選確率が低い賞（左上のバッジ）ほど本数が少なく、狙って手に入れることはできません。"}
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {prizeGallery.map((p, i) => {
@@ -556,9 +564,10 @@ export default async function ItemPage({ params }: Props) {
               >
                 <div className="relative aspect-square w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800">
                   {p.image ? (
+                    // 各賞の画像も自ドメイン経由（?p=<番号> でこの賞を指す）。
                     // eslint-disable-next-line @next/next/no-img-element
                     <img
-                      src={p.image}
+                      src={proxiedImageUrl(item.id, p.image, i)!}
                       alt={`${p.label} ${p.name}`}
                       loading="lazy"
                       className="h-full w-full object-cover"
@@ -598,7 +607,7 @@ export default async function ItemPage({ params }: Props) {
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {related.series.map((r) => (
-              <ItemCard key={r.id} item={r} />
+              <ItemCard key={r.id} item={toCardItem(r)} />
             ))}
           </div>
         </section>
@@ -611,7 +620,7 @@ export default async function ItemPage({ params }: Props) {
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             {related.genre.map((r) => (
-              <ItemCard key={r.id} item={r} />
+              <ItemCard key={r.id} item={toCardItem(r)} />
             ))}
           </div>
           <p className="mt-4 text-sm">

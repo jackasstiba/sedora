@@ -65,6 +65,20 @@ export function absolutize(src: string, pageUrl: string): string | null {
 export const GENERIC_IMAGE_RE =
   /binoculars|no[-_]?image|noimage|nophoto|default|placeholder|logo|icon|avatar|gravatar|blank|dummy|sprite|ogp|og[-_]?image|snsshare|sns[-_]|share[-_/]|\/share\/|banner|bnr\d|\/common\/|\/themes?\/|\/assets\/img\/(?:common|share)\/|profile_images|\/empty\.|\/uploads\/201[0-8]\//i;
 
+/**
+ * **掲載する根拠が無いホスト**の画像か（＝商品画像であっても採らない）。
+ *
+ * Amazon の商品画像は、アソシエイト・プログラム（PA-API）の参加者が定められた方法で使う
+ * もので、当サイトは参加していない＝借りてよい根拠が1つも無い。ホットリンクしていた頃も
+ * 灰色だったが、2026-08-18 に画像を**自ドメイン経由で配る**ようにしたことで、自分の
+ * サーバから再配布する形になった＝より明確に外れる。実測48件を落として取得も止めた。
+ *
+ * 「商品画像ではない」(isGenericImageUrl) とは別の理由なので、判定も別に持つ。
+ */
+export function isUnlicensedImageHost(url: string): boolean {
+  return /(^|\.|\/\/)(m\.)?media-amazon\.com|images-amazon\.com|amazon\.co\.jp\/images/i.test(url);
+}
+
 /** 画像として使える拡張子か（トラッキング用の1x1 gif や広告配信URLを弾く）。 */
 const IMAGE_EXT_RE = /\.(?:jpe?g|png|webp|avif|gif)(?:[?#]|$)/i;
 
@@ -118,6 +132,7 @@ function imageHost(u: string | null | undefined): string | null {
 /** 新しく採用してよい候補か（＝汎用画像でなく、画像として取得できる形をしている）。 */
 export function isUsableImageCandidate(url: string): boolean {
   if (isGenericImageUrl(url)) return false;
+  if (isUnlicensedImageHost(url)) return false;
   if (IMAGE_EXT_RE.test(url)) return true;
   // 拡張子が無くても、画像CDNの動的URL（Amazon/楽天/Shopify等）は許す。
   return /media-amazon\.com|image\.rakuten\.co\.jp|\.shopify\.com|cloudfront|imgix|\/image\b/i.test(url);
@@ -149,7 +164,8 @@ export function pickJsonLdProductImage(html: string): string | null {
   return null;
 }
 
-/** Amazon の商品ページから主画像を取る（Amazon は og:image を出さない）。 */
+/** Amazon の商品ページから主画像を取る（Amazon は og:image を出さない）。
+ *  ※ 2026-08-18 から**使っていない**（isUnlicensedImageHost の理由）。判定の説明のために残す。 */
 export function pickAmazonImage(html: string): string | null {
   const m =
     html.match(/data-old-hires="(https:\/\/[^"]+)"/) ||
@@ -176,7 +192,8 @@ export function pickPageImage(html: string, pageUrl: string): ImageCandidate | n
     ["og:image", pickMeta(html, "og:image") ?? pickMeta(html, "og:image:secure_url")],
     ["twitter:image", pickMeta(html, "twitter:image") ?? pickMeta(html, "twitter:image:src")],
     ["jsonld", pickJsonLdProductImage(html)],
-    ["amazon", pickAmazonImage(html)],
+    // Amazon の主画像を取る経路は 2026-08-18 に停止（isUnlicensedImageHost）。
+    // 取っても isUsableImageCandidate で落ちるので、無駄に本文を舐めない。
     ["content", pickContentImage(html, pageUrl)],
   ];
   for (const [via, raw] of tries) {

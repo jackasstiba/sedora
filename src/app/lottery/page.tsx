@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ItemCard } from "@/components/ItemCard";
+import { toCardItem } from "@/lib/cardItem";
 import { getLotteryItems } from "@/lib/seo";
 
 // 抽選は締切が動くのでISRで30分ごとに再生成。
@@ -8,8 +9,10 @@ export const revalidate = 1800;
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
+// ⚠ description は検索結果とOGPに出る＝**外向きの文章**。内部の言い回し（「せどりの本命」等）を
+// そのまま置かない。訴求は「逃すと買えない」側に寄せる（[[project_hatsukore_positioning]]）。
 const DESCRIPTION =
-  "スニーカー・一番くじ・トレカ・コラボ限定品・Nintendo Switch 2 / GeForce RTX など家電・ゲーム機の、いま応募できる抽選・予約抽選をまとめて掲載。締切の近い順で、当選＝定価入手＝せどりの本命を見逃さないための一覧です。";
+  "スニーカー・一番くじ・トレカ・コラボ限定品・Nintendo Switch 2 / GeForce RTX など家電・ゲーム機の、いま応募できる抽選・予約抽選をまとめて掲載。締切の近い順に並べているので、気づかないうちに受付が終わっていた、を防げます。";
 
 export const metadata: Metadata = {
   title: "抽選・予約抽選まとめ｜いま応募できるレア・限定品の抽選 | ハツコレ",
@@ -44,7 +47,7 @@ export default async function LotteryPage() {
       {items.length > 0 ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
           {items.map((it) => (
-            <ItemCard key={it.id} item={it} />
+            <ItemCard key={it.id} item={toCardItem(it)} />
           ))}
         </div>
       ) : (

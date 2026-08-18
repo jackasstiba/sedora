@@ -20,6 +20,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // /premium は 2026-08-10 に取り下げ（lib/seo.ts の getPremiumItems のコメント参照）。
     // 消したページを sitemap に残すと 404 を自分から検索エンジンに申告することになる。
     { url: `${base}/lottery`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
+    // 静的な方針ページ。中身はめったに変わらないが、載せておく方が「実体のあるサイト」として
+    // 扱われる（広告審査でも見られる面）。
+    { url: `${base}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
   ];
 
   for (const g of genres) {

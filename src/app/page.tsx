@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { ItemBrowser } from "@/components/ItemBrowser";
 import { type Item } from "@/components/ItemCard";
+import { toCardItem } from "@/lib/cardItem";
 import { type FilterValues } from "@/components/FilterBar";
 import { getItems, getLastUpdated } from "@/lib/items";
 import { formatDateTimeJst } from "@/lib/date";
@@ -37,24 +38,10 @@ export default async function Home() {
     getTcgTitleCounts(),
   ]);
 
-  // クライアントへ渡せるようシリアライズ（eventDate は ISO 文字列）。表示に使う分だけ。
-  const items: Item[] = baseItems.map((it) => ({
-    id: it.id,
-    source: it.source,
-    title: it.title,
-    genre: it.genre,
-    subGenre: it.subGenre,
-    eventType: it.eventType,
-    eventDate: it.eventDate ? it.eventDate.toISOString() : null,
-    eventDateText: it.eventDateText,
-    price: it.price,
-    url: it.url,
-    imageUrl: it.imageUrl,
-    marketPrice: it.marketPrice,
-    marketPriceText: it.marketPriceText,
-    highlights: it.highlights,
-    hasLottery: it.hasLottery,
-  }));
+  // クライアントへ渡す形は toCardItem が決める。**ここで列を手で並べない**
+  // （並べ直すたびに url / imageUrl のような「画面に出さないのに配ってしまう値」が
+  //  紛れ込む。実測 2026-08-18: 収集元の記事URLがトップのHTMLに835件出ていた）。
+  const items: Item[] = baseItems.map(toCardItem);
 
   // ジャンル別件数（表示対象＝今後＋未定 のスコープで数える）。件数降順。
   const genreCounts = Object.entries(

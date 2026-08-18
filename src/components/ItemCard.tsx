@@ -1,27 +1,13 @@
 import Link from "next/link";
 import { countdown, displayEventType, eventDateLabel, isMonthPrecision, todayJst } from "@/lib/date";
 import { formatPriceDisplay } from "@/lib/margin";
-import { cleanListTitle, displaySubGenre } from "@/lib/title";
+import { displaySubGenre } from "@/lib/title";
 import { NoImage } from "./NoImage";
+import type { CardItem } from "@/lib/cardItem";
 
-// eventDate は Date（サーバー）／ISO文字列（クライアントへ渡した後）どちらも受ける。
-export type Item = {
-  id: number;
-  source: string;
-  title: string;
-  genre: string;
-  subGenre: string | null;
-  eventType: string;
-  eventDate: Date | string | null;
-  eventDateText: string | null;
-  price: string | null;
-  url: string;
-  imageUrl: string | null;
-  marketPrice?: number | null;
-  marketPriceText?: string | null;
-  highlights?: string | null;
-  hasLottery?: boolean | null;
-};
+// カードが受け取れる形は1つだけ（src/lib/cardItem.ts）。**収集元が割れる url / imageUrl は
+// 型として持てない**＝クライアントへ渡しようがない、という形で非公開方針を固定する。
+export type Item = CardItem;
 
 const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
 const BLUE = "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
@@ -65,7 +51,8 @@ export function ItemCard({ item }: { item: Item }) {
   // 月精度のものに「🔥 本日/明日」を出すと、合成した月初へのカウントダウンになってしまう。
   const cd = isMonthPrecision(item.eventDateText) ? null : countdown(item.eventDate);
   // 一覧では商品名へ寄せて整形（Xミラーの実況コメント込みタイトル対策）。詳細ページは全文表示。
-  const displayTitle = cleanListTitle(item.source, item.title);
+  // タイトルは toCardItem が整形済み（整形に必要な収集元名はブラウザに送らないため）。
+  const displayTitle = item.title;
   // 予定日が過ぎたものを「予定」と書かない（登場予定 → 登場済み）。
   const eventLabel = displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst());
 
@@ -75,10 +62,11 @@ export function ItemCard({ item }: { item: Item }) {
       className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900"
     >
       <div className="relative aspect-square w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800">
-        {item.imageUrl ? (
+        {item.image ? (
+          // src は自ドメインのパス（/i/<商品ID>）。元の画像URLはサーバの中だけにある。
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={item.imageUrl}
+            src={item.image}
             alt={item.title}
             loading="lazy"
             className="h-full w-full object-cover transition group-hover:scale-105"
@@ -112,7 +100,7 @@ export function ItemCard({ item }: { item: Item }) {
         </div>
 
         {/* 画像ありは商品名を本文に。画像なしは NoImage タイル側で商品名を主役に出すため重複を避ける。 */}
-        {item.imageUrl ? (
+        {item.image ? (
           <h3 className="line-clamp-3 flex-1 text-sm font-medium leading-snug text-neutral-900 dark:text-neutral-100">
             {displayTitle}
           </h3>

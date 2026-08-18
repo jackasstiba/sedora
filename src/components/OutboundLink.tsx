@@ -19,6 +19,8 @@ export type OutboundKind =
   | "rakuten"
   | "market";
 
+// source は**符号**（src/lib/sourceCode.ts）で渡すこと。ここはクライアント部品なので、
+// 渡した値はそのまま配信物に載る＝収集元の内部名を書くと非公開方針が破れる。
 type Props = {
   href: string;
   kind: OutboundKind;
@@ -33,7 +35,9 @@ export function OutboundLink({ href, kind, source, itemId, className, children }
     <a
       href={href}
       target="_blank"
-      rel="nofollow noopener noreferrer"
+      // アフィリリンクには rel="sponsored"（Googleが広告・提携リンクに指定している値）。
+      // 他の外部リンクは従来どおり nofollow。どちらも noopener noreferrer は付ける。
+      rel={`${kind === "rakuten" ? "sponsored" : "nofollow"} noopener noreferrer`}
       className={className}
       onClick={() => {
         // itemId は数値だと by=eventData 集計で扱いにくいので文字列で送る。

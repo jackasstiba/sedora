@@ -14,6 +14,11 @@ export function SiteFooter() {
             RSSで新着を購読
           </a>
           （Discordやフィードリーダーに新着レア情報を自動で流せます）
+          {" ・ "}
+          {/* アフィリエイトを使っている以上、方針を書いた面へどのページからでも辿れるようにする。 */}
+          <Link href="/privacy" className="text-rose-600 hover:underline dark:text-rose-400">
+            プライバシーポリシー・免責事項
+          </Link>
         </p>
         <p>
           フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなどの予約・発売・抽選予定を独自に収集・整理して掲載しています。

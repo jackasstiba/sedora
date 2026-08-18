@@ -20,7 +20,7 @@ import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
 import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
-import { AD_DISCLOSURE, isRakutenAffiliateId } from "../src/lib/outbound";
+import { AD_DISCLOSURE, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -75,6 +75,52 @@ function checkRakutenLinks($: cheerio.CheerioAPI, page: string): number {
       flag(page, "別のアフィリIDのリンク", `期待と違うIDで出ている ${href.slice(0, 80)}`);
   });
   return seen;
+}
+
+/**
+ * **配信したHTMLから収集元が割れないか。**
+ *
+ * 「リンクを画面に出さない」だけでは非公開にならない。実測 2026-08-18: トップページの
+ * HTMLに収集元の記事URLが埋まっていた（collabo-cafe.com 835回・ota-goods.info 441回・
+ * figisland.net 348回・kore-tore.com 26回・snkrdunk.com 20回）。カードが表示に使わない
+ * `url` / `imageUrl` まで、クライアント部品への受け渡しでそのまま配信されていたため。
+ * 画面を見ても分からない層なので、**配信されたHTMLの文字列**を見るしかない。
+ *
+ * 隠すべきホストは手で書かない。**item.url を画面に出さないと決めているソース
+ * （isOfficialUrl が false）の実データのホスト**を、そのまま隠すべき集合として使う。
+ * 収集元が増えた日に自動で網が広がる。
+ */
+function hiddenSourceHosts(rows: { source: string; url: string }[]): string[] {
+  const hosts = new Set<string>();
+  for (const r of rows) {
+    if (isOfficialUrl(r.source)) continue;
+    // 内部名そのものも隠す対象。URLを消しても "tenbaiquest" "torecasoku" が配信物に
+    // 残っていれば、収集元の名前を出しているのと同じ（実測 2026-08-18: figisland 516回・
+    // collabo_cafe 393回・torecasoku 240回。カード用データを丸ごとブラウザへ渡していた）。
+    hosts.add(r.source);
+    try {
+      const h = new URL(r.url).hostname.replace(/^www\./, "").toLowerCase();
+      // 楽天検索は購入導線（隠している収集元ではない）。x.com は共有ボタンでも出るので別扱い。
+      if (/(^|\.)rakuten\.co\.jp$/.test(h) || h === "x.com" || h === "twitter.com") continue;
+      hosts.add(h);
+    } catch {
+      /* URLとして壊れている行は別の検査が拾う */
+    }
+  }
+  return [...hosts];
+}
+
+/** そのページのHTMLに、隠すべきホスト名が何回出たか。0でなければ即アウト。 */
+function checkSourceLeak(html: string, page: string, hosts: string[]): number {
+  let hits = 0;
+  for (const h of hosts) {
+    const n = html.split(h).length - 1;
+    if (n > 0) {
+      hits += n;
+      flag(page, "収集元がHTMLに出ている", `「${h}」が ${n}回（画面に出していなくても配信物に含まれている）`);
+    }
+  }
+  return hits;
 }
 
 async function fetchPage(url: string): Promise<string | null> {
@@ -189,6 +235,9 @@ async function main() {
   // 楽天アフィリリンクを何本見たか。本番に出ていなければ収益は0なので、0本で終わったら
   // 「きれいだから0件」ではなく検査の空振り（＝収益導線が消えていても気付けない状態）。
   let rakutenLinksSeen = 0;
+  // 隠すべき収集元ホスト（実データから導出）と、HTMLに出てしまった回数。
+  const hiddenHosts = hiddenSourceHosts(pages.flatMap((p) => p.rows));
+  let sourceLeaks = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -200,6 +249,7 @@ async function main() {
     // <script>/<style> はテキスト検査から外す（JSONペイロードに undefined 等が出るため）。
     $("script, style, noscript").remove();
     const text = $("main").text().replace(/\s+/g, " ").trim() || $("body").text();
+    sourceLeaks += checkSourceLeak(html, p.name, hiddenHosts);
     checkAdDisclosure($, p.name);
     rakutenLinksSeen += checkRakutenLinks($, p.name);
     const titles = cardTitles($);
@@ -299,6 +349,7 @@ async function main() {
       const $ = cheerio.load(html);
       $("script, style, noscript").remove();
       const text = $("main").text().replace(/\s+/g, " ").trim();
+      sourceLeaks += checkSourceLeak(html, `/items/${r.id}`, hiddenHosts);
       checkAdDisclosure($, `/items/${r.id}`);
       rakutenLinksSeen += checkRakutenLinks($, `/items/${r.id}`);
       for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
@@ -340,8 +391,12 @@ async function main() {
   // 実際に検査した物量を必ず出す。セレクタが壊れると0枚になり、静かに素通りするのを防ぐ。
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
-      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本`
+      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / 隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回）`
   );
+  // 隠すべきホストが1つも作れていないなら、この検査は何も守っていない。
+  if (checked > 0 && hiddenHosts.length === 0) {
+    flag("(全体)", "検査が空振り", "隠すべき収集元ホストを1つも導出できていない（実データの url が読めていない）");
+  }
   // 収益導線は詳細ページにしか無い。1本も見ていないなら、本番のアフィリが消えていても
   // この監査は「指摘0件」と言ってしまう（＝守っていない）。
   if (checked > 0 && rakutenLinksSeen === 0) {

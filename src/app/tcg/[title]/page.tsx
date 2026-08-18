@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ItemCard } from "@/components/ItemCard";
+import { toCardItem } from "@/lib/cardItem";
 import { getItemsByTcgTitle, getTcgTitleCounts, isTcgTitle } from "@/lib/tcg";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
@@ -82,7 +83,7 @@ export default async function TcgTitlePage({ params }: Props) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
         {items.map((item) => (
-          <ItemCard key={item.id} item={item} />
+          <ItemCard key={item.id} item={toCardItem(item)} />
         ))}
       </div>
 

@@ -87,7 +87,7 @@ import { monthPlanDate } from "../src/scrapers/util";
 import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
 import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
 import { cleanListTitle, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
-import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
+import { extractSoleJan, isGenericImageUrl, isUnlicensedImageHost, isUsableImageCandidate, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { readdirSync, readFileSync } from "node:fs";
 import {
@@ -178,6 +178,60 @@ function rakutenAffiliateCallers(): string[] {
   return hits;
 }
 
+/**
+ * 免責としてなら書いてよい一文。「転売を推奨しない」と言うには語そのものが要るので、
+ * **この文字列に限って**下の走査から除く。増やすときは「語を出すこと自体が目的か」で判断する。
+ */
+const ALLOWED_FORBIDDEN_PHRASES = ["投機や高額転売を推奨するものではありません"];
+
+/**
+ * 表示層のソース1本から「画面に出る文字列に混ざった立ち位置違反の語」を返す（純関数）。
+ *
+ * コメントは対象外。内部では「せどりの本命」と呼んでよく、表に出さなければよい
+ * （[[project_hatsukore_positioning]]）。`//` は `https://` を巻き込まないよう `:` の後は見ない。
+ */
+export function forbiddenInDisplayText(source: string): string[] {
+  let s = source
+    .replace(/\/\*[\s\S]*?\*\//g, "") // ブロックコメント（JSXの {/* */} もこれで消える）
+    .replace(/(?<!:)\/\/.*$/gm, ""); // 行コメント（URLのスラッシュは除く）
+  for (const ok of ALLOWED_FORBIDDEN_PHRASES) s = s.split(ok).join("");
+  return findForbidden(s);
+}
+
+/** 走査対象＝表示層のソース一覧。 */
+function renderLayerSources(): string[] {
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name === "node_modules" || e.name === "generated") continue;
+        walk(p);
+      } else if (/\.tsx?$/.test(e.name)) hits.push(p);
+    }
+  };
+  for (const r of ["src/app", "src/components"]) walk(r);
+  return hits;
+}
+
+/**
+ * 表示層の全ファイルを読み、違反語を `ファイル:語` の形で返す。
+ *
+ * なぜ要るか（2026-08-18 実測）: 語彙は X の下書きだけ `findForbidden` で機械が見ていて、
+ * **サイト本体は人の注意だけで守られていた**。実際に3箇所生き残っていた
+ * （`/lottery` の description「せどりの本命」＝**検索結果に出る文字列**、item ページの
+ * 「二次相場が付きやすい」「転売相場が付きやすい」＝画面本文）。
+ * 見た目は何も壊れないので、目視でも描画監査でも永久に見つからない型
+ * （[[feedback_hatsukore_facts_must_be_machine_checked]] と同じ理由で、機械に見せる）。
+ */
+function forbiddenWordsInRenderLayer(): string[] {
+  const hits: string[] = [];
+  for (const p of renderLayerSources()) {
+    for (const w of forbiddenInDisplayText(readFileSync(p, "utf8"))) hits.push(`${p}:${w}`);
+  }
+  return hits;
+}
+
 /** 上のうち、**呼んではいけない場所**（機械が叩く側）だけを返す。 */
 function affiliateCallersOutsideRenderLayer(): string[] {
   const allowed = [
@@ -188,6 +242,35 @@ function affiliateCallersOutsideRenderLayer(): string[] {
     /^scripts\/auditSelftest\.ts$/, // このファイル（形の固定に使う）
   ];
   return rakutenAffiliateCallers().filter((f) => !allowed.some((re) => re.test(f)));
+}
+
+/**
+ * 表示層が「元の画像URL」を直接 src に渡していないか（静的スキャン）。
+ *
+ * 画像は必ず自ドメイン経由（`/i/<商品ID>`）で配る。直リンクに戻すと、画像のホスト名から
+ * 収集元が割れる状態（2026-08-18 実測: 表示中1,834枚のうち784枚が収集元ドメイン）に戻るが、
+ * **画面は今と1ピクセルも変わらない**ので目視では絶対に気付けない。書き方を固定する。
+ */
+function directImageUrlUsages(): string[] {
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) walk(p);
+      else if (/\.tsx$/.test(e.name)) {
+        const src = readFileSync(p, "utf8");
+        // src={...imageUrl...} / src={p.image} のような「生のURLをそのまま渡す」書き方。
+        for (const m of src.matchAll(/src=\{([^}]*)\}/g)) {
+          const expr = m[1];
+          if (/imageUrl|p\.image/.test(expr) && !/proxiedImageUrl|item\.image/.test(expr))
+            hits.push(`${p}: src={${expr.trim().slice(0, 40)}}`);
+        }
+      }
+    }
+  };
+  walk("src/app");
+  walk("src/components");
+  return hits;
 }
 
 type Case = { name: string; fn: () => unknown; want: unknown };
@@ -591,6 +674,39 @@ const cases: Case[] = [
     fn: () => findForbidden("【抽選】8/18(火) ・NIKE MIND 001").length,
     want: 0,
   },
+  // ── 表示層の語彙（静的スキャン・2026-08-18） ──────────────
+  // 「健全路線にした」つもりで3箇所が外に出ていた実測から。以下4件は
+  // ①判定そのもの ②コメントは見逃す ③免責は通す ④走査が空振りしていない を固定する。
+  {
+    name: "表示語彙: 画面に出る文字列の違反語を拾う",
+    fn: () => forbiddenInDisplayText(`const D = "当選＝定価入手＝せどりの本命";`).join(","),
+    want: "せどり",
+  },
+  {
+    name: "表示語彙: コメントの中は見逃す（内部ではその語で呼んでよい）",
+    fn: () => forbiddenInDisplayText(`// 高額品＝せどりの本命\n{/* 転売相場が付く */}\nconst a = 1;`).length,
+    want: 0,
+  },
+  {
+    name: "表示語彙: 免責の一文は通す（転売を推奨しないと書くには語が要る）",
+    fn: () => forbiddenInDisplayText(`<p>投機や高額転売を推奨するものではありません。</p>`).length,
+    want: 0,
+  },
+  {
+    name: "表示語彙: URLのスラッシュをコメントと誤読しない",
+    fn: () => forbiddenInDisplayText(`<a href="https://x.com/">相場</a>`).join(","),
+    want: "相場",
+  },
+  {
+    name: "表示層に立ち位置に反する語が出ていない",
+    fn: () => forbiddenWordsInRenderLayer().join(" / "),
+    want: "",
+  },
+  {
+    name: "静的スキャン自体が空振りしていない（表示層のファイルが見えている）",
+    fn: () => renderLayerSources().length >= 15,
+    want: true,
+  },
   {
     name: "過去でも『発送予定』は据え置き（発送月は予定のままが正しい）",
     fn: () => eventDateHeading("予約", "2026年10月発送予定", true),
@@ -658,6 +774,36 @@ const cases: Case[] = [
     name: "静的スキャン自体が空振りしていない（表示層の呼び出しは見えている）",
     fn: () => rakutenAffiliateCallers().some((f) => f.startsWith("src/app/")),
     want: true,
+  },
+  // (d-2e) 掲載根拠の無いホスト（Amazonの商品画像。アソシエイト未加入なので借りる根拠が無い）。
+  { name: "画像: Amazonの商品画像は採らない", fn: () => isUnlicensedImageHost("https://m.media-amazon.com/images/I/71abc.jpg"), want: true },
+  { name: "画像: 楽天の商品画像はこの判定では落とさない", fn: () => isUnlicensedImageHost("https://thumbnail.image.rakuten.co.jp/@0_mall/x.jpg"), want: false },
+  { name: "画像: 候補判定でもAmazonは弾く", fn: () => isUsableImageCandidate("https://m.media-amazon.com/images/I/71abc.jpg"), want: false },
+  // (d-2d) トラッキングは # の中にも入る。実測 #93668 の形（収集元名がフラグメントに残っていた）。
+  {
+    name: "公式リンク: フラグメント内のトラッキングも落とす（収集元名を配らない）",
+    fn: () => cleanStoreUrl("https://eeo.today/pr/seiken-so-ikebukuro/#so?utm_source=collabo_cafe_dot_com&utm_medium=x"),
+    want: "https://eeo.today/pr/seiken-so-ikebukuro/#so",
+  },
+  {
+    name: "公式リンク: 意味のあるアンカーは残す",
+    fn: () => cleanStoreUrl("https://example.com/page#section"),
+    want: "https://example.com/page#section",
+  },
+  // (d-2c) 画像は自ドメイン経由でしか出さない（収集元のホスト名をHTMLに出さないため）。
+  {
+    name: "表示層は元の画像URLを直接 src に渡さない（収集元が割れる直リンクに戻さない）",
+    fn: () => directImageUrlUsages().join(" / "),
+    want: "",
+  },
+  {
+    name: "カードに渡す形は url / imageUrl を持てない（型で塞ぐ）",
+    fn: () => {
+      const src = readFileSync("src/lib/cardItem.ts", "utf8");
+      const type = src.slice(src.indexOf("export type CardItem"), src.indexOf("export function toCardItem"));
+      return /url\s*:|imageUrl\s*:/.test(type);
+    },
+    want: false,
   },
   { name: "IDの形（4ブロック）を認める", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p"), want: true },
   { name: "IDの形（3ブロック）は認めない", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l"), want: false },
