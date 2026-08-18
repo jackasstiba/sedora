@@ -57,6 +57,18 @@ function printRows(title: string, rows: Row[] | undefined, key: string, blankLab
   }
 }
 
+// URLエンコードされた日本語パス（/genre/%E3%83%88...）はそのままでは読めないので戻す。
+function decodePaths(rows: Row[] | undefined, key: string): Row[] | undefined {
+  if (!rows) return rows;
+  return rows.map((r) => {
+    try {
+      return { ...r, [key]: decodeURIComponent(String(r[key] ?? "")) };
+    } catch {
+      return r;
+    }
+  });
+}
+
 async function main() {
   if (!TOKEN || !PROJECT_ID) {
     console.error(
@@ -114,6 +126,80 @@ async function main() {
   })) as { data?: Row[] } | null;
   printRows("デバイス", devices?.data, "deviceType");
 
+  // ── ページ別（どこが見られているか）──────────────────────────
+  // requestPath は実URL（/items/516）、route は雛形（/items/[id]）。
+  // 「どの記事が読まれたか」は requestPath、「どの画面が機能しているか」は route で見る。
+  // ※ ここは以前この解析から丸ごと抜けていて、PVの総数しか見えていなかった。
+  const routes = (await query("visits/aggregate", {
+    ...range,
+    by: "route",
+    limit: "20",
+  })) as { data?: Row[] } | null;
+  printRows("画面の種類（route）", routes?.data, "route");
+
+  const paths = (await query("visits/aggregate", {
+    ...range,
+    by: "requestPath",
+    limit: "25",
+  })) as { data?: Row[] } | null;
+  printRows("よく見られたページ TOP25", decodePaths(paths?.data, "requestPath"), "requestPath");
+
+  const browsers = (await query("visits/aggregate", {
+    ...range,
+    by: "browserName",
+    limit: "10",
+  })) as { data?: Row[] } | null;
+  printRows("ブラウザ", browsers?.data, "browserName");
+
+  const os = (await query("visits/aggregate", {
+    ...range,
+    by: "osName",
+    limit: "10",
+  })) as { data?: Row[] } | null;
+  printRows("OS", os?.data, "osName");
+
+  // ── 日本の訪問者だけを切り出す ────────────────────────────────
+  // ハツコレは日本語・日本の発売情報しか扱わないので、海外からの訪問は
+  // 実需ではなくクローラ/スクレイパである可能性が高い。混ぜたまま眺めると
+  // 「伸びている」と誤読するため、JPだけの数字を別に出す。
+  const jpRoutes = (await query("visits/aggregate", {
+    ...range,
+    by: "route",
+    limit: "20",
+    filter: "country eq 'JP'",
+  })) as { data?: Row[] } | null;
+  printRows("【日本のみ】画面の種類", jpRoutes?.data, "route");
+
+  const jpPaths = (await query("visits/aggregate", {
+    ...range,
+    by: "requestPath",
+    limit: "20",
+    filter: "country eq 'JP'",
+  })) as { data?: Row[] } | null;
+  printRows("【日本のみ】よく見られたページ", decodePaths(jpPaths?.data, "requestPath"), "requestPath");
+
+  // ── 検索・SNSからの着地ページ ────────────────────────────────
+  // リファラが付いた訪問がどのページに落ちたか＝SEOで実際に効いている面。
+  // 総数が小さいうちはここが唯一の「外の世界に見つかった証拠」になる。
+  const refHosts = (referrers?.data ?? [])
+    .map((r) => String(r.referrerHostname ?? "").trim())
+    .filter((h) => h.length > 0);
+  if (refHosts.length > 0) {
+    console.log("\n■ 外部からの着地ページ（リファラ別）");
+    for (const host of refHosts) {
+      const landed = (await query("visits/aggregate", {
+        ...range,
+        by: "requestPath",
+        limit: "10",
+        filter: `referrerHostname eq '${host}'`,
+      })) as { data?: Row[] } | null;
+      console.log(`  ${host}`);
+      for (const r of decodePaths(landed?.data, "requestPath") ?? []) {
+        console.log(`    ${String(r.requestPath).padEnd(40)} PV ${r.pageviews}\t訪問者 ${r.visitors}`);
+      }
+    }
+  }
+
   // ── 解釈（実来訪か開発検証/クローラのノイズかを見分ける補助）─────────────
   // ハツコレは新規ドメインでSEO育成中。数字が小さいうちは「自分の検証アクセス」と
   // 「実際の外部ユーザー」が混ざり、素の数字だけ見ると誤読しやすいので指標を出す。
@@ -138,6 +224,43 @@ async function main() {
       console.log(
         "  ⚠ 検索・SNS・被リンクからの流入がゼロ。= 発見経路が機能していない（SEO未インデックス）。"
       );
+    }
+  }
+  // 海外比率。日本語の発売情報しか扱わないサイトで海外PVが多いのは、
+  // 実需ではなくクローラ/スクレイパが大量にページを舐めている型。
+  // 「1訪問者あたりPV」が異常に大きい国は人間の読み方ではない。
+  const cRows = countries?.data ?? [];
+  const cTotal = cRows.reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  const jpPv = cRows
+    .filter((r) => String(r.country ?? "") === "JP")
+    .reduce((s, r) => s + Number(r.pageviews || 0), 0);
+  if (cTotal > 0 && cTotal - jpPv > 0) {
+    const foreignPct = Math.round(((cTotal - jpPv) / cTotal) * 100);
+    console.log(`  国: 日本 ${jpPv}PV / 海外 ${cTotal - jpPv}PV (${foreignPct}%)`);
+    // 期間平均で割ると、1日だけの大量巡回が30日で薄まって見えなくなる
+    // （実測: US 116PV/31人＝平均3.7でも、8/18の1日だけで196PV/13人だった）。
+    // なので日単位まで降りて、その日だけ跳ねている国を名指しする。
+    for (const r of cRows) {
+      const country = String(r.country ?? "");
+      if (country === "JP" || !country) continue;
+      const byDay = (await query("visits/aggregate", {
+        ...range,
+        by: "day",
+        filter: `country eq '${country}'`,
+      })) as { data?: Row[] } | null;
+      for (const d of byDay?.data ?? []) {
+        const pv = Number(d.pageviews || 0);
+        const vi = Number(d.visitors || 0);
+        if (vi === 0 || pv < 30) continue;
+        const perVisitor = pv / vi;
+        if (perVisitor >= 8) {
+          console.log(
+            `  ⚠ ${String(d.timestamp).slice(0, 10)} の ${country}: ${pv}PV / ${vi}人` +
+              `（1人あたり ${perVisitor.toFixed(1)}ページ）。人間の閲覧ではなく` +
+              "クローラ/スクレイパの可能性が高い＝伸びた実績として数えない。"
+          );
+        }
+      }
     }
   }
   if (deskTotal > 0) {

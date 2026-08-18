@@ -103,9 +103,48 @@ export function hasSearchableTitle(source: string): boolean {
 }
 
 /**
- * 商品名で楽天市場を検索するURL。
- * 収益化方針(楽天/もしもアフィリ)のアフィリンクに差し替える際はこの1箇所を変えればよい。
+ * 楽天アフィリエイトID（例: `1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p` の形）。
+ * **未設定なら素の検索URLのまま**にする（＝アフィリ化前と同じ挙動）。
  */
-export function rakutenSearchUrl(title: string): string {
+const RAKUTEN_AFFILIATE_ID = (process.env.RAKUTEN_AFFILIATE_ID ?? "").trim();
+
+/**
+ * アフィリエイトIDの形だけを確かめる（**緩めに**判定する）。
+ *
+ * なぜ緩いか: 楽天はIDの厳密な仕様を公開していない。実物を1本もらう前に厳しく縛ると、
+ * **正しいIDを弾いて収益ゼロのまま気づかない**という、まさに避けたい壊れ方になる。
+ * ここで見るのは「ドット区切りの英数4ブロック」という骨格だけ。
+ *
+ * 逆に**形が違うものを通してはいけない**理由: 壊れたIDでもリンク自体は楽天に飛ぶので
+ * **画面上は完全に正常に見えて、成果だけが付かない**。目視では絶対に見つからない型。
+ */
+export function isRakutenAffiliateId(v: string): boolean {
+  return /^[0-9a-z]{4,12}(\.[0-9a-z]{4,12}){3}$/i.test(v.trim());
+}
+
+/** 商品名で楽天市場を検索する素のURL（アフィリエイトを通さない着地先）。 */
+export function rakutenSearchRawUrl(title: string): string {
   return `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(title.trim())}/`;
+}
+
+/**
+ * 商品名で楽天市場を検索するURL。**収益導線はここ1箇所だけ**。
+ *
+ * `RAKUTEN_AFFILIATE_ID` があればアフィリエイト経由に包む。IDが無い/形が違うときは
+ * **素の検索URLに落とす**（＝リンクは必ず生きている。成果が付かないだけ）。
+ * 「壊れたアフィリリンクで変な所へ飛ばす」より「アフィリ無しで正しく飛ぶ」方が常に良い。
+ *
+ * 形式は**楽天のリンク作成ツールが実際に吐いたリンクから写した**（2026-08-18 実測）:
+ *   https://hb.afl.rakuten.co.jp/hgc/<ID>/?pc=<URLをencodeURIComponentしたもの>&link_type=hybrid_url
+ * 楽天は仕様を公開していないので、記憶や古いブログではなく**実物が唯一の根拠**。
+ *   ・`m=`（モバイル用URL）は**今のツールは吐かない**。`link_type=hybrid_url` が両対応の指定。
+ *   ・`ut=`（base64のJSON）はツール側の作成経路の記録なので付けない。
+ *   ・`pc=` の中身は**二重エンコードになるのが正しい**（内側の検索URLで日本語が既に %XX 化
+ *     されていて、それを更に包むため % が %25 になる）。包まないと内側の & = が
+ *     パラメータの区切りと誤読されて着地が壊れる。
+ */
+export function rakutenSearchUrl(title: string, affiliateId = RAKUTEN_AFFILIATE_ID): string {
+  const raw = rakutenSearchRawUrl(title);
+  if (!isRakutenAffiliateId(affiliateId)) return raw;
+  return `https://hb.afl.rakuten.co.jp/hgc/${affiliateId}/?pc=${encodeURIComponent(raw)}&link_type=hybrid_url`;
 }

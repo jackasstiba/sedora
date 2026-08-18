@@ -51,7 +51,7 @@ import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
 /** テスト内の改行。TSの "
 " を埋め込むと生成側で壊れやすいので定数にする */
 const LF = String.fromCharCode(10);
-import { officialUrlLabel } from "../src/lib/outbound";
+import { isRakutenAffiliateId, officialUrlLabel, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
@@ -578,6 +578,49 @@ const cases: Case[] = [
   { name: "プレバンは店名を出す", fn: () => officialUrlLabel(null, "figisland_pb"), want: "プレミアムバンダイで見る →" },
   { name: "受付状況は約束しない（『予約する』と書かない）", fn: () => /予約する/.test(officialUrlLabel(null, "figisland_pb")), want: false },
   { name: "販売内容が裏取りできない時は公式ページ止まり", fn: () => officialUrlLabel(null), want: "公式ページを見る →" },
+
+  // (d-2) 楽天アフィリンク。**壊れても画面上は正常に見える**（リンクは楽天に飛ぶので
+  // 押した人も自分も気づかず、成果だけが静かに落ちる）ため、ここで形を固定する。
+  {
+    name: "アフィリIDが無ければ素の検索URL",
+    fn: () => rakutenSearchUrl("ポケカ 拡張パック", ""),
+    want: "https://search.rakuten.co.jp/search/mall/%E3%83%9D%E3%82%B1%E3%82%AB%20%E6%8B%A1%E5%BC%B5%E3%83%91%E3%83%83%E3%82%AF/",
+  },
+  {
+    name: "形が違うIDは使わない（成果の付かないリンクを作らない）",
+    fn: () => rakutenSearchUrl("ポケカ", "not-an-id").startsWith("https://search.rakuten.co.jp/"),
+    want: true,
+  },
+  {
+    name: "正しい形のIDならアフィリ経由に包む",
+    fn: () => rakutenSearchUrl("ポケカ", "1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p").startsWith("https://hb.afl.rakuten.co.jp/hgc/1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p/?pc="),
+    want: true,
+  },
+  {
+    // pc= に渡す内側URLは**二重エンコード**になる（内側で既に日本語が %XX 化されていて、
+    // それを更に encodeURIComponent で包むため % が %25 になる）。これは正しい姿で、
+    // 包まないと内側の & や = がパラメータ境界と誤読されて着地先が壊れる。
+    name: "アフィリ経由でも検索語は保たれる（2回デコードで戻る）",
+    fn: () =>
+      decodeURIComponent(
+        decodeURIComponent(rakutenSearchUrl("ポケカ", "1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p"))
+      ).includes("search.rakuten.co.jp/search/mall/ポケカ/"),
+    want: true,
+  },
+  { name: "IDの形（4ブロック）を認める", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p"), want: true },
+  { name: "IDの形（3ブロック）は認めない", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l"), want: false },
+  // 以下2件は「楽天のリンク作成ツールが実際に吐いたリンク」から写した形（2026-08-18実測）。
+  // 仕様が公開されていないので、実物と違う形に戻したら気づけるようにここで固定する。
+  {
+    name: "アフィリリンクは link_type=hybrid_url を付ける（実物と同じ形）",
+    fn: () => rakutenSearchUrl("ポケカ", "1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p").endsWith("&link_type=hybrid_url"),
+    want: true,
+  },
+  {
+    name: "m= は付けない（今のツールは吐かない）",
+    fn: () => rakutenSearchUrl("ポケカ", "1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p").includes("&m="),
+    want: false,
+  },
 
   // (e) 一番くじの「1回いくら／どこで引けるか」。これが無いとロットの採算計算ができない。
   {

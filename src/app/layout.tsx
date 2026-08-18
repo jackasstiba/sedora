@@ -11,6 +11,12 @@ export const metadata: Metadata = {
   title: "ハツコレ | レア・限定品の予約・発売・抽選スケジュール",
   description:
     "フィギュア・トレカ・スニーカー・一番くじ・コラボグッズなど、レア・限定アイテムの予約開始・発売・抽選の予定を日付順に掲載。",
+  // Google Search Console の所有権確認（meta タグ方式）。
+  // 未設定なら meta 自体が出ない（空文字の meta を出すと確認が失敗する）。
+  // ⚠ Vercel の環境変数は**ビルド時**に読まれるので、追加したら再デプロイが要る。
+  ...(process.env.GOOGLE_SITE_VERIFICATION
+    ? { verification: { google: process.env.GOOGLE_SITE_VERIFICATION } }
+    : {}),
   alternates: {
     types: { "application/rss+xml": "/feed.xml" },
   },
