@@ -44,11 +44,25 @@ export default async function MonthPage({ params }: Props) {
   const label = monthLabel(month);
 
   // 日ごとに件数を集計＋グループ化（カレンダーと日別セクションで使う）
+  //
+  // ⚠️ 日にちだけ（getUTCDate）で束ねてはいけない。この月に載る行の中には、**応募期間が
+  // この月にかかっているが、いま表示している締切は別の月**というものがある（月をまたぐ抽選。
+  // 所属の決め方は getItemsByMonth を参照）。日にちだけで束ねると、10/24 のカードが
+  // 「9月24日」の見出しの下に並び、カレンダーの24日の件数にも足される＝**見出しが嘘になる**
+  // （2026-08-18 に実際にそうなっていた。Xbox の 10/24 が 9月24日 の欄にいた）。
+  const year = Number(month.slice(0, 4));
+  const monthIndex = Number(month.slice(5, 7)) - 1;
   const counts: Record<number, number> = {};
   const byDay = new Map<number, typeof items>();
+  const crossMonth: typeof items = [];
   for (const it of items) {
     if (!it.eventDate) continue;
-    const day = new Date(it.eventDate).getUTCDate();
+    const d = new Date(it.eventDate);
+    if (d.getUTCFullYear() !== year || d.getUTCMonth() !== monthIndex) {
+      crossMonth.push(it);
+      continue;
+    }
+    const day = d.getUTCDate();
     counts[day] = (counts[day] ?? 0) + 1;
     if (!byDay.has(day)) byDay.set(day, []);
     byDay.get(day)!.push(it);
@@ -93,9 +107,7 @@ export default async function MonthPage({ params }: Props) {
       <div className="flex flex-col gap-8">
         {days.map((day) => {
           const dayItems = byDay.get(day)!;
-          const dow = new Date(
-            Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5, 7)) - 1, day)
-          ).getUTCDay();
+          const dow = new Date(Date.UTC(year, monthIndex, day)).getUTCDay();
           return (
             <section key={day} id={`day-${day}`} className="scroll-mt-4">
               <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
@@ -112,6 +124,24 @@ export default async function MonthPage({ params }: Props) {
             </section>
           );
         })}
+
+        {crossMonth.length > 0 && (
+          // 月をまたぐ抽選。**この月にも応募できる**が、いま最短の締切は別の月にある。
+          // 見出しでその事実だけを書く（カードの日付は実際の締切のまま＝裏取り済みのみ約束）。
+          <section id="cross-month" className="scroll-mt-4">
+            <h2 className="mb-3 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+              {label}も応募できる
+              <span className="ml-1 text-sm font-normal text-neutral-600 dark:text-neutral-400">
+                (最短の締切はこの月の外) {crossMonth.length}件
+              </span>
+            </h2>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {crossMonth.map((item) => (
+                <ItemCard key={item.id} item={item} />
+              ))}
+            </div>
+          </section>
+        )}
       </div>
 
       <nav className="mt-10 border-t border-neutral-200 pt-4 dark:border-neutral-800">

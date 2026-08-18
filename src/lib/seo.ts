@@ -1,6 +1,15 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
-import { dedupeItems, dedupeKey, GENRE_ORDER, sortByEventDate, withLiveStoreDeadline } from "./itemFilter";
+import {
+  dedupeItems,
+  dedupeKey,
+  GENRE_ORDER,
+  itemPeriodMs,
+  MAX_PERIOD_DAYS,
+  overlapsRange,
+  sortByEventDate,
+  withLiveStoreDeadline,
+} from "./itemFilter";
 import { computeMargin } from "./margin";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 
@@ -179,21 +188,51 @@ function monthRange(month: string): { start: Date; end: Date } | null {
   return { start: new Date(Date.UTC(y, mo - 1, 1)), end: new Date(Date.UTC(y, mo, 1)) };
 }
 
-/** 月ページ用：その月に発売・開催のアイテム（過去も含めた一覧） */
+/**
+ * 月ページ用：**その月に「応募できる日」があるアイテム**（過去も含めた一覧）。
+ *
+ * 2026-08-18 まで「eventDate がその月にある行」で絞っていたが、応募先(stores)を持つ行は
+ * 1行が幅（受付開始〜最後の締切）を持つため、**9月ページに「8/16」と書かれたカード**が
+ * 並んでいた（実測3件/628件）。eventDate は最後の締切、画面の日付は今日以降で最短の締切
+ * ＝1点として扱う限りどちらの月に置いても嘘になる。
+ *
+ * → 所属を「**応募期間が月と重なるか**」で決める（[[Projects/sedori_radar]] の「本筋」）。
+ *   月をまたぐ抽選は8月ページにも9月ページにも出る＝どちらの月に来た人からも見つかる。
+ *   表示日だけで絞り直す案は採らない: それだと上の行が9月から消えたうえ、8月のSQL
+ *   （eventDate が8月）にも入らず**どちらの月にも出ない穴**になる。
+ */
 export async function getItemsByMonth(month: string, take = 300) {
   const range = monthRange(month);
   if (!range) return [];
+  // 締切が翌月にある抽選は eventDate（＝最後の締切）が翌月なので、その月のSQLには入らない。
+  // 前もって見に行く範囲は応募期間の最大の幅（itemPeriodMs と同じ値）に合わせる。
+  const lookahead = new Date(range.end.getTime() + MAX_PERIOD_DAYS * 86_400_000);
+  // 2本に分けて取る。**その月に締切がある行の取得件数(take)は今までと同じに保つ**ため
+  // （1本のクエリにまとめて take を増やすと、月ページに載る顔ぶれ自体が変わってしまい、
+  //  この修正とは無関係な差分が出る）。2本目＝月をまたいで入ってくる行だけを足す。
+  const [inMonthRows, spillRows] = await Promise.all([
+    prisma.item.findMany({
+      where: { eventDate: { gte: range.start, lt: range.end } },
+      orderBy: [{ eventDate: "asc" }, { id: "desc" }],
+      take,
+    }),
+    // 締切が翌月以降にずれ込む「応募期間がこの月から始まっている」行。stores を持つ行
+    // だけが幅を持つので、広げる範囲はそこに限る（無関係な翌月分を引き込まない）。
+    prisma.item.findMany({
+      where: { eventDate: { gte: range.end, lt: lookahead }, stores: { not: null } },
+      orderBy: [{ eventDate: "asc" }, { id: "desc" }],
+      take: 200,
+    }),
+  ]);
+  const rows = [...inMonthRows, ...spillRows];
   // 月ページも他の一覧と同じ整理（重複解消・非商品投稿の除外）を通す。ここだけ dedupeItems を
   // 呼んでいなかったため、同じ商品が2枚並ぶ・実況投稿が載るのが月ページだけ起きていた。
-  return sortByEventDate(
-    dedupeItems(
-      await prisma.item.findMany({
-        where: { eventDate: { gte: range.start, lt: range.end } },
-        orderBy: [{ eventDate: "asc" }, { id: "desc" }],
-        take,
-      })
-    )
+  // 期間の判定は**整理前の行**（＝DBの eventDate＝最後の締切）で行う。dedupeItems は表示日を
+  // 「今日以降で最短の締切」に作り直すので、後から見ると期間の終端が分からなくなる。
+  const inMonth = new Set(
+    rows.filter((r) => overlapsRange(r, range.start, range.end)).map((r) => r.id)
   );
+  return sortByEventDate(dedupeItems(rows.filter((r) => inMonth.has(r.id)))).slice(0, take);
 }
 
 export function isValidMonth(month: string): boolean {
@@ -214,17 +253,31 @@ export function monthLabel(month: string): string {
 export async function getMonthsWithItems(): Promise<string[]> {
   const rows = await prisma.item.findMany({
     where: { eventDate: { not: null } },
-    select: { eventDate: true },
+    // stores を持つ行は応募期間に**幅**があり、開始月と締切月が違うことがある
+    // （getItemsByMonth と同じ基準で月を数えないと、中身はあるのにサイトマップと
+    //  内部リンクから漏れる月が生まれる）。
+    select: { eventDate: true, stores: true },
   });
   const now = todayJst();
   const currentMonth = `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}`;
+  const monthOf = (ms: number) => {
+    const d = new Date(ms);
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
+  };
   const set = new Set<string>();
   for (const r of rows) {
     if (!r.eventDate) continue;
-    const d = new Date(r.eventDate);
-    const month = `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`;
-    if (month < currentMonth) continue; // 過去月は除外（当月は途中でも残す）
-    set.add(month);
+    const period = itemPeriodMs(r);
+    // 応募期間が触れる月を全部（開始月〜締切月）。幅を持たない行は1ヶ月だけになる。
+    const months = new Set([monthOf(new Date(r.eventDate).getTime())]);
+    if (period) {
+      for (let t = period.start; t <= period.end; t += 86_400_000) months.add(monthOf(t));
+      months.add(monthOf(period.end));
+    }
+    for (const month of months) {
+      if (month < currentMonth) continue; // 過去月は除外（当月は途中でも残す）
+      set.add(month);
+    }
   }
   return [...set].sort().reverse();
 }

@@ -1,6 +1,6 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
-import { fetchHtml, sleep } from "./util";
+import { crawlPages, lastIsOlderThan } from "./crawl";
 
 // ポケモン公式サイトのグッズ一覧。ページはSPAだが、裏で叩いているJSON APIを直接取得する。
 // start_date は「登場/発売日」で直近分も過去日付になりがち（＝予定ではなく“今買える新商品”）。
@@ -8,7 +8,15 @@ import { fetchHtml, sleep } from "./util";
 // そこで eventDate は null（＝常時表示の新着扱い）にし、日付は eventDateText に「登場 M/D」で残す。
 // 直近 RECENT_DAYS 日分だけを新着として取り込む。
 const API = "https://www.pokemon.co.jp/api/goods/index/?limit=20&pokecen=0&page=";
-const MAX_PAGES = 4;
+/**
+ * 安全弁（終端は上の「登場日が30日より古くなったら」＝crawlPages の足切り）。
+ *
+ * 実測（2026-08-18）: 1ページ20件で、**4ページ目でちょうど窓の縁**（page4 が 7/24〜7/10・
+ * 窓の起点は 7/19）＝旧実装の固定4ページは**ぎりぎり足りていただけ**だった。新商品が
+ * 1割増えれば、その分を静かに落としていた（件数もエラーも出ない型）。12ページなら
+ * 発売ペースが3倍になっても届く。
+ */
+const MAX_PAGES = 12;
 
 /**
  * 「新着」として載せ続けてよい日数。**取り込みと掲載の両方がこの1つの値を使う。**
@@ -68,41 +76,40 @@ export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
   const t = todayJst();
   const cutoff = new Date(t.getTime() - POKEMON_GOODS_RECENT_DAYS * 86_400_000);
 
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const json = JSON.parse(await fetchHtml(API + page)) as { results?: ApiItem[] };
-    const results = json.results ?? [];
-    if (results.length === 0) break;
+  // 終端は「登場日が窓より古くなったら」＝暦で決める（ページ数で決めない＝crawl.ts の規約）。
+  const results = await crawlPages<ApiItem>({
+    label: "pokemon_goods",
+    urlOf: (p) => API + p,
+    parse: (body) => (JSON.parse(body) as { results?: ApiItem[] }).results ?? [],
+    keyOf: (r) => String(r.id),
+    isPageOld: lastIsOlderThan((r) => parseDotDate(r.start_date), cutoff.getTime()),
+    maxPages: MAX_PAGES,
+    sleepMs: 500,
+  });
 
-    let anyRecent = false;
-    for (const r of results) {
-      const date = parseDotDate(r.start_date);
-      if (date && date < cutoff) continue; // 古すぎる新商品は取り込まない
-      anyRecent = true;
+  for (const r of results) {
+    const date = parseDotDate(r.start_date);
+    if (date && date < cutoff) continue; // 古すぎる新商品は取り込まない
 
-      const url = r.full_uniq || r.uniq;
-      if (!url || !r.title) continue;
+    const url = r.full_uniq || r.uniq;
+    if (!url || !r.title) continue;
 
-      items.push({
-        source: "pokemon_goods",
-        sourceId: String(r.id),
-        title: r.title,
-        // 一番くじはポケモン題材でも独立ジャンル（classifyGenre・ichiban_kuji と揃える）。
-        // ジャンルが割れると別ジャンルページに分かれ、ページ単位の重複解消が届かずに
-        // 同じくじのカードが2枚出る（実測: ポケモンマスターズ EX 7th が #7566/#58799 で二重）。
-        genre: /一番くじ/.test(r.title) ? "一番くじ" : "ポケモン",
-        subGenre: r.pokecen === 1 ? "ポケセン限定" : "グッズ",
-        eventType: "発売",
-        eventDate: null,
-        eventDateText: r.start_date ? `登場 ${r.start_date.replace(/\./g, "/")}` : null,
-        price: null,
-        url,
-        imageUrl: r.img_1 || null,
-      });
-    }
-
-    // 日付降順なので、このページに直近分が1件も無ければ以降も全て古い
-    if (!anyRecent) break;
-    await sleep(500);
+    items.push({
+      source: "pokemon_goods",
+      sourceId: String(r.id),
+      title: r.title,
+      // 一番くじはポケモン題材でも独立ジャンル（classifyGenre・ichiban_kuji と揃える）。
+      // ジャンルが割れると別ジャンルページに分かれ、ページ単位の重複解消が届かずに
+      // 同じくじのカードが2枚出る（実測: ポケモンマスターズ EX 7th が #7566/#58799 で二重）。
+      genre: /一番くじ/.test(r.title) ? "一番くじ" : "ポケモン",
+      subGenre: r.pokecen === 1 ? "ポケセン限定" : "グッズ",
+      eventType: "発売",
+      eventDate: null,
+      eventDateText: r.start_date ? `登場 ${r.start_date.replace(/\./g, "/")}` : null,
+      price: null,
+      url,
+      imageUrl: r.img_1 || null,
+    });
   }
 
   // 古い順に返す。登録順=id順になり、新しい商品ほど大きいidになるので、

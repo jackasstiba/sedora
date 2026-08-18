@@ -74,6 +74,18 @@ function identityTokens(title: string): string[] {
     .slice(0, 6);
 }
 
+/** ヘッダ → HTML先頭の meta charset の順に見て復号する（scrapers/util.ts と同じ手順）。 */
+function decodeBody(buf: Buffer, contentType: string | null): string {
+  const fromHeader = (contentType ?? "").match(/charset=["']?([\w-]+)/i)?.[1];
+  const fromMeta = buf.subarray(0, 3000).toString("latin1").match(/charset=["']?([\w-]+)/i)?.[1];
+  const label = (fromHeader ?? fromMeta ?? "utf-8").toLowerCase().replace(/^x-/, "").replace(/^sjis$/, "shift_jis");
+  try {
+    return new TextDecoder(label).decode(buf);
+  } catch {
+    return buf.toString("utf8");
+  }
+}
+
 async function pageText(url: string): Promise<string | null> {
   try {
     if (WALLED_HOSTS.test(new URL(url).hostname)) return null;
@@ -82,7 +94,13 @@ async function pageText(url: string): Promise<string | null> {
       signal: AbortSignal.timeout(15000),
     });
     if (!res.ok) return null;
-    const $ = cheerio.load(await res.text());
+    // **文字コードを見てから復号する。** `res.text()` は charset が無いと UTF-8 と決め打つので、
+    // Shift_JIS で配信している一次ストア（タカラトミーモール）の本文が丸ごと文字化けし、
+    // 識別語が1つも見つからない＝「リンク先に商品が見当たらない」という**嘘の指摘**が出る
+    // （実測 2026-08-18: #92255/#92355 の2件。実際にはページに商品名がある）。
+    // スクレイパー側は fetchHtmlDetectCharset で既に対処済みで、**検査側だけが素の text() の
+    // ままだった**＝検査が誤報を出す側に回っていた。
+    const $ = cheerio.load(decodeBody(Buffer.from(await res.arrayBuffer()), res.headers.get("content-type")));
     $("script, style, noscript").remove();
     const t = $("body").text().replace(/\s+/g, " ");
     // 本文が極端に短いページ（SPAの殻など）は判定材料にならないので除外する。

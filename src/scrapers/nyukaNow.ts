@@ -1,5 +1,6 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
+import { crawlPages } from "./crawl";
 import { classifyAggregatorGenre, cleanStoreUrl, NOISE_LINK, stripTags } from "./aggregatorUtil";
 import { summarizeStores } from "../lib/stores";
 // 「日本時間の今日」は src/lib/date.ts の todayJst() だけが持つ。
@@ -26,8 +27,8 @@ const CATEGORY_BASE = "https://nyuka-now.com/archives/category/chusen";
 const RESTOCK_BASE = "https://nyuka-now.com/archives/category/restock";
 const ARTICLE_BASE = "https://nyuka-now.com/archives/";
 /**
- * カテゴリ一覧を何ページまで辿るかの**安全弁**（終端の判定は「新規が0になったら」＝下の
- * collectArticles）。
+ * カテゴリ一覧を何ページまで辿るかの**安全弁**（終端の判定は「新規が0になったら」＝
+ * crawlPages）。
  *
  * 2026-08-18 実測でここが実害を出していた: 「実測3ページ。将来増えても取りこぼさないよう
  * 余裕を持たせる」と書いて 8 に置いていたが、抽選カテゴリは **17ページ・171記事**に育っており、
@@ -42,6 +43,9 @@ const ARTICLE_BASE = "https://nyuka-now.com/archives/";
  * **例外にする**（黙って半分だけ取り込むより、そのソースを赤くして前回値を保つ方が安全＝
  * 巡回失敗時は upsert も受付終了の削除も走らないので、既存データは壊れない。3日で
  * audit の source_stale が ERROR を出す）。
+ *
+ * 2026-08-18（同日・2巡目）: この形を他のスクレイパーにも配れるよう `crawl.ts` に出した。
+ * 同じ日に channeltono が **1.8日分の窓**で同型の取りこぼしをしていたのが実測で出たため。
  */
 const MAX_PAGES = 40;
 
@@ -64,33 +68,15 @@ function parseArticleList(html: string): Article[] {
 
 /** カテゴリを全ページ巡回して記事一覧を集める（重複id除去）。 */
 async function collectArticles(base = CATEGORY_BASE): Promise<Article[]> {
-  const byId = new Map<string, Article>();
-  for (let p = 1; p <= MAX_PAGES; p++) {
-    const url = p === 1 ? base : `${base}/page/${p}`;
-    let html: string;
-    try {
-      html = await fetchHtml(url);
-    } catch {
-      break; // 次ページが無い（404）＝巡回終了
-    }
-    const list = parseArticleList(html);
-    let added = 0;
-    for (const a of list) {
-      if (!byId.has(a.id)) {
-        byId.set(a.id, a);
-        added++;
-      }
-    }
-    if (added === 0) break; // 新規が無くなったら終了
-    // 上限に当たったのに、まだ新規が出続けている＝窓が収集元に追い越された。
-    // 黙って続けると「半分だけ取り込んだ正常な巡回」に見える（実測でそうなっていた）。
-    if (p === MAX_PAGES)
-      throw new Error(
-        `${base}: ${MAX_PAGES}ページまで辿ってもまだ新規記事がある（累計${byId.size}件）。MAX_PAGES が収集元の規模に追い越されている`
-      );
-    await sleep(400);
-  }
-  return [...byId.values()];
+  // 記事一覧に投稿日が無い（記事本文を開くまで日付が分からない）ので、足切りは使わず
+  // 「新規が出なくなったら終端」だけで止める。＝全記事をさらう設計。
+  return crawlPages<Article>({
+    label: base,
+    urlOf: (p) => (p === 1 ? base : `${base}/page/${p}`),
+    parse: parseArticleList,
+    keyOf: (a) => a.id,
+    maxPages: MAX_PAGES,
+  });
 }
 
 /**

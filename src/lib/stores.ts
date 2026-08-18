@@ -180,6 +180,16 @@ export function soonestOpenDeadline(stores: StoreEntry[], today: Date): Date | n
   return open[0] ?? null;
 }
 
+/**
+ * その行が持っている**暦日を全部**（受付開始・締切のどちらも）ミリ秒で返す。
+ * 「応募期間がいつからいつまでか」を組み立てる側（月ページの所属判定）が使う。
+ */
+export function storeDayMs(stores: StoreEntry[]): number[] {
+  return stores
+    .map((s) => (s.at ? new Date(`${s.at}T00:00:00.000Z`).getTime() : NaN))
+    .filter((ms) => Number.isFinite(ms));
+}
+
 /** **最後の締切**（＝全店が締め切る日＝この商品を載せ続けてよい期限）。無ければ null。 */
 export function lastDeadline(stores: StoreEntry[]): Date | null {
   const all = datedDeadlines(stores)

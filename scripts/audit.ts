@@ -32,7 +32,7 @@ import {
   todayJst,
 } from "../src/lib/date";
 import { cleanListTitle } from "../src/lib/title";
-import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, productUrlKey } from "../src/lib/itemFilter";
+import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, overlapsRange, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
@@ -48,6 +48,8 @@ import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/tex
 import { getSitemapItemRefs } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
+import { CRAWL_RULE_WHY } from "../src/lib/crawlLint";
+import { scanRepoCrawlViolations } from "./crawlScan";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -246,6 +248,70 @@ async function main() {
       }
     }
     report("dup_same_product_url", "同じページに同一商品URLのカードが複数ある", "error", urlBad, baseline);
+
+    // 同じ応募ページ・同じ応募先・同じ日で、**片方の商品名がもう片方に丸ごと含まれる**2枚。
+    // 実測 2026-08-18（観点B）: #75445/#75446 は url も stores も完全に同一（Joshinアプリ・
+    // 〜8/17 23:59）で、トップの1画面目に並んでいた＝「応募先が2つある」と誤読する。
+    // ※「同じ応募ページを複数行が指す」こと自体は正当（1ページで複数商品を同時抽選する店が
+    //   実在する）。**包含関係のあるものだけ**が同じ商品の書き分け＝ここだけを検査する。
+    const containedBad: string[] = [];
+    for (const p of pages) {
+      const byKey = new Map<string, Row[]>();
+      for (const it of p.rows) {
+        if (!it.url) continue;
+        const day = it.eventDate ? new Date(it.eventDate).toISOString().slice(0, 10) : "none";
+        const k = `${it.source}|${it.url}|${it.stores ?? "none"}|${day}`;
+        (byKey.get(k) ?? byKey.set(k, []).get(k)!).push(it);
+      }
+      for (const arr of byKey.values()) {
+        if (arr.length < 2) continue;
+        const named = arr.map((it) => ({ it, key: dedupeKey(cleanListTitle(it.source, it.title)) }));
+        for (const a of named)
+          for (const b of named)
+            if (
+              a.it.id !== b.it.id &&
+              a.key.length >= 8 &&
+              a.key !== b.key &&
+              a.key.includes(b.key)
+            )
+              containedBad.push(
+                `${p.name}: #${a.it.id}「${cleanListTitle(a.it.source, a.it.title)}」⊃ #${b.it.id}「${cleanListTitle(b.it.source, b.it.title)}」`
+              );
+      }
+    }
+    report(
+      "dup_contained_name",
+      "同じ応募ページ・同じ応募先の商品が、名前の書き方違いで複数枚出ている",
+      "error",
+      containedBad,
+      baseline
+    );
+
+    // 月ページの所属は「**応募期間がその月と重なるか**」。実測 2026-08-18: eventDate 1点で
+    // 絞っていたため、9月ページに「8/16」と書かれたカードが3件（母数628）並んでいた。
+    // 幅を持つ行（応募先が複数店＝受付開始〜最後の締切）は、1点で置く限りどちらの月でも嘘になる。
+    const monthBad: string[] = [];
+    let monthRows = 0;
+    for (const p of pages) {
+      const m = p.name.match(/^\/release\/(\d{4})-(\d{2})$/);
+      if (!m) continue;
+      const start = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, 1));
+      const end = new Date(Date.UTC(Number(m[1]), Number(m[2]), 1));
+      for (const it of p.rows) {
+        monthRows++;
+        if (overlapsRange(it, start, end)) continue;
+        const d = it.eventDate ? new Date(it.eventDate).toISOString().slice(0, 10) : "日付なし";
+        monthBad.push(`${p.name}: #${it.id} 表示日${d}「${cleanListTitle(it.source, it.title)}」`);
+      }
+    }
+    report(
+      "month_page_out_of_range",
+      "月ページに、その月に応募できる日が無い商品が載っている",
+      "error",
+      monthBad,
+      baseline,
+      monthRows
+    );
   }
 
   // (3) 抽選まわりの断定。裏取りできていない表示は出さない（原則: 確認済みのみ約束）。
@@ -1637,6 +1703,32 @@ async function main() {
     report(
       "clock_discipline",
       "時計を読む行が src/lib/date.ts の外にある（日付が実行時刻・TZに依存する）",
+      "error",
+      bad,
+      baseline,
+      files.length
+    );
+  }
+  {
+    // (17c) **一覧のページ送りを自前で書いていないか**（＝取りこぼしを「成功」と表示しない）。
+    //
+    // 2026-08-18 に同じ型が1日で3ソース見つかった: nyuka_now は上限8ページに対し収集元が
+    // 17ページで **90記事(53%)を一度も見ていなかった**。channeltono は上限3ページ＝45記事に
+    // 対し投稿が **25記事/日**＝窓は**1.8日分**（収集元の直近14日355件のうち40件が未取込。
+    // うち29件は 8/04 の1日に集中）。pokemon_goods は上限4ページで**窓のちょうど縁**だった。
+    // どれも件数もエラーも出ない＝**画面をいくら見ても分からない**が、ソースを読めば分かる。
+    //
+    // 規約: ページ送りは src/scrapers/crawl.ts の crawlPages だけが書く（終端で止まり、
+    // 上限に当たったまま新規が残っていたら**例外**にして前回値を保つ）。この検査を入れた
+    // その場で、grep では見つけていなかった tenbaiquest（MAX_LIST_PAGES=5）が出た＝
+    // **人が数える方式では取りこぼす**ことの実例。
+    const { files, violations } = scanRepoCrawlViolations();
+    const bad = violations.map(
+      (v) => `${v.file}:${v.line} [${v.rule}] ${v.snippet} … ${CRAWL_RULE_WHY[v.rule] ?? ""}`
+    );
+    report(
+      "crawl_discipline",
+      "一覧のページ送りを自前で書いている（固定ページ数はいつか収集元に追い越される）",
       "error",
       bad,
       baseline,

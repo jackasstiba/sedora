@@ -19,6 +19,8 @@ import {
   parseJapaneseFullDate,
   sleep,
 } from "./util";
+import { crawlPages } from "./crawl";
+import { todayJst } from "../lib/date";
 
 // コラボカフェ.com: アニメ・ゲーム・VTuber等のコラボカフェ / くじ / ポップアップ /
 // 店舗タイアップ / グッズ情報を横断的にまとめているアグリゲーター。
@@ -42,20 +44,31 @@ const LISTING_URLS = [
   "https://collabo-cafe.com/events/category/gengaten-tenjikai/",
 ];
 
-// カテゴリは /page/2/ 以降にも先日程の記事が残る（実測: 1ページ目は約16記事で、
-// 投稿が多いカテゴリでは開催前のイベントが2ページ目以降に流れる）。カテゴリページだけ
-// 2ページまで巡回する（トップは新着横断なので1ページで足りる。3ページ目以降は過去
-// 開催が大半＝全記事エンリッチの往復が重くなるだけなので取らない）。
-const CATEGORY_PAGES = 2;
-function listingUrlsWithPages(): string[] {
-  const out: string[] = [];
-  for (const base of LISTING_URLS) {
-    out.push(base);
-    if (base.includes("/events/category/")) {
-      for (let p = 2; p <= CATEGORY_PAGES; p++) out.push(`${base}page/${p}/`);
-    }
-  }
-  return out;
+/**
+ * カテゴリ一覧を何ページまで辿るかの安全弁（終端は下の `pageIsAllPast`＝中身で決める）。
+ *
+ * 2026-08-18 まで「カテゴリは2ページまで。3ページ目以降は過去開催が大半」という**推測**で
+ * 固定していたが、実測すると**開催前のイベントが2ページ目より奥に大量に残っていた**:
+ *   pop-up-store … 10ページ辿ってもまだ開催前があり、その範囲で開催前**61件**
+ *   gengaten-tenjikai … 6ページ/開催前25件 ／ cafe … 5ページ/開催前31件
+ * ＝先頭2ページで切っていた分は「収集元にあるのにサイトに無い」（[[System/rules]] 観点D）。
+ * 同じ型を同日に nyuka_now・channeltono・tenbaiquest でも直している（crawl.ts 参照）。
+ */
+const MAX_LIST_PAGES = 15;
+
+/**
+ * 足切り: **このページの日付が分かる記事が1件以上あり、その全部が開催済み**なら、
+ * 以降のページは見ない（記事は新しい順＝奥ほど過去）。
+ *
+ * ページ数ではなく中身で止める理由: カテゴリごとに投稿ペースが全く違う（実測で1〜10ページ超）。
+ * 「何ページ目までが有効か」は書いた瞬間から古くなる。日付が読めない記事は判定に使わない
+ * （読めないことを理由に巡回を止めると、書式が変わった日にソースが縮む）。
+ */
+function pageIsAllPast(todayMs: number): (items: ScrapedItem[]) => boolean {
+  return (items) => {
+    const dated = items.filter((it) => it.eventDate);
+    return dated.length > 0 && dated.every((it) => it.eventDate!.getTime() < todayMs);
+  };
 }
 
 // article class の event-category-* から拾う種別スラッグ → 表示ラベル
@@ -132,20 +145,25 @@ function parseArticle(block: string): ScrapedItem | null {
 }
 
 export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
+  const today = todayJst().getTime();
   const byId = new Map<string, ScrapedItem>();
 
-  for (const listUrl of listingUrlsWithPages()) {
-    let html: string;
-    try {
-      html = await fetchHtml(listUrl);
-    } catch {
-      continue; // /page/N/ が無いカテゴリ（記事が少ない）は飛ばす
-    }
-    for (const m of html.matchAll(ARTICLE_RE)) {
-      const item = parseArticle(m[0]);
-      if (item && !byId.has(item.sourceId)) byId.set(item.sourceId, item);
-    }
-    await sleep(500);
+  for (const base of LISTING_URLS) {
+    // トップ(新着横断)はページ送りしない＝1ページで止める（カテゴリ側で全部拾える）。
+    const isCategory = base.includes("/events/category/");
+    const found = await crawlPages<ScrapedItem>({
+      label: base,
+      urlOf: (p) => (p === 1 ? base : `${base}page/${p}/`),
+      parse: (html) =>
+        [...html.matchAll(ARTICLE_RE)]
+          .map((m) => parseArticle(m[0]))
+          .filter((it): it is ScrapedItem => !!it),
+      keyOf: (it) => it.sourceId,
+      isPageOld: isCategory ? pageIsAllPast(today) : () => true,
+      maxPages: isCategory ? MAX_LIST_PAGES : 1,
+      sleepMs: 500,
+    });
+    for (const item of found) if (!byId.has(item.sourceId)) byId.set(item.sourceId, item);
   }
 
   const items = [...byId.values()];
@@ -154,7 +172,26 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
   // 各イベントについて (a) collabo-cafe 記事本文から抽選/ランダム有無＋注目賞品名を、
   // (b) 記事内の一次情報（公式キャンペーン/ストア）ページへ飛んで販売商品の価格帯・点数を
   // 取得して合成する。レート制限つき・失敗時は取れた分だけ活かす（壊さない）。
-  for (const item of items) {
+  //
+  // **扱うのは掲載される行だけ**（開催前＋日付未定＋直近に終わった分）。掲載スコープは
+  // `eventDate >= today` または日付なしなので、とっくに終わった記事を深掘りしても
+  // 1文字も画面に出ない。巡回範囲を「2ページ固定」から終端まで広げた分（実測で記事数は
+  // 約2倍）をここで相殺する＝**時間を増やさずに取りこぼしだけ無くす**。
+  //
+  // ⚠️ **深掘りを飛ばした行は返さない**（＝upsertしない）。scrape.ts の upsert は
+  // `highlights: item.highlights ?? null` のように書くので、深掘りせずに返すと
+  // **既にDBに入っている賞品情報・会場・公式リンクを null で上書きして消す**
+  // （[[scrapeのnull上書き注意]]）。返さなければその行はDBでそのまま残る。
+  //
+  // 猶予14日: 収集元の一覧の日付は誤っていることがあり（実測 #20308 が2日ズレ）、
+  // 記事本文で訂正すると未来日に戻ることがある。今日で切ると、その訂正の機会ごと失う。
+  const ENRICH_GRACE_DAYS = 14;
+  const enrichFrom = today - ENRICH_GRACE_DAYS * 86_400_000;
+  const enrichTargets = items.filter((it) => !it.eventDate || it.eventDate.getTime() >= enrichFrom);
+  console.log(
+    `[collabo_cafe] 記事${items.length}件 / 深掘り＋保存の対象（開催前・日付未定・直近${ENRICH_GRACE_DAYS}日）${enrichTargets.length}件`
+  );
+  for (const item of enrichTargets) {
     try {
       const html = await fetchHtml(item.url);
       const body = extractArticleBody(html);
@@ -208,7 +245,8 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
     await sleep(400);
   }
 
-  return items;
+  // 深掘りした行だけを返す（上のコメント参照＝返さない行はDBでそのまま残る）。
+  return enrichTargets;
 }
 
 // 公式サイトは各社バラバラ（遅い/SPA/別文字コード）なので、タイムアウトを付けて

@@ -1,6 +1,7 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
-import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
+import { parseJapaneseFullDate } from "./util";
+import { crawlPages } from "./crawl";
 import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
 
 // 転売クエスト（tenbaiquest.com）の "抽選" 記事を全カテゴリ横断で収集する。
@@ -17,7 +18,39 @@ import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
 // 「限定公開記事」等の商品名を持たない投稿は採用しない。
 
 const HOME = "https://tenbaiquest.com/";
-const MAX_LIST_PAGES = 5; // 開催中の抽選は新しい投稿に集中するため、直近ページで十分カバーできる。
+/**
+ * 安全弁（終端は下の `pageIsAllOld`＝暦で決める）。
+ *
+ * 2026-08-18 まではここが「5ページ。開催中の抽選は新しい投稿に集中するため直近ページで
+ * 十分カバーできる」という**推測**だった。実測すると1ページ31件のうち**新規は8〜10件**
+ * （固定表示の記事が毎ページ混ざる）で、5ページ＝実質57件・7月中旬まで。つまり窓の広さは
+ * 書いてある数字から読めず、投稿ペースが上がれば静かに追い越される
+ * （nyuka_now・channeltono が同じ日に実際にそうなっていた＝[[System/rules]] 観点D）。
+ */
+const MAX_LIST_PAGES = 20;
+
+/**
+ * 何日前の投稿まで遡るか。掲載条件は「締切/発売日が未来」なので、それより古い投稿は
+ * 取り込んでも全部落ちる。45日あれば、応募開始が先の抽選（実測で最長1ヶ月先）まで届く。
+ */
+const LOOKBACK_DAYS = 45;
+
+/**
+ * 足切り。**このページの日付付き記事が1件以上あり、その全部が古い**なら以降は見ない。
+ *
+ * 末尾1件で決めない理由（実測 2026-08-18）: この一覧は固定表示(sticky)の記事が毎ページ
+ * 混ざるので**厳密な新しい順ではない**。末尾だけを見ると、たまたま古い記事が最後に来た
+ * ページで巡回が止まる＝取りこぼしが静かに起きる。日付が読めない記事は判定に使わない
+ * （読めないことを理由に止めない）。
+ */
+function pageIsAllOld(cutoffMs: number): (cards: Card[]) => boolean {
+  return (cards) => {
+    const dates = cards
+      .map((c) => parseJapaneseFullDate(c.title.normalize("NFKC")))
+      .filter((d): d is Date => !!d);
+    return dates.length > 0 && dates.every((d) => d.getTime() < cutoffMs);
+  };
+}
 
 // カテゴリ表記からのフォールバック（商品名からジャンルを推定できなかったとき）。
 const CAT_GENRE: Record<string, string> = {
@@ -68,29 +101,17 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
   // 「日本時間の今日」を暦日(UTC0時)で。締切が過去の抽選（＝受付終了）は載せない。
   const today = todayJst();
 
-  const byId = new Map<string, Card>();
-  for (let p = 1; p <= MAX_LIST_PAGES; p++) {
-    const url = p === 1 ? HOME : `https://tenbaiquest.com/page/${p}`;
-    let html: string;
-    try {
-      html = await fetchHtml(url);
-    } catch {
-      break;
-    }
-    const cards = parseCards(html);
-    let added = 0;
-    for (const c of cards) {
-      if (!byId.has(c.slugPath)) {
-        byId.set(c.slugPath, c);
-        added++;
-      }
-    }
-    if (added === 0) break;
-    await sleep(400);
-  }
+  const cards = await crawlPages<Card>({
+    label: "tenbaiquest",
+    urlOf: (p) => (p === 1 ? HOME : `https://tenbaiquest.com/page/${p}`),
+    parse: parseCards,
+    keyOf: (c) => c.slugPath,
+    isPageOld: pageIsAllOld(today.getTime() - LOOKBACK_DAYS * 86_400_000),
+    maxPages: MAX_LIST_PAGES,
+  });
 
   const items: ScrapedItem[] = [];
-  for (const c of byId.values()) {
+  for (const c of cards) {
     const lottery = isLotteryTitle(c.title);
     const release = !lottery && isReleaseTitle(c.title);
     if (!lottery && !release) continue; // 「限定公開記事」等の商品名を持たない投稿は採らない

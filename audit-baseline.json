@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-08-18T01:56:49.196Z",
+  "updatedAt": "2026-08-18T02:17:12.273Z",
   "checks": {
     "title_noise:相場・在庫の実況": 0,
     "title_noise:呼びかけ・感想の残り": 0,
@@ -71,7 +71,10 @@
     "recent_window_overrun": 0,
     "text_color_unreadable": 0,
     "source_contributes_zero": 2,
-    "source_empty_by_design": 0
+    "source_empty_by_design": 0,
+    "dup_contained_name": 0,
+    "month_page_out_of_range": 0,
+    "crawl_discipline": 0
   },
   "pages": {
     "/": 1917,
@@ -97,10 +100,10 @@
     "/release/2027-02": 12,
     "/release/2027-01": 45,
     "/release/2026-12": 52,
-    "/release/2026-11": 75,
-    "/release/2026-10": 160,
-    "/release/2026-09": 203,
-    "/release/2026-08": 257,
+    "/release/2026-11": 76,
+    "/release/2026-10": 161,
+    "/release/2026-09": 204,
+    "/release/2026-08": 262,
     "/tcg/ポケカ": 58,
     "/tcg/ワンピースカード": 22,
     "/tcg/ガンダムカード": 1,
@@ -142,8 +145,8 @@
     "official_rate:snkrdunk": 0,
     "coverage:official_url_entity": 2177,
     "coverage:event_official_is_product": 289,
-    "coverage:page_vanished": 30,
-    "coverage:sitemap_scope_drift": 2847,
+    "coverage:page_vanished": 37,
+    "coverage:sitemap_scope_drift": 2846,
     "coverage:report_items_truncated": 1,
     "official_rate:nike_snkrs": 1,
     "official_rate:nyuka_now": 1,
@@ -183,7 +186,7 @@
     "coverage:clock_discipline": 122,
     "coverage:scrape_skips_images": 1,
     "coverage:recent_window_overrun": 63,
-    "coverage:text_color_unreadable": 88,
+    "coverage:text_color_unreadable": 90,
     "coverage:source_contributes_zero": 28,
     "official_rate:takaratomy_mall": 1,
     "official_rate:medicom_toy": 1,
@@ -192,7 +195,9 @@
     "image_rate:medicom_toy": 1,
     "image_rate:gashapon": 1,
     "image_rate:chiikawa_market": 1,
-    "coverage:source_empty_by_design": 28
+    "coverage:source_empty_by_design": 28,
+    "coverage:month_page_out_of_range": 845,
+    "coverage:crawl_discipline": 36
   },
   "coverage": {
     "title_noise:相場・在庫の実況": 27,
@@ -212,8 +217,8 @@
     "schema_drift": 24,
     "official_url_entity": 2177,
     "event_official_is_product": 289,
-    "page_vanished": 30,
-    "sitemap_scope_drift": 2847,
+    "page_vanished": 37,
+    "sitemap_scope_drift": 2846,
     "report_items_truncated": 1,
     "intake_face_dead": 4,
     "image_generic": 2099,
@@ -229,9 +234,11 @@
     "clock_discipline": 122,
     "scrape_skips_images": 1,
     "recent_window_overrun": 63,
-    "text_color_unreadable": 88,
+    "text_color_unreadable": 90,
     "source_contributes_zero": 28,
-    "source_empty_by_design": 28
+    "source_empty_by_design": 28,
+    "month_page_out_of_range": 845,
+    "crawl_discipline": 36
   },
   "facts": {
     "checked": 55,

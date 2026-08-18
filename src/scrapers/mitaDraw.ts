@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
 import { fetchHtml, sleep } from "./util";
+import { crawlPages, lastIsOlderThan } from "./crawl";
 import { calendarDate, nowInstant, todayJst } from "../lib/date";
 
 // ミタスニーカーズの抽選受付サイト（draw.mita-sneakers.co.jp）＝**一次情報の抽選告知**。
@@ -22,8 +23,8 @@ import { calendarDate, nowInstant, todayJst } from "../lib/date";
 const HOME = "https://draw.mita-sneakers.co.jp/";
 
 /**
- * 一覧を何ページ辿るかの安全弁。**終端の判定は「新規0件」**（下の collectPosts）で、
- * ここはループ暴走を止めるためだけの数字。
+ * 一覧を何ページ辿るかの安全弁。**終端の判定は「新規0件」または「足切りより古い」**
+ * （crawlPages）で、ここはループ暴走を止めるためだけの数字。
  * 固定ページ数を「実測◯ページだから」で置くと収集元に追い越されて静かに取りこぼす
  * （nyuka_now が 2026-08-18 に実際にそれで53%を落としていた）。
  */
@@ -112,27 +113,16 @@ export function parseMitaDrawDetail(html: string): MitaDrawDetail {
 }
 
 async function collectPosts(oldestMs: number): Promise<MitaDrawPost[]> {
-  const byslug = new Map<string, MitaDrawPost>();
-  for (let page = 1; page <= MAX_PAGES; page++) {
-    const url = page === 1 ? HOME : `${HOME}page/${page}/`;
-    let html: string;
-    try {
-      html = await fetchHtml(url);
-    } catch {
-      break; // 終端（404）
-    }
-    const posts = parseMitaDrawList(html);
-    const before = byslug.size;
-    for (const p of posts) if (!byslug.has(p.slug)) byslug.set(p.slug, p);
-    if (byslug.size === before) break; // 新規が出なくなった＝終端
-
+  return crawlPages<MitaDrawPost>({
+    label: "mita_draw",
+    urlOf: (page) => (page === 1 ? HOME : `${HOME}page/${page}/`),
+    parse: parseMitaDrawList,
+    keyOf: (p) => p.slug,
     // 記事は新しい順に並ぶので、ページの最後が足切りより古くなったらそれ以降は全部古い。
-    // ここで止めないと、受付中が1件しかない日でも一覧を最後まで（実測30ページ）舐める。
-    const last = posts[posts.length - 1]?.postedAt;
-    if (last && last.getTime() < oldestMs) break;
-    await sleep(400);
-  }
-  return [...byslug.values()];
+    // これが無いと、受付中が1件しかない日でも一覧を最後まで（実測30ページ）舐める。
+    isPageOld: lastIsOlderThan((p) => p.postedAt, oldestMs),
+    maxPages: MAX_PAGES,
+  });
 }
 
 export async function scrapeMitaDraw(): Promise<ScrapedItem[]> {
