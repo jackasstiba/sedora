@@ -888,6 +888,27 @@ const SEARCH_SYNONYMS: { alias: string; canon: string[] }[] = [
   { alias: "ぼざろ", canon: ["ぼっち・ざ・ろっく", "ぼっちざろっく"] },
   { alias: "遊戯王", canon: ["遊☆戯☆王"] },
   { alias: "プリキュア", canon: ["プリキュア"] },
+  // ── ブランド名の**カタカナ↔英字**（2026-08-18・watchlist が見つけた） ─────────
+  // 実測: 「アディダス」「ニューバランス」「アシックス」はどれも**表示0件**なのに、
+  // 英字で引くと `new balance` 6件・`asics` 1件・`adidas` 4件（DB）が実在した。
+  // 収集元（billys / snkrdunk）は商品名を英字で載せるが、**日本語話者はカタカナで検索する**。
+  // つまり「載せているのに見つからない」＝在庫の問題ではなく検索の問題だった。
+  // カタカナ→英字だけでなく**英字→カタカナ**も要る（両方の表記の商品が混在しているため）。
+  { alias: "アディダス", canon: ["adidas"] },
+  { alias: "adidas", canon: ["アディダス"] },
+  { alias: "ニューバランス", canon: ["new balance", "newbalance"] },
+  { alias: "new balance", canon: ["ニューバランス"] },
+  { alias: "アシックス", canon: ["asics"] },
+  { alias: "asics", canon: ["アシックス"] },
+  { alias: "ナイキ", canon: ["nike"] },
+  { alias: "nike", canon: ["ナイキ"] },
+  { alias: "ジョーダン", canon: ["jordan"] },
+  { alias: "jordan", canon: ["ジョーダン"] },
+  { alias: "プーマ", canon: ["puma"] },
+  { alias: "コンバース", canon: ["converse"] },
+  { alias: "リーボック", canon: ["reebok"] },
+  { alias: "ベイブレード", canon: ["beyblade"] },
+  { alias: "ベアブリック", canon: ["be@rbrick", "bearbrick"] },
 ];
 
 /**

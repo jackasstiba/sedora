@@ -38,6 +38,7 @@ import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
+import { countWatchlist } from "../src/lib/watchlist";
 import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
@@ -1130,6 +1131,38 @@ async function main() {
         if (MAY_BE_EMPTY[src]) zeroByDesign.push(`${line}（${MAY_BE_EMPTY[src]}）`);
         else zero.push(line);
       }
+      // **「載っていて当然の層」が丸ごと0件になっていないか**（観点Dの残り半分）。
+      //
+      // 上の検査はソース単位なので、「そのソースは動いているが、**その層の収集元を
+      // そもそも持っていない**」を映さない。実測 2026-08-18: 本番3512件を転売ワードで
+      // 数えて初めて、アディダス/NB/アシックス・BE@RBRICK・トミカ/プラレール・ちいかわが
+      // **丸ごと0件**だと分かった（数えるまで誰も気付かなかった）。→ その「数える」を常設にする。
+      //
+      // **本体は毎回出す観測**（下の一覧）で、判定はゼロの層の**件数のラチェット**だけ。
+      // 0件が正常な層もある（季節もの・年数回の抽選）ので「今日0件」では鳴らさず、
+      // **ゼロの層が増えた**ときだけ鳴らす。暦を進めれば掲載は必ず縮むので、
+      // audit:tomorrow の CALENDAR_EXPECTED に理由付きで入れてある。
+      {
+        const titles = shown.map((r) => cleanListTitle(r.source, r.title));
+        const hits = countWatchlist(titles, (t, w) => matchesQuery(t, w));
+        console.log(
+          `(参考) 転売ワードの掲載件数（${hits.length}語・少ない順）: ` +
+            hits
+              .slice()
+              .sort((a, b) => a.hits - b.hits)
+              .map((h) => `${h.word}=${h.hits}`)
+              .join("  ")
+        );
+        report(
+          "watchlist_zero",
+          "転売の的になる層が1件も載っていない（その層の収集元を持っていない疑い）",
+          "warn",
+          hits.filter((h) => h.hits === 0).map((h) => `${h.word}: 0件 — ${h.why}`),
+          baseline,
+          hits.length
+        );
+      }
+
       report(
         "source_contributes_zero",
         "巡回できているのに、サイトに1件も出ていないソースがある",

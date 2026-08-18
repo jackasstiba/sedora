@@ -44,7 +44,8 @@ import {
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
-import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
+import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, matchesQuery, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
+import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
 import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
 
 /** テスト内の改行。TSの "
@@ -2333,6 +2334,37 @@ const cases: Case[] = [
         (r) => r.n
       ).length,
     want: 0,
+  },
+  // ── 検索: ブランドのカタカナ↔英字（2026-08-18・watchlist が見つけた「載せているのに0件」） ──
+  {
+    // 収集元は英字で載せるが、日本語話者はカタカナで検索する。実測でここが0件だった。
+    name: "検索: カタカナ「ニューバランス」で英字タイトルに当たる",
+    fn: () => matchesQuery("New Balance 990v6 Made in USA", "ニューバランス"),
+    want: true,
+  },
+  {
+    name: "検索: 英字「asics」でカタカナタイトルにも当たる",
+    fn: () => matchesQuery("アシックス ゲルカヤノ 14", "asics"),
+    want: true,
+  },
+  {
+    name: "検索: 別ブランドには当たらない（同義語で当たりすぎない）",
+    fn: () => matchesQuery("NIKE AIR MAX 95", "アディダス"),
+    want: false,
+  },
+  {
+    // 監視する層は「理由(why)」つきでしか足せない＝空の理由を混ぜたら気付けるようにする。
+    name: "watchlist: 全ての語に理由が書いてある",
+    fn: () => WATCHLIST.every((w) => w.why.trim().length >= 8),
+    want: true,
+  },
+  {
+    name: "watchlist: 掲載件数はサイトの検索と同じ物差しで数える",
+    fn: () =>
+      countWatchlist(["New Balance 990v6", "ポケモンカード 拡張パック"], (t, w) => matchesQuery(t, w)).find(
+        (h) => h.word === "ニューバランス"
+      )?.hits,
+    want: 1,
   },
 ];
 
