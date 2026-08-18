@@ -44,6 +44,11 @@ import {
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
 import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
+import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
+
+/** テスト内の改行。TSの "
+" を埋め込むと生成側で壊れやすいので定数にする */
+const LF = String.fromCharCode(10);
 import { officialUrlLabel } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
@@ -446,6 +451,81 @@ const cases: Case[] = [
     name: "登場予定・未来 → 見出しは『登場予定』のまま",
     fn: () => eventDateHeading("登場予定", null, false),
     want: "登場予定",
+  },
+  // (b-3) X投稿の断定語は行の実データから導出する。**見出しに種別を書けるのは全行一致のときだけ。**
+  //       本人がレビューしても誤りを検出できない領域なので、ここは機械で固定する
+  //       （実測 2026-08-18: 「本日の発売予定」と書こうとした5件のうち eventType=発売 は1件だけだった）。
+  {
+    name: "投稿: 種別が全行そろえば見出しに畳み、行からは消す",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "商品B", type: "抽選", dateLabel: "8/18(火)" },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ https://hatsukore.com/",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【抽選】8/18(火)", "", "・商品A", "・商品B", "", "→ https://hatsukore.com/"].join(LF),
+  },
+  {
+    name: "投稿: 種別が混在したら見出しに種別を書かず、行ごとに出す",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "商品B", type: "開催", dateLabel: "8/18(火)" },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ https://hatsukore.com/",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【今日の予定】8/18(火)", "", "・抽選 商品A", "・開催 商品B", "", "→ https://hatsukore.com/"].join(LF),
+  },
+  {
+    name: "投稿: 日付が混在したら行頭に日付を残す（受付中を含む）",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "商品B", type: "抽選", dateLabel: null },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ x",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【抽選】", "", "・8/18(火) 商品A", "・受付中 商品B", "", "→ x"].join(LF),
+  },
+  {
+    name: "投稿: 予算で落ちた行の種別は見出し判定に混ぜない",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "B", type: "抽選", dateLabel: "8/18(火)" },
+          // 3行目は予算に入らない。ここの「開催」を拾って見出しを崩してはいけない
+          { name: "とても長い商品名とても長い商品名とても長い商品名", type: "開催", dateLabel: "8/18(火)" },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ x",
+        weigh: (t: string) => t.length,
+        budget: 60,
+      }).text,
+    want: ["【抽選】8/18(火)", "", "・A", "・B", "", "→ x"].join(LF),
+  },
+  {
+    name: "投稿: 立ち位置に反する語を機械で拾う",
+    fn: () => findForbidden("この商品は相場が高騰していて利益が出ます").join(","),
+    want: "転売,利益,高騰,相場".split(",").filter((w) => "この商品は相場が高騰していて利益が出ます".includes(w)).join(","),
+  },
+  {
+    name: "投稿: 通常の本文は禁止語に引っかからない",
+    fn: () => findForbidden("【抽選】8/18(火) ・NIKE MIND 001").length,
+    want: 0,
   },
   {
     name: "過去でも『発送予定』は据え置き（発送月は予定のままが正しい）",

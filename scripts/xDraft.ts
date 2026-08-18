@@ -3,7 +3,8 @@ import path from "node:path";
 import { getItems } from "../src/lib/items";
 import { getLotteryItems } from "../src/lib/seo";
 import { cleanListTitle } from "../src/lib/title";
-import { daysUntil, formatShort, todayJst } from "../src/lib/date";
+import { daysUntil, displayEventType, formatShort, todayJst } from "../src/lib/date";
+import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
 import { weightedLength, MAX_WEIGHTED } from "../src/lib/xApi";
 
 // X用の下書きを、サイトが今見せているデータから組み立てる。
@@ -21,7 +22,7 @@ import { weightedLength, MAX_WEIGHTED } from "../src/lib/xApi";
 
 const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "https://hatsukore.com";
 const NL = String.fromCharCode(10);
-const MAX_ROWS = 5; // 予算内に収まる範囲での上限。実際の行数は assemble が決める
+const MAX_ROWS = 6;
 
 function arg(name: string): string | undefined {
   const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
@@ -34,42 +35,53 @@ type Row = {
   title: string;
   genre: string;
   eventDate: Date | null;
+  eventDateText: string | null;
   eventType: string;
 };
 
-/** 商品名は長いので行に収まる長さで落とす */
-function shortTitle(source: string, title: string, max = 24): string {
-  const t = cleanListTitle(source, title).replace(/\s+/g, " ").trim();
-  return t.length > max ? `${t.slice(0, max)}…` : t;
+/**
+ * DBの行を投稿用の行に変換する。**種別はサイトと同じ displayEventType を通す**
+ * （別実装にすると画面と投稿がズレる。過去日の「予定」も同じ規則で過去形になる）。
+ */
+function toDraftRow(r: Row, today: Date): DraftRow {
+  return {
+    name: displayName(r.source, r.title),
+    type: displayEventType(r.eventType, r.eventDate, r.eventDateText, today),
+    dateLabel: r.eventDate ? formatShort(r.eventDate) : null,
+  };
 }
 
-function bullet(r: Row): string {
-  return `・${r.eventDate ? formatShort(r.eventDate) : "受付中"} ${shortTitle(r.source, r.title)}`;
+/** 商品名は**切らない**（切ると何の商品か分からず、並べる意味が無くなる） */
+function displayName(source: string, title: string): string {
+  return cleanListTitle(source, title).replace(/\s+/g, " ").trim();
 }
+
+/** 1行が長すぎる商品は載せない。切るのではなく**選ばない**ことで途切れを無くす。 */
+const MAX_NAME = 34;
 
 /**
- * 近い順に選ぶが、**切り詰めた後の表示名が同じ行**と**同じジャンルの偏り**を避ける。
- * 素直に上位から取ると「ONE PIECEカードゲーム ブースターパック 世…」が2行並ぶ（実測）。
- * 名前を切る以上、切った後の文字列で重複判定しないと意味がない。
+ * 近い順に選ぶが、**表示名の重複**と**同じジャンルの偏り**を避ける。
+ * used は下書きをまたいで共有する（別idでも同じ商品名の行が実在するので id では防げない）。
  */
-function pickVaried(rows: Row[], limit: number, withinDays: number): Row[] {
+function pickVaried(rows: Row[], limit: number, withinDays: number, used: Set<string>): Row[] {
   const near = rows.filter((r) => {
     if (!r.eventDate) return true;
     const d = daysUntil(r.eventDate);
     return d >= 0 && d <= withinDays;
   });
-  const pool = near.length >= limit ? near : rows;
-  const seenName = new Set<string>();
+  // 長すぎる名前はここで落とす（下流で切らないため）
+  const pool = (near.length >= limit ? near : rows).filter(
+    (r) => displayName(r.source, r.title).length <= MAX_NAME,
+  );
   const seenGenre = new Set<string>();
   const out: Row[] = [];
-  // 1巡目はジャンルを散らす。埋まらなければ2巡目で同ジャンルも許す。
   for (const pass of [0, 1]) {
     for (const r of pool) {
       if (out.length >= limit) break;
-      const name = shortTitle(r.source, r.title);
-      if (seenName.has(name)) continue;
+      const name = displayName(r.source, r.title);
+      if (used.has(name)) continue;
       if (pass === 0 && seenGenre.has(r.genre)) continue;
-      seenName.add(name);
+      used.add(name);
       seenGenre.add(r.genre);
       out.push(r);
     }
@@ -77,65 +89,65 @@ function pickVaried(rows: Row[], limit: number, withinDays: number): Row[] {
   return out;
 }
 
-/**
- * 見出しと締め文を先に確保し、**残り予算に収まる分だけ**商品行を足す。
- * 行数を決め打ちすると、商品名が長い日だけ 280 を超えて送信時に弾かれる
- * （実測 2026-08-18: 4行固定で 278/280 とほぼ余白が無かった）。
- */
-function assemble(head: string, rows: Row[], tail: string): string {
-  const body: string[] = [];
-  for (const r of rows) {
-    const next = [...body, bullet(r)];
-    if (weightedLength([head, "", ...next, "", tail].join(NL)) > MAX_WEIGHTED - 6) break;
-    body.push(bullet(r));
-  }
-  return body.length ? [head, "", ...body, "", tail].join(NL) : [head, "", tail].join(NL);
-}
-
 type Draft = { kind: string; note: string; text: string };
 
 async function buildDrafts(): Promise<Draft[]> {
   const drafts: Draft[] = [];
-  const lotteryIds = new Set<number>();
+  const used = new Set<string>();
 
-  // ① 抽選まとめ … 受付中/締切が近い抽選。ハツコレの一番強い面
-  const lottery = (await getLotteryItems()) as unknown as Row[];
+  const today = todayJst();
+
+  // ① 抽選。**種別が実際に「抽選」の行だけ**に絞る。
+  // /lottery ページは hasLottery やタイトル一致でも拾うので、そのまま並べると
+  // 「開催」「発売」が混ざり、見出しに『抽選』と書けなくなる（実測で混ざっていた）。
+  const lotteryAll = (await getLotteryItems()) as unknown as Row[];
+  const lottery = lotteryAll.filter(
+    (r) => displayEventType(r.eventType, r.eventDate, r.eventDateText, today) === "抽選",
+  );
   if (lottery.length) {
-    const picks = pickVaried(lottery, MAX_ROWS, 14);
-    for (const r of picks) lotteryIds.add(r.id);
+    const picks = pickVaried(lottery, MAX_ROWS, 14, used);
     drafts.push({
       kind: "lottery",
-      note: `抽選 ${lottery.length}件から近い順に選出`,
-      text: assemble("【抽選・受付中】応募忘れに注意", picks, `ほかの抽選もまとめています → ${SITE}/lottery`),
+      note: `抽選ページ ${lotteryAll.length}件 → 種別が抽選の ${lottery.length}件から選出`,
+      text: buildPost({
+        rows: picks.map((r) => toDraftRow(r, today)),
+        headBase: "抽選",
+        tail: `ほかの抽選もまとめています → ${SITE}/lottery`,
+        weigh: weightedLength,
+        budget: MAX_WEIGHTED - 6,
+      }).text,
     });
   }
 
-  // ② 今週の予定 … 抽選で出した商品は外す（同じ日に2本投げると中身がほぼ同じになる）
+  // ② 発売・予約の予定
   const all = (await getItems({})) as unknown as Row[];
-  const today = todayJst();
   const upcoming = all.filter(
-    (r) => !lotteryIds.has(r.id) && r.eventDate != null && daysUntil(r.eventDate) >= 0 && daysUntil(r.eventDate) <= 7,
+    (r) => r.eventDate != null && daysUntil(r.eventDate) >= 0 && daysUntil(r.eventDate) <= 7,
   );
   if (upcoming.length) {
+    const picks = pickVaried(upcoming, MAX_ROWS, 7, used);
     drafts.push({
       kind: "week",
-      note: `今後7日 ${upcoming.length}件（抽選の分を除く）から選出`,
-      text: assemble(
-        `【今週の予定】${formatShort(today)}〜`,
-        pickVaried(upcoming, MAX_ROWS, 7),
-        `今週の分をまとめて見る → ${SITE}/`,
-      ),
+      note: `今後7日 ${upcoming.length}件から選出`,
+      text: buildPost({
+        rows: picks.map((r) => toDraftRow(r, today)),
+        headBase: "今日の予定",
+        tail: `日付順にまとめています → ${SITE}/`,
+        weigh: weightedLength,
+        budget: MAX_WEIGHTED - 6,
+      }).text,
     });
   }
 
-  // ③ 単品ピック … 画像を添えて投稿する想定
+  // ③ 単品ピック（画像を添えて投稿する想定）
   const pick = upcoming[0] ?? all[0];
   if (pick) {
     drafts.push({
       kind: "pick",
       note: "単品ピック（画像を添えて投稿する想定）",
       text: [
-        `${pick.eventDate ? formatShort(pick.eventDate) : "受付中"} ${cleanListTitle(pick.source, pick.title)}`,
+        `${pick.eventDate ? formatShort(pick.eventDate) : "受付中"} 【${displayEventType(pick.eventType, pick.eventDate, pick.eventDateText, today)}】`,
+        cleanListTitle(pick.source, pick.title),
         "",
         "気になる人は早めにチェックを。",
         `${SITE}/items/${pick.id}`,
@@ -164,6 +176,8 @@ async function main() {
     console.log(d.text);
     console.log("-".repeat(60));
     console.log(`重み付き文字数: ${len} / ${MAX_WEIGHTED}${len > MAX_WEIGHTED ? "  ❌ 超過" : ""}`);
+    const ng = findForbidden(d.text);
+    if (ng.length) console.log(`❌ 立ち位置に反する語: ${ng.join(" / ")}`);
   }
 
   if (out) {
