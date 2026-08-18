@@ -45,7 +45,7 @@ import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { isGenericImageUrl, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
-import { getSitemapItemRefs } from "../src/lib/seo";
+import { getSitemapItemRefs, hasSubstance } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
 import { CRAWL_RULE_WHY } from "../src/lib/crawlLint";
@@ -1524,6 +1524,31 @@ async function main() {
       refs.length
     );
     console.log(`(参考) sitemap の商品URL ${refs.length}件（表示中 ${allowed.size}件＋直近に終了した分）`);
+  }
+
+  // (16c-2) **薄いページを増やしていないか**。
+  //
+  // 2026-08-18 の検索流入対処で、sitemap は hasSubstance（名前と日付以外の中身が1つでも
+  // あるか）で申告対象を絞るようにした。だが本当に効かせたいのは「申告しない」ではなく
+  // **増やさない**方で、新しい収集元を足したときに名前と日付だけの行が大量に入ると、
+  // sitemap から外れるだけで**サイトの中身自体が薄くなる**（Googleは内部リンクからも辿る）。
+  //
+  // ⚠️ ここは **shown（表示中の全件）** を数える。refs を数えると、refs は同じ
+  // hasSubstance で絞った後なので **構造上ずっと0件＝検査が存在しないのと同じ**になる。
+  {
+    const thin = shown
+      .filter((r) => !hasSubstance(r))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 40)}`);
+    report(
+      "thin_pages",
+      "名前と日付しか無いページ（中身が1つも無い＝収集元の重複に近い）",
+      "warn",
+      thin,
+      baseline,
+      shown.length
+    );
+    metrics["substance_rate"] =
+      Math.round(((shown.length - thin.length) / Math.max(shown.length, 1)) * 1000) / 10;
   }
 
   // (16d) **画像**。一覧はカードの並びなので、画像の有無と正しさが体験のほぼ全部を決める。

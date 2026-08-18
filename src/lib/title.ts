@@ -502,3 +502,79 @@ export function cleanListTitle(source: string, title: string): string {
   // 5) 削りすぎ・空は原文に戻す（安全側）。
   return t.length >= 6 ? t : raw;
 }
+
+// ── 商品ページの <title> ──────────────────────────────────────────────
+//
+// 2026-08-18 まで、商品ページのタイトルは `${商品名} | ハツコレ` だけだった。
+// これが狙えるのは「商品名」単体のクエリで、そこは公式サイト・大手モール・大手まとめが
+// 必ず上にいる（被リンクゼロの新規ドメインで取りにいく場所ではない）。実際に打たれるのは
+// 「〇〇 発売日」「〇〇 抽選」のような**修飾つきのクエリ**なのに、その語が sitemap 掲載
+// 2846ページのタイトルに1文字も入っていなかった。
+//
+// ここで足す修飾語は、**そのページが実際に持っている事実からしか作らない**
+// （[[System/rules]] UIラベルは裏取り済みのみ約束）。日付が無いなら日付は書かない、
+// hasLottery が立っていないなら「抽選」と書かない。
+//
+// 📌 **名前は切り詰めない。** 「Googleの表示は30〜35文字だから名前を切って修飾語を
+//    見える位置に出す」を実測したら**逆効果**だった（2026-08-18 sitemap 2846件）:
+//      上限40字 → 同一タイトルが **128件**／50字 → 47件／60字 → 16件／80字 → 6件／
+//      切らない → **0件**（切り詰め前の表示名そのものの重複は12件だが、日付と見出しが
+//      付くことで解消する）。
+//    長い名前ほど末尾が識別子（型番・ver.違い）なので、切るとページ同士が同じ顔になる。
+//    重複タイトルは薄いページ判定に直結するので、表示の切れよりも一意性を取る。
+//    中央値は48文字（表示名の中央値が31文字）で、切り詰めが効くのは長い700件だけ。
+
+/** タイトルに出してよい見出し語。
+ *
+ *  eventDateHeading は eventType から機械的に `${eventType}日` を作るので、
+ *  eventType="情報" のような日付でない種別だと「情報日」という日本語にならない語が出る
+ *  （実測5件）。画面の見出しなら文脈で読めるが、検索結果に出るタイトルは単体で読まれる。
+ *  ここに無い語は**名前だけのタイトルに落とす**（安全側。新しい eventType が増えても
+ *  変な日本語を検索結果に出さない）。 */
+const TITLE_HEADINGS = new Set([
+  "発売日",
+  "開催日",
+  "再販日",
+  "登場日",
+  "抽選日",
+  "発送予定",
+  "予約日",
+  "登場予定",
+  "予約開始日",
+  "販売開始日",
+  "予約受付中",
+]);
+
+/**
+ * 商品ページの <title> を組み立てる。
+ *
+ * 引数は**すでに解決済みの表示値**を受け取る（日付の解釈や過去判定を二重に書かない）。
+ *  ・name    … cleanListTitle 済みの表示名
+ *  ・heading … eventDateHeading の結果（発売日 / 登場予定 / 抽選日 / 発送予定 …）
+ *  ・date    … eventDateLabel の結果（"short" 推奨。無いなら null）
+ *  ・hasLottery … 抽選ありが裏取りできている行だけ true
+ */
+export function itemPageTitle(input: {
+  name: string;
+  heading: string | null;
+  date: string | null;
+  hasLottery: boolean;
+}): string {
+  const name = input.name;
+
+  // 商品名にすでに同じ語が入っているなら足さない（「〇〇 発売日の発売日」を作らない）。
+  const heading =
+    input.heading && TITLE_HEADINGS.has(input.heading) && !name.includes(input.heading)
+      ? input.heading
+      : null;
+  const base = heading ? `${name}の${heading}` : name;
+
+  const facts = [
+    input.date,
+    // 名前や見出しに「抽選」が既にあるなら重ねない。
+    input.hasLottery && !base.includes("抽選") ? "抽選あり" : null,
+  ].filter((v): v is string => Boolean(v));
+
+  const head = facts.length ? `${base}｜${facts.join("・")}` : base;
+  return `${head} | ハツコレ`;
+}

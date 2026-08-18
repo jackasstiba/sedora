@@ -37,7 +37,8 @@
     "hooks:install": "git config core.hooksPath .githooks",
     "deploy:check": "node --env-file-if-exists=.env --import tsx scripts/deployCheck.ts",
     "x:verify": "node --env-file-if-exists=.env --import tsx scripts/xVerify.ts",
-    "x:post": "node --env-file-if-exists=.env --import tsx scripts/xPost.ts"
+    "x:post": "node --env-file-if-exists=.env --import tsx scripts/xPost.ts",
+    "x:draft": "node --env-file-if-exists=.env --import tsx scripts/xDraft.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

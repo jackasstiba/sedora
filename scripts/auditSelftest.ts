@@ -72,7 +72,7 @@ import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
 import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
 import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
-import { cleanListTitle, hasProductSegment } from "../src/lib/title";
+import { cleanListTitle, hasProductSegment, itemPageTitle } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { readFileSync } from "node:fs";
@@ -1620,6 +1620,66 @@ const cases: Case[] = [
     want: "キャラグッズ",
   },
   { name: "ちいかわ: ソフビはソフビ・アートトイ", fn: () => chiikawaGenre("フィギュア", "おっきいソフビフィギュア"), want: "ソフビ・アートトイ" },
+
+
+  // ── 商品ページの <title>（検索クエリの形になっているか） ────────────
+  // 2026-08-18まで `${商品名} | ハツコレ` だけで、「〇〇 発売日」「〇〇 抽選」という
+  // 実際に打たれる形の語が2846ページのどこにも無かった。足すのは裏取り済みの事実だけ。
+  {
+    name: "title: 商品名だけでなく『の発売日』と日付が入る",
+    fn: () => itemPageTitle({ name: "ワンピースカード 新弾", heading: "発売日", date: "9/5(金)", hasLottery: false }),
+    want: "ワンピースカード 新弾の発売日｜9/5(金) | ハツコレ",
+  },
+  {
+    name: "title: 抽選ありの行だけ『抽選あり』を足す",
+    fn: () => itemPageTitle({ name: "限定タオル", heading: "発売日", date: "9/5(金)", hasLottery: true }),
+    want: "限定タオルの発売日｜9/5(金)・抽選あり | ハツコレ",
+  },
+  {
+    // 見出しが既に「抽選日」なら「抽選あり」は同じことの二度書き。
+    name: "title: 見出しが抽選日なら『抽選あり』を重ねない",
+    fn: () => itemPageTitle({ name: "限定タオル", heading: "抽選日", date: "9/5(金)", hasLottery: true }),
+    want: "限定タオルの抽選日｜9/5(金) | ハツコレ",
+  },
+  {
+    name: "title: 抽選が裏取りできていないなら書かない",
+    fn: () => itemPageTitle({ name: "限定タオル", heading: "発売日", date: "9/5(金)", hasLottery: false }),
+    want: "限定タオルの発売日｜9/5(金) | ハツコレ",
+  },
+  {
+    name: "title: 日付が無いなら日付を書かない",
+    fn: () => itemPageTitle({ name: "新作フィギュア", heading: "登場予定", date: null, hasLottery: false }),
+    want: "新作フィギュアの登場予定 | ハツコレ",
+  },
+  {
+    name: "title: 名前に既にある語は重ねない",
+    fn: () => itemPageTitle({ name: "〇〇の発売日まとめ", heading: "発売日", date: "9/5(金)", hasLottery: false }),
+    want: "〇〇の発売日まとめ｜9/5(金) | ハツコレ",
+  },
+  {
+    name: "title: 名前に「抽選」があれば『抽選あり』を重ねない",
+    fn: () => itemPageTitle({ name: "限定タオル抽選販売", heading: "発売日", date: null, hasLottery: true }),
+    want: "限定タオル抽選販売の発売日 | ハツコレ",
+  },
+  {
+    // eventType="情報" だと eventDateHeading が「情報日」を作る（実測5件）。
+    // 画面の見出しなら文脈で読めるが、検索結果のタイトルは単体で読まれる。
+    name: "title: 日本語にならない見出し語は落として名前だけにする",
+    fn: () => itemPageTitle({ name: "新作フィギュア", heading: "情報日", date: "9/5(金)", hasLottery: false }),
+    want: "新作フィギュア｜9/5(金) | ハツコレ",
+  },
+  {
+    // 名前を40字で切ると同一タイトルが128件生まれた（実測）。切らないと0件。
+    name: "title: 長い名前を切り詰めない（ページ同士が同じ顔にならない）",
+    fn: () =>
+      itemPageTitle({
+        name: "ワンピース KING OF ARTIST THE MONKEY.D.LUFFY GEAR5 SPECIAL COLOR ver.A",
+        heading: "発売日",
+        date: "9/5(金)",
+        hasLottery: false,
+      }).includes("SPECIAL COLOR ver.A"),
+    want: true,
+  },
 
   // ガシャポン: 量産の300〜500円を載せない（載せる基準そのもの）
   {

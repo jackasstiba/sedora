@@ -9,7 +9,7 @@ import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl }
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
-import { cleanListTitle, displaySubGenre } from "@/lib/title";
+import { cleanListTitle, displaySubGenre, itemPageTitle } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import {
   groupStoresByLabel,
@@ -35,9 +35,17 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // 一覧では商品名なのに、開いた先のタイトル・<title> がツイート全文（実況コメント込み）になり、
   // 同じ商品の名前がページ間で食い違っていた。
   const cleanTitle = cleanListTitle(item.source, item.title);
-  const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
   const past = isEventPast(item.eventDate, item.eventDateText, todayJst());
+  // <title> は「商品名」単体ではなく「〇〇の発売日」の形にする（実際に打たれるクエリの形）。
+  // 組み立て規則と、名前を切り詰めない理由は itemPageTitle 側に書いてある。
+  const title = itemPageTitle({
+    name: cleanTitle,
+    heading: eventDateHeading(item.eventType, item.eventDateText, past),
+    // タイトルは短い方の書式（説明文は long を使う）。
+    date: eventDateLabel(item.eventDate, item.eventDateText, "short"),
+    hasLottery: item.hasLottery === true,
+  });
   // 検索結果に出る説明文。**相場・転売実績は入れない**（[[System/rules]] ハツコレの立ち位置。
   // 相場を出すと転売サイト感が高まる）。載せるのは「逃すと買えない」側＝抽選の有無・
   // 賞品ラインナップ・取扱店。以前は日付/価格/ジャンルだけで、28.5%が持つ highlights も

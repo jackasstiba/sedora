@@ -319,6 +319,12 @@ export async function getSitemapItemRefs() {
       officialUrl: true,
       price: true,
       imageUrl: true,
+      // 「名前と日付しかないページ」を自分から申告しないための判定材料（hasSubstance）。
+      highlights: true,
+      prizes: true,
+      stores: true,
+      salesChannel: true,
+      marketPriceText: true,
     },
   });
   // **掲載基準を通す**。ここが自前の where だけで完結していたため、サイトが「載せない」と
@@ -326,5 +332,34 @@ export async function getSitemapItemRefs() {
   // 掲載基準で落ちる行＝日付なしのXミラー投稿 515件、クロスソース重複の負け側 229件ほか）。
   // 重複ページと実況投稿を自分から大量申告している状態で、クロール割当を薄める。
   // 表示範囲の定義は1か所（dedupeItems／src/lib/pages.ts）に揃える。
-  return dedupeItems(rows).map((r) => ({ id: r.id, scrapedAt: r.scrapedAt }));
+  // **中身の無いページは申告しない。** 名前と日付しか無いページは、収集元にも同じ情報が
+  // あり、こちらに固有の中身が1つも無い＝Googleから見て重複に近い。0権威の新規ドメインで
+  // そういうURLを混ぜると、クロール割当をそこに使わせて中身のあるページの発見を遅らせる。
+  // （実測 2026-08-18: 2846件中46件＝1.6%。サイト内では従来どおり表示する＝落とすのは
+  //  「自分からGoogleに申告する対象」だけで、内部リンクからは辿れる。）
+  return dedupeItems(rows)
+    .filter(hasSubstance)
+    .map((r) => ({ id: r.id, scrapedAt: r.scrapedAt }));
+}
+
+/** そのページに「名前と日付」以外の固有の中身があるか。
+ *
+ *  sitemap の申告基準と、監査の薄いページ検査で**同じ定義**を使う（判定を二重に書かない）。
+ *  相場(marketPriceText)は画面には出さないが（[[System/rules]] ハツコレの立ち位置）、
+ *  ページの中身の有無としては数える。 */
+export function hasSubstance(r: {
+  imageUrl?: string | null;
+  price?: string | null;
+  marketPriceText?: string | null;
+  highlights?: string | null;
+  prizes?: string | null;
+  stores?: string | null;
+  salesChannel?: string | null;
+  officialUrl?: string | null;
+}): boolean {
+  const has = (v: unknown) => v !== null && v !== undefined && String(v).trim() !== "";
+  return (
+    has(r.imageUrl) || has(r.price) || has(r.marketPriceText) || has(r.highlights) ||
+    has(r.prizes) || has(r.stores) || has(r.salesChannel) || has(r.officialUrl)
+  );
 }
