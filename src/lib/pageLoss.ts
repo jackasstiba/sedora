@@ -25,18 +25,52 @@
 
 import { isStalePlan } from "./date";
 import { productUrlKey } from "./itemFilter";
+import { saleUnitLabel, stripSaleUnit } from "./saleUnit";
+import { cleanListTitle } from "./title";
 
-/** URL重複の突合キー（商品ページURL＋暦日）。ページ内の表示行と消えた行で同じ物差しを使う。 */
-export function productMergeKeys(r: {
-  url?: string | null;
-  officialUrl?: string | null;
-  eventDate: Date | string | null;
-}): string[] {
-  if (!r.eventDate) return [];
-  const day = new Date(r.eventDate).toISOString().slice(0, 10);
-  return [productUrlKey(r.url), productUrlKey(r.officialUrl)]
-    .filter((k): k is string => !!k)
-    .map((k) => `${k}|${day}`);
+/**
+ * 「代表に畳まれた」ことを示す突合キー。ページ内の表示行と消えた行で**同じ物差し**を使う。
+ *
+ * 2系統ある:
+ *  ① 商品ページURL＋暦日 … `dedupeSameProductUrlCrossSource` が畳んだ分
+ *  ② 収集元＋単位表記を外した名前＋暦日 … `dedupeSaleUnitSameSource` が畳んだ分
+ *     （実測 2026-08-18: 販売単位の重複解消を入れた直後、`/tcg/ヴァイスシュヴァルツ` の
+ *      18→14件が「説明のつかない消失」で ERROR になった。畳んだのはこちらなのに、
+ *      説明する側がその理由を知らなかった＝検査側の説明不足）。
+ *
+ * `displayed`（＝そのページに今出ている行）と、消えた行とで出すキーが少し違う:
+ *  ・消えた行は**単位表記を持つときだけ**②を出す（畳まれる側は単位表記付きの行）。
+ *  ・日付なしの行は暦日の代わりに `-` で揃える（単位違いは日付なしの行が混ざる）。
+ */
+export function productMergeKeys(
+  r: {
+    url?: string | null;
+    officialUrl?: string | null;
+    eventDate: Date | string | null;
+    eventDateText?: string | null;
+    source?: string | null;
+    title?: string | null;
+  },
+  displayed = false
+): string[] {
+  const keys: string[] = [];
+  const day = r.eventDate ? new Date(r.eventDate).toISOString().slice(0, 10) : null;
+  if (day) {
+    for (const k of [productUrlKey(r.url), productUrlKey(r.officialUrl)]) if (k) keys.push(`${k}|${day}`);
+  }
+  if (r.source && r.title && (displayed || saleUnitLabel(cleanListTitle(r.source, r.title)))) {
+    const base = stripSaleUnit(cleanListTitle(r.source, r.title));
+    if (base.length >= 8) {
+      const d = day ?? r.eventDateText ?? null;
+      if (displayed) {
+        keys.push(`unit|${r.source}|${base}|-`);
+        if (d) keys.push(`unit|${r.source}|${base}|${d}`);
+      } else {
+        keys.push(`unit|${r.source}|${base}|${d ?? "-"}`);
+      }
+    }
+  }
+  return keys;
 }
 
 /** そのページが「過去日の商品を載せない」設計か。 */
@@ -57,9 +91,12 @@ export type LostRow = {
    * `/genre/フィギュア` の43件がこの型で「説明のつかない消失」に化けた（暦が進んだだけ）。
    */
   eventDateText?: string | null;
-  /** URL重複の突合（productMergeKeys）に使う。渡せる呼び出しだけ渡せばよい（任意）。 */
+  /** 突合（productMergeKeys）に使う。渡せる呼び出しだけ渡せばよい（任意）。
+   *  source/title は**販売単位の重複解消**に畳まれた行を説明するのに要る。 */
   url?: string | null;
   officialUrl?: string | null;
+  source?: string | null;
+  title?: string | null;
 };
 
 export type PageLoss = {

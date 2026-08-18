@@ -6,7 +6,7 @@ import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
-import { getItemById, getRelatedItems } from "@/lib/seo";
+import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre, itemPageTitle } from "@/lib/title";
@@ -82,7 +82,10 @@ export default async function ItemPage({ params }: Props) {
   const item = await getItemById(Number(id));
   if (!item) notFound();
 
-  const related = await getRelatedItems(item);
+  // 同じ商品の販売単位（ばら売り/BOX/カートン）。一覧は1枚に畳むので、価格と導線はここで出す。
+  const saleUnits = await getSaleUnits(item);
+  // 単位の別行は下の「販売単位」欄に出すので、関連アイテムからは外す（1ページに2回出さない）。
+  const related = await getRelatedItems(item, 12, saleUnits.map((u) => u.id));
   // 一覧カードと同じ規則で、分かっている精度でしか日付を書かない。
   const dateLabel = eventDateLabel(item.eventDate, item.eventDateText, "long");
   // 月精度のものは合成した月初へのカウントダウンになるので出さない。
@@ -357,6 +360,56 @@ export default async function ItemPage({ params }: Props) {
           </p>
         </div>
       </div>
+
+      {/* 同じ商品の**販売単位**（ばら売り/BOX/カートン）。一覧では1枚に畳んでいるので、
+          畳んだ側の価格と購入導線はここで全部出す。ラベルは収集元の表記のまま＝
+          どちらが小さい単位かは数えられないので「単品」等とこちらで言い換えない。 */}
+      {saleUnits.length > 1 && (
+        <section className="mt-10">
+          <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            📦 販売単位（{saleUnits.length}種）
+          </h2>
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
+            同じ商品で、売る単位ごとに価格と販売情報が分かれています。
+          </p>
+          <ul className="grid gap-2 sm:grid-cols-2">
+            {saleUnits.map((u) => (
+              <li
+                key={u.id}
+                className={`flex items-center justify-between gap-3 rounded-lg border p-3 ${
+                  u.id === item.id
+                    ? "border-rose-300 bg-rose-50 dark:border-rose-800 dark:bg-rose-950/30"
+                    : "border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900"
+                }`}
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
+                    {u.label}
+                    {u.id === item.id && (
+                      <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
+                        （このページ）
+                      </span>
+                    )}
+                  </div>
+                  {u.price && (
+                    <div className="mt-0.5 text-xs font-semibold text-rose-600 dark:text-rose-400">
+                      {u.price}
+                    </div>
+                  )}
+                </div>
+                {u.id !== item.id && (
+                  <Link
+                    href={`/items/${u.id}`}
+                    className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
+                  >
+                    この単位を見る →
+                  </Link>
+                )}
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {/* 「どこへ行けば/どこで応募すれば買えるか」。家電・ゲーム機は各小売の応募ページ、
           コラボ/ポップアップ/カフェは開催店舗（会場限定なのでここが買える唯一の場所）。 */}

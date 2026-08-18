@@ -37,6 +37,7 @@ import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
   accumulateUnexplained,
   classifyPageLoss,
+  productMergeKeys,
   isReportableLoss,
   isReportableVanish,
   pageExcludesPast,
@@ -59,11 +60,13 @@ import { buildRecentEndedItem, cleanProductName, cleanRestockName, parseEndedSto
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
-import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChusen";
+import { parseCardChusen, parseDue, productKey, splitSaleConditions } from "../src/scrapers/cardChusen";
+import { buildSaleUnits, groupSaleUnits, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { findCrawlViolations, isCrawlLinted } from "../src/lib/crawlLint";
+import { isStoreNoticeImage } from "../src/scrapers/imagePick";
 import { crawlDecision, lastIsOlderThan } from "../src/scrapers/crawl";
 import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
@@ -239,6 +242,27 @@ const cases: Case[] = [
         today,
         new Set()
       ).unexplained.length,
+    want: 1,
+  },
+  {
+    // 販売単位の重複解消で畳まれた行も「商品はまだページにある」＝説明済み（2026-08-18）。
+    // 畳む側（dedupeSaleUnitSameSource）と説明する側で同じ物差しを使う。
+    name: "販売単位で畳まれた行は『説明済み』",
+    fn: () => {
+      const rep = { source: "torecasoku", title: "ブースターパック 葬送のフリーレン Vol.2", eventDate: new Date(Date.UTC(2026, 7, 28)) };
+      const box = { id: 1, inDb: true, source: rep.source, title: `${rep.title} 【10パック入りBOX】`, eventDate: rep.eventDate };
+      return classifyPageLoss("/tcg/ヴァイス", [box], today, new Set(productMergeKeys(rep, true))).merged;
+    },
+    want: 1,
+  },
+  {
+    // 単位表記を持たない行の消失は、名前が似ていても「畳まれた」で説明しない。
+    name: "単位表記の無い行の消失は説明済みにしない",
+    fn: () => {
+      const rep = { source: "torecasoku", title: "ブースターパック 葬送のフリーレン Vol.2", eventDate: new Date(Date.UTC(2026, 7, 28)) };
+      const other = { id: 2, inDb: true, source: rep.source, title: rep.title, eventDate: rep.eventDate };
+      return classifyPageLoss("/tcg/ヴァイス", [other], today, new Set(productMergeKeys(rep, true))).unexplained.length;
+    },
     want: 1,
   },
   {
@@ -1007,6 +1031,19 @@ const cases: Case[] = [
   { name: "cardchusen: ゲーム接頭辞違いを同じ商品に束ねる", fn: () => productKey("ポケモンカード ストームエメラルダ") === productKey("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」"), want: true },
   { name: "cardchusen: 語順違い(OP-17)も束ねる", fn: () => productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】") === productKey("ONE PIECEカードゲーム ブースターパック OP-17「世界最強の戦士」"), want: true },
   { name: "cardchusen: 別の弾は束ねない", fn: () => productKey("ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」") === productKey("ポケモンカードゲーム MEGA 拡張パック「メガシンフォニア」"), want: false },
+  // 店が商品名欄に自店の売り方を書き足すと、同じ弾が別行に割れる（実測 2026-08-18:
+  // OP-17 が10行）。条件は名前から外して束ね、外した条件はその店の note に残す。
+  { name: "cardchusen: 店ごとの販売条件は商品名から外して束ねる", fn: () => productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）") === productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】"), want: true },
+  { name: "cardchusen: 数量だけ違う行も同じ商品", fn: () => productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 2BOX") === productKey("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】"), want: true },
+  { name: "cardchusen: 再販・再入荷も同じ商品に束ねる", fn: () => productKey("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」【再入荷】") === productKey("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」"), want: true },
+  // **括弧を一律に落とすと壊れる**: 中身が「別商品の列挙」のことがある。
+  { name: "cardchusen: 中身違い(御三家8種)は別商品のまま", fn: () => productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（フシギダネ・ヒトカゲ・ゼニガメ）") === productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（チコリータ・ヒノアラシ・ワニノコ）"), want: false },
+  { name: "cardchusen: 外した条件は店のnoteに残す", fn: () => splitSaleConditions("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）").conds.join("・"), want: "5,760円税込・現金払いのみ・1BOX" },
+  { name: "cardchusen: 型番だけの括弧は弾名が残る時だけ落とす", fn: () => productKey("遊戯王OCGデュエルモンスターズ LIMITED PACK WORLD CHAMPIONSHIP 2026 [26LP]") === productKey("遊戯王OCG LIMITED PACK WORLD CHAMPIONSHIP 2026"), want: true },
+  // 定型語を削ると3文字になる商品（151/100）を「短すぎ」で捨てると、受付中の抽選が
+  // どのページにも出ない。束ねる時だけ語順ソートを使わないことで誤マージも避ける。
+  { name: "cardchusen: 3文字の弾名も掲載対象に残す", fn: () => productKey("ポケモンカード 強化拡張パック ポケモンカード151").length >= 2, want: true },
+  { name: "cardchusen: 3文字は語順ソートで別商品と衝突させない", fn: () => productKey("ポケモンカード 拡張パック 151") === productKey("ポケモンカード 拡張パック 115"), want: false },
   // 収集元の「本日/明日」は**保存する時点で暦日に解決する**（2026-08-16の事故）。
   // 保存文字列に相対表記が残ると、巡回した日を過ぎた瞬間に締切が1日ズレる。
   { name: "cardchusen: 締切 本日は当日日付＋絶対表記で保存", fn: () => { const d = parseDue("締切 本日 22:00", today); return d ? `${d.kind}|${ymd(d.date!)}|${d.label}` : null; }, want: "締切|2026-08-08|〜8/8 22:00" },
@@ -1960,6 +1997,78 @@ const cases: Case[] = [
     want: false,
   },
 
+  // ── 販売単位だけが違う2枚（2026-08-18 実測10組・トレカ速報8組ほか） ──
+  {
+    name: "単位: BOX違いは1枚に畳む（単位表記の無い方を残す）",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "torecasoku", title: "【ヴァイスシュヴァルツ】ブースターパック 葬送のフリーレン Vol.2", url: "https://a/1", price: "440円", eventDate: new Date(Date.UTC(2026, 7, 28)), eventType: "発売" },
+        { id: 2, source: "torecasoku", title: "【ヴァイスシュヴァルツ】ブースターパック 葬送のフリーレン Vol.2 【10パック入りBOX】", url: "https://a/2", price: "4,400円", eventDate: new Date(Date.UTC(2026, 7, 28)), eventType: "発売" },
+      ] as never[]);
+      return (rows as { id: number }[]).map((r) => r.id).join(",");
+    },
+    want: "1",
+  },
+  {
+    name: "単位: 発売日が違えば別イベントとして残す",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "torecasoku", title: "【ヴァイスシュヴァルツ】ブースターパック 葬送のフリーレン Vol.2", url: "https://a/1", eventDate: new Date(Date.UTC(2026, 7, 28)), eventType: "発売" },
+        { id: 2, source: "torecasoku", title: "【ヴァイスシュヴァルツ】ブースターパック 葬送のフリーレン Vol.2 【10パック入りBOX】", url: "https://a/2", eventDate: new Date(Date.UTC(2026, 8, 28)), eventType: "発売" },
+      ] as never[]);
+      return (rows as { id: number }[]).length;
+    },
+    want: 2,
+  },
+  {
+    // 実測: `…アクリルスタンド(BOX=8)` は eventDate も eventDateText も無く、相方（8/31発売）と
+    // 束ねられずに一覧へ2枚並んでいた。日付が1つしか無い組なら日付なしも同じ回とみなす。
+    name: "単位: 日付なしのBOX行も、同じ回が1つだけなら束ねる",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "torecasoku", title: "遊☆戯☆王GX トゥーン・ワールド アクリルスタンド", url: "https://a/1", eventDate: new Date(Date.UTC(2026, 7, 31)), eventType: "発売" },
+        { id: 2, source: "torecasoku", title: "遊☆戯☆王GXトゥーン・ワールド アクリルスタンド(BOX=8)", url: "https://a/2", eventDate: null, eventType: "発売" },
+      ] as never[]);
+      return (rows as { id: number }[]).map((r) => r.id).join(",");
+    },
+    want: "1",
+  },
+  {
+    // 同じ名前で日付が2つ以上ある＝再販などで別の回がある。日付なしがどの回か分からないので束ねない。
+    name: "単位: 回が2つある組では日付なしを束ねない",
+    fn: () =>
+      groupSaleUnits(
+        [
+          { id: 1, source: "s", title: "ブースターパック X", price: null, url: null, eventDate: new Date(Date.UTC(2026, 7, 31)) },
+          { id: 2, source: "s", title: "ブースターパック X", price: null, url: null, eventDate: new Date(Date.UTC(2026, 9, 31)) },
+          { id: 3, source: "s", title: "ブースターパック X 【10パック入りBOX】", price: null, url: null, eventDate: null },
+        ],
+        (r) => r.title
+      ).length,
+    want: 0,
+  },
+  // 単位表記が**どちらにも無い**組は「単位違い」ではない（同名の別記事＝別の重複の型）。
+  { name: "単位: 表記なし同士は単位違いとして畳まない", fn: () => isSaleUnitGroup([{ title: "ONE PIECE カードゲーム" }, { title: "ONE PIECE カードゲーム" }]), want: false },
+  { name: "単位: 版の名前（箱ver.）は単位と読まない", fn: () => saleUnitLabel("【箱ver.】サンリオキャラクターズ おおきなSOFVIMATES～マイメロディ～"), want: null },
+  { name: "単位: 前置きの【BOX販売】も単位", fn: () => saleUnitLabel("【BOX販売】HB-BP01 ホロビートカードゲーム 拡張パック第一弾"), want: "BOX販売" },
+  { name: "単位: (BOX=8) も単位", fn: () => saleUnitLabel("遊☆戯☆王GX トゥーン・ワールド アクリルスタンド(BOX=8)"), want: "BOX=8" },
+  // ラベルは収集元の表記のまま。**「単品」と言い換えない**（実測: 表記なしの行が1BOXで、
+  // 相方が1カートンの組があった＝どちらが小さい単位かは数えられない）。
+  {
+    name: "単位: 一覧は安い順・表記なしの行は商品名をラベルにする",
+    fn: () =>
+      buildSaleUnits(
+        [
+          { id: 2, source: "torecasoku", title: "ブースターパック X 【10パック入りBOX】", price: "4,400円", url: null, eventDate: null },
+          { id: 1, source: "torecasoku", title: "ブースターパック X", price: "440円", url: null, eventDate: null },
+        ],
+        (r) => r.title
+      )
+        .map((u) => `${u.label}=${u.price}`)
+        .join(" / "),
+    want: "ブースターパック X=440円 / 10パック入りBOX=4,400円",
+  },
+
   // ── 同じ応募ページ・同じ応募先で、名前の書き方だけ違う2枚（2026-08-18 実測 #75445/#75446） ──
   {
     name: "重複: 同じurl・同じstores・同じ日で名前が包含関係 → 具体的な方を残す",
@@ -2054,6 +2163,37 @@ const cases: Case[] = [
       return Math.round((p.end - p.start) / 86_400_000);
     },
     want: 62,
+  },
+  // ── 応募先の店の告知バナーを商品写真にしない（2026-08-18 本人指摘・/items/75417） ──
+  {
+    name: "画像: 応募先ブログと同じホストの画像は告知バナーとみなす",
+    fn: () =>
+      isStoreNoticeImage("https://www.c-labo.jp/wordpress/wp-content/uploads/2026/08/psjuMo39.png", [
+        { url: "https://www.c-labo.jp/shop/kyoto/blog/612915/" },
+      ]),
+    want: true,
+  },
+  {
+    // 応募先が**個別商品ページ**なら、そこの画像は本物の商品写真＝触らない。
+    name: "画像: 応募先が個別商品ページ（プレバン）なら触らない",
+    fn: () =>
+      isStoreNoticeImage("https://p-bandai.jp/images/item/1000255803.jpg", [
+        { url: "https://p-bandai.jp/item/item-1000255803/" },
+      ]),
+    want: false,
+  },
+  {
+    name: "画像: 応募先と無関係なホスト（楽天の商品写真）は触らない",
+    fn: () =>
+      isStoreNoticeImage("https://thumbnail.image.rakuten.co.jp/@0_mall/dra-shop/cabinet/x.jpg", [
+        { url: "https://www.c-labo.jp/shop/kyoto/blog/612915/" },
+      ]),
+    want: false,
+  },
+  {
+    name: "画像: 応募先が無い行は対象外",
+    fn: () => isStoreNoticeImage("https://example.com/a.jpg", null),
+    want: false,
   },
 ];
 

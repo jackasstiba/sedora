@@ -10,6 +10,7 @@ import {
   type StoreEntry,
 } from "./stores";
 import { cleanListTitle, hasProductSegment } from "./title";
+import { groupSaleUnits, saleUnitLabel } from "./saleUnit";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
 export type ItemWhen = "week" | "month";
@@ -612,6 +613,44 @@ export function dedupeSameSourceSameName<T extends DedupeItem>(items: T[], today
 }
 
 /**
+ * **販売単位だけが違う行**を1枚に畳む（同じ収集元・同じ発売日・単位表記を外すと同名）。
+ *
+ * 実測（2026-08-18 観点B・本人指摘の続き）: 同じページに同じ商品が2枚並ぶ組が10組あり、
+ * 全部この型だった（『葬送のフリーレン Vol.2』440円 ↔ 『同 【10パック入りBOX】』4,400円 など）。
+ * 発売日も商品も同じで、違うのは買う量だけ。
+ *
+ * **落とす側の情報は消えない。** 単位ごとの価格と購入導線は商品ページの「販売単位」欄に
+ * 全部出す（`getSaleUnits`）。ここでやるのは*一覧を1枚にする*ことだけ。
+ *
+ * 安全弁:
+ *  ・**1つでも単位表記を持つ行があること**（全部が表記なし＝同名の別記事は別の重複なので触らない）
+ *  ・同じ暦日のものだけ（別日は別イベント）
+ *  ・単位を外した名前が8文字以上（短い名前の偶発一致で別商品を潰さない）
+ * 代表は**単位表記を持たない行**（＝商品名そのもの）を優先し、無ければ repScore で決める。
+ */
+function dedupeSaleUnitSameSource<T extends DedupeItem & { eventDateText?: string | null }>(items: T[]): T[] {
+  const drop = new Set<number>();
+  for (const g of groupSaleUnits(items, (it) => cleanListTitle(it.source, it.title))) {
+    // 代表は**単位表記を持たない行**（＝商品名そのもの）を優先。同条件なら日付を持つ方＞repScore。
+    const plain = g.filter((it) => !saleUnitLabel(cleanListTitle(it.source, it.title)));
+    const pool = plain.length ? plain : g;
+    let best = pool[0];
+    for (const it of pool) {
+      if (it === best) continue;
+      const d =
+        Number(!!it.eventDate) - Number(!!best.eventDate) || repScore(it) - repScore(best);
+      if (d > 0 || (d === 0 && it.id < best.id)) best = it;
+    }
+    for (const it of g) {
+      if (it.id === best.id) continue;
+      inheritEnrichment(best, it);
+      drop.add(it.id);
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/**
  * 商品として成立していない投稿を一覧から外す。
  * Xミラー(channeltono)には「もうすぐあみあみで復活更新があるかと…」のような、商品名を一切
  * 含まない実況投稿が混ざる。整形しても商品名が出てこない＝何が買えるか特定できないので、
@@ -752,6 +791,7 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
   // 復活すべき行（まだ締切前の店がある商品）がそこで捨てられる。
   return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
     dedupeSameSourceSameName(
+      dedupeSaleUnitSameSource(
       dedupeSneakerCrossSource(
         dedupeSameSourceSameUrlContained(
           dedupeSameSourceExact(
@@ -762,6 +802,7 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
             )
           )
         )
+      )
       ),
       todayJst()
     )

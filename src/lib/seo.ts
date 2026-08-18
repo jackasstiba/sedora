@@ -12,12 +12,45 @@ import {
 } from "./itemFilter";
 import { computeMargin } from "./margin";
 import { franchiseAliases, franchiseLabel } from "./franchise";
+import { cleanListTitle } from "./title";
+import { buildSaleUnits, groupSaleUnits } from "./saleUnit";
 
 // SEO向けの個別ページ（商品/ジャンル/月）で使うデータ取得・整形ヘルパー。
 
 // ジャンルの語彙・表示順は itemFilter.ts に集約（監査が同じ定義で語彙を検査するため）。
 
 export type SeoItem = Awaited<ReturnType<typeof getItemById>>;
+
+/**
+ * その商品の**販売単位の一覧**（同じ収集元・同じ発売日で、単位表記を外すと同名の行）。
+ *
+ * 一覧では `dedupeSaleUnitSameSource` が1枚に畳んでいる。畳んだ側の価格と購入導線が
+ * 消えないように、**商品ページでは全部の単位を出す**（440円のばら売りと4,400円のBOXは
+ * 買う人が違う＝どちらの導線も要る）。
+ *
+ * 一覧の行に持たせず**ここで引き直す**理由: 商品ページは1行だけを id で読むので、
+ * 一覧の処理を通らない。直接この URL を開いた人にも同じものを見せるには、ここで取るしかない。
+ */
+export async function getSaleUnits(item: {
+  id: number;
+  source: string;
+  title: string;
+  eventDate: Date | string | null;
+  eventDateText: string | null;
+}) {
+  const siblings = await prisma.item.findMany({
+    // 同じ収集元の「同じ発売日の行」＋「日付なしの行」だけを見る。日付なしを外すと、
+    // 実測のトレカ速報 `…(BOX=8)` のように**単位表記側だけ日付を持たない**組を取り逃がす。
+    // 束ねてよいかの判断（別の回を混ぜない）は groupSaleUnits が一覧と同じ規則で行う。
+    where: { source: item.source, OR: [{ eventDate: item.eventDate as Date }, { eventDate: null }] },
+    select: { id: true, source: true, title: true, price: true, url: true, eventDate: true, eventDateText: true },
+    take: 600,
+  });
+  const clean = (r: { source: string; title: string }) => cleanListTitle(r.source, r.title);
+  const group = groupSaleUnits(siblings, clean).find((g) => g.some((r) => r.id === item.id));
+  if (!group) return [];
+  return buildSaleUnits(group, clean);
+}
 
 export async function getItemById(id: number) {
   if (!Number.isFinite(id)) return null;
@@ -34,7 +67,10 @@ export async function getItemById(id: number) {
  */
 export async function getRelatedItems(
   item: { id: number; genre: string; title: string },
-  take = 12
+  take = 12,
+  /** 関連から外す id（この商品の**販売単位の別行**）。単位はページ上部の「販売単位」欄に
+   *  価格つきで出ているので、関連欄にもう一度同じ商品を並べると1ページに2回出ることになる。 */
+  excludeIds: number[] = []
 ) {
   const today = todayJst();
   const upcoming = { OR: [{ eventDate: { gte: today } }, { eventDate: null }] };
@@ -50,7 +86,7 @@ export async function getRelatedItems(
   const rawSeries = aliases.length
     ? await prisma.item.findMany({
         where: {
-          id: { not: item.id },
+          id: { notIn: [item.id, ...excludeIds] },
           AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming],
         },
         orderBy,
@@ -64,13 +100,13 @@ export async function getRelatedItems(
   const seriesKeys = new Set(
     series.map((s) => dedupeKey(s.title)).filter((k) => k.length >= 6)
   );
-  const excludeIds = [item.id, ...series.map((s) => s.id)];
+  const excluded = [item.id, ...excludeIds, ...series.map((s) => s.id)];
   const need = take - series.length;
   const genre =
     need > 0
       ? dedupeItems(
           await prisma.item.findMany({
-            where: { genre: item.genre, id: { notIn: excludeIds }, ...upcoming },
+            where: { genre: item.genre, id: { notIn: excluded }, ...upcoming },
             orderBy,
             take: need + 8,
           })
