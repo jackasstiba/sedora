@@ -60,3 +60,7 @@ scripts/x_watch/x_watch_inbox.json
 # 監査の観測プロファイル（ローカルの実行状態。前回との差分検出に使う）
 audit-profile.json
 sweep-dump.txt
+
+# 使い捨ての調査スクリプト（_ 始まり / scratch_）。コミットに紛れ込ませない
+scripts/_*.ts
+scratch_*.mjs
