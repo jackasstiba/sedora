@@ -42,7 +42,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
-import { isGenericImageUrl, keepableSameProduct } from "../src/scrapers/imagePick";
+import { isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs, hasSubstance } from "../src/lib/seo";
@@ -1197,9 +1197,13 @@ async function main() {
         eventDateText: inDbById.get(id)?.eventDateText ?? null,
         url: inDbById.get(id)?.url ?? null,
         officialUrl: inDbById.get(id)?.officialUrl ?? null,
+        // 販売単位の重複解消（同じ商品のBOX/カートン）に畳まれた行を説明するのに要る。
+        source: inDbById.get(id)?.source ?? null,
+        title: inDbById.get(id)?.title ?? null,
       }));
-    // 今表示されている行の商品URLキー。消えた行がここに畳まれたなら「まだページにある」。
-    const mergeKeys = new Set((nowRows ?? []).flatMap((r) => productMergeKeys(r)));
+    // 今表示されている行の突合キー（商品URL＋販売単位）。消えた行がここに畳まれたなら
+    // 「まだページにある」。畳む側と説明する側で同じ関数を使う。
+    const mergeKeys = new Set((nowRows ?? []).flatMap((r) => productMergeKeys(r, true)));
     // 「サイトのどこかには今も出ている」id の集合。月ページ・ジャンルページの所属は
     // eventDate / genre から決まるので、それが正当に変われば移動が起きる（消失ではない）。
     const stillDisplayedIds = new Set(shown.map((r) => r.id));
@@ -1574,6 +1578,24 @@ async function main() {
       .filter((r) => isGenericImageUrl(r.imageUrl!))
       .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 30)} → ${r.imageUrl!.slice(0, 70)}`);
     report("image_generic", "商品画像でない画像（no-image/ロゴ）が保存されている", "error", generic, baseline, withImg.length);
+
+    // ①-b **応募先の店が出した告知バナー**を商品写真として出していないか。
+    //     実測 2026-08-18（本人指摘「この商品の画像おかしいな」・/items/75417）: カードの写真が
+    //     カードラボ京都店のブログに貼られた「抽選予約」の文字バナーだった。同じ型が**8件**
+    //     （c-labo のブログ2件・livepocket の抽選イベント画像6件）。
+    //     URLの見た目では汎用画像と区別できない（`psjuMo39.png` のような無意味なファイル名）ので、
+    //     **その行の応募先と突き合わせて**判定する＝定義は imagePick.ts の isStoreNoticeImage 1つ。
+    const notice = withImg
+      .filter((r) => isStoreNoticeImage(r.imageUrl, r.stores ? parseStoresJson(r.stores) : null))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 30)} → ${r.imageUrl!.slice(0, 70)}`);
+    report(
+      "image_from_store_page",
+      "応募先の店の告知バナーを商品画像として出している",
+      "error",
+      notice,
+      baseline,
+      withImg.length
+    );
 
     // ①-c URLの形が壊れている（相対パス・http）。https のサイトに http 画像を埋めると
     //      ブラウザに遮断されて、画面上は「画像なし」と見分けがつかない。

@@ -32,11 +32,13 @@ import { prisma } from "../src/lib/prisma";
 import { sleep } from "../src/scrapers/util";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { cleanListTitle } from "../src/lib/title";
+import { parseStoresJson } from "../src/lib/stores";
 import { rakutenSearchUrl } from "../src/lib/outbound";
 import {
   absolutize,
   extractSoleJan,
   isGenericImageUrl,
+  isStoreNoticeImage,
   pickListedImage,
   pickMeta,
   pickPageImage,
@@ -159,10 +161,23 @@ async function cleanupBadImages(): Promise<number> {
   const freq = new Map<string, number>();
   for (const r of rows) freq.set(r.imageUrl!, (freq.get(r.imageUrl!) ?? 0) + 1);
 
-  const bad = rows.filter((r) => isGenericImageUrl(r.imageUrl!) || freq.get(r.imageUrl!)! >= CLEANUP_SHARED_MIN);
+  // 「応募先の店が出した告知バナー」も外す。**一度入った画像は「画像なし」の対象から外れる＝
+  // 二度と見直されない**ので、掃除で落とさない限り永久に残る（実測 2026-08-18: 本人指摘の
+  // /items/75417 は 2026-08-16 に付いたカードラボのブログのバナーがそのまま出ていた）。
+  // 落とした行は、この直後の後付けで**商品名が全語一致した検索結果**から採り直される。
+  const noticeImage = (r: (typeof rows)[number]) =>
+    isStoreNoticeImage(r.imageUrl, r.stores ? parseStoresJson(r.stores) : null);
+
+  const bad = rows.filter(
+    (r) => isGenericImageUrl(r.imageUrl!) || freq.get(r.imageUrl!)! >= CLEANUP_SHARED_MIN || noticeImage(r)
+  );
   const why = new Map<string, number>();
   for (const r of bad) {
-    const k = isGenericImageUrl(r.imageUrl!) ? "汎用画像" : `共有 x${freq.get(r.imageUrl!)}`;
+    const k = isGenericImageUrl(r.imageUrl!)
+      ? "汎用画像"
+      : noticeImage(r)
+        ? "応募先の告知バナー"
+        : `共有 x${freq.get(r.imageUrl!)}`;
     why.set(`${k}: ${r.imageUrl!.slice(0, 80)}`, (why.get(`${k}: ${r.imageUrl!.slice(0, 80)}`) ?? 0) + 1);
   }
   for (const [k, n] of [...why.entries()].sort((a, b) => b[1] - a[1]))
@@ -240,7 +255,12 @@ async function main() {
       await sleep(RATE_MS);
       if (html) {
         // A: リンク先が商品/記事ページなら、そのページの画像
-        if (!isSearch && !skipPageImage) cand = pickPageImage(html, r.url);
+        //    ただし**リンク先がこの行の応募先そのもので、個別商品ページでない**とき（＝店の
+        //    告知・抽選イベントページ）は採らない。そこにあるのは店の「抽選予約」バナーであって
+        //    商品写真ではない（実測 2026-08-18・#75417）。card_chusen の `url` は締切が過ぎるたび
+        //    別の店に入れ替わるので、たまたまブログの日に焼き付くと二度と直らない。
+        const noticePage = isStoreNoticeImage(r.url, r.stores ? parseStoresJson(r.stores) : null);
+        if (!isSearch && !skipPageImage && !noticePage) cand = pickPageImage(html, r.url);
         // C: リンク先が検索結果ページなら、商品名が全語一致する結果の画像だけ借りる
         if (!cand && isSearch) cand = pickListedImage(html, cleanListTitle(r.source, r.title));
         // B: 画像が無い記事でも JAN が取れれば、その商品の画像を楽天から引ける。

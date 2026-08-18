@@ -18,6 +18,9 @@
  *   ・検索結果ページの1件目（商品名が一致しない限り別商品。実測: 「INSTINCTOY SHOW TOKYO 2026」の
  *     楽天検索1位は菅田将暉のBlu-rayだった）
  */
+// 「個別商品ページか」の定義は itemFilter.ts の productUrlKey ただ1つ（重複解消と同じ物差し）。
+import { productUrlKey } from "../lib/itemFilter";
+
 
 /** meta[property|name=prop] の content（属性の順序どちらでも拾う）。 */
 export function pickMeta(html: string, prop: string): string | null {
@@ -76,6 +79,39 @@ const AD_HOST_RE =
  */
 export function isGenericImageUrl(url: string): boolean {
   return AD_HOST_RE.test(url) || GENERIC_IMAGE_RE.test(url);
+}
+
+/**
+ * その画像は「**応募先の店が出した告知**」から借りたものか（＝商品写真ではない）。
+ *
+ * 直す対象（実測 2026-08-18・本人指摘「この商品の画像おかしいな」/items/75417）:
+ * カードの写真が **カードラボ京都店のブログ記事に貼られた「抽選予約」の文字バナー**（600x374 PNG）
+ * だった。同じ型が表示中に **8件**（c-labo のブログ 2件・livepocket の抽選イベント画像 6件）。
+ *
+ * なぜ入り込むか: 店舗別抽選の行（card_chusen）は `item.url` が**その日の代表店の応募ページ**で、
+ * 締切が過ぎるたびに**別の店に入れ替わる**。画像の後付けは「リンク先のページの og:image」を
+ * 採るので、リンク先がたまたま店のブログ記事だった日には、その店の告知バナーが商品写真として
+ * 焼き付く。しかも画像は一度入ると「画像なし」の対象から外れるので、**二度と見直されない**。
+ *
+ * 判定: 画像のホストが、この行の応募先のどれかと同じ **かつ** その応募先が**個別商品ページでない**
+ * （＝店の告知・イベントページ）。応募先が個別商品ページ（プレバンの `/item/…` 等）なら、
+ * そこの画像は本物の商品写真なので触らない。
+ */
+export function isStoreNoticeImage(
+  imageUrl: string | null | undefined,
+  stores: { url: string | null }[] | null | undefined
+): boolean {
+  const ih = imageHost(imageUrl);
+  if (!ih || !stores?.length) return false;
+  return stores.some((s) => s.url && imageHost(s.url) === ih && !productUrlKey(s.url));
+}
+
+function imageHost(u: string | null | undefined): string | null {
+  try {
+    return u ? new URL(u).hostname.replace(/^www\./, "").toLowerCase() : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 新しく採用してよい候補か（＝汎用画像でなく、画像として取得できる形をしている）。 */
