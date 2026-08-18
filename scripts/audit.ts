@@ -42,7 +42,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
-import { isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
+import { conflictingJanImages, isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs, hasSubstance } from "../src/lib/seo";
@@ -1630,6 +1630,31 @@ async function main() {
       })
       .map(([u, a]) => `${a.length}件が同じ画像: ${u.slice(0, 80)}（${a[0].source} #${a[0].id} 他）`);
     report("image_shared", "別商品なのに同じ画像が3件以上で使い回されている", "error", shared, baseline, withImg.length);
+
+    // ①-d **同じ商品コード(JAN)の画像が、別商品の行に付いている。**
+    //      上の image_shared は「同じ画像URL」で束ねるうえ、URLにJANが入っていたら
+    //      同一商品とみなして素通りさせる。だが JAN の取り違えは**別の店のサムネイル**として
+    //      入ってくるので URL は一致せず、一致するのは URL 内のコードだけ（実測 2026-08-18:
+    //      #92497 御三家カードセットに #92494 スタートデッキ100 の写真＝Amazon のページに
+    //      載っていた唯一のJANがカルーセルの別商品のものだった）。
+    const janConflict = conflictingJanImages(
+      withImg,
+      (r) => r.imageUrl,
+      (r) => cleanListTitle(r.source, r.title)
+    ).map(
+      ({ jan, rows }) =>
+        `コード ${jan} の画像が別商品に: ${rows
+          .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title).slice(0, 28)}`)
+          .join(" / ")}`
+    );
+    report(
+      "image_jan_conflict",
+      "同じ商品コードの画像が別商品に付いている",
+      "error",
+      janConflict,
+      baseline,
+      withImg.length
+    );
 
     // ② 画像が無い件数。ラチェットで「増えたら ERROR」。
     const missing = shown.filter((r) => !r.imageUrl);

@@ -66,7 +66,12 @@ import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResa
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { findCrawlViolations, isCrawlLinted } from "../src/lib/crawlLint";
-import { isStoreNoticeImage } from "../src/scrapers/imagePick";
+import {
+  conflictingJanImages,
+  isStoreNoticeImage,
+  isTooGenericForImageSearch,
+  pickListedImage,
+} from "../src/scrapers/imagePick";
 import { crawlDecision, lastIsOlderThan } from "../src/scrapers/crawl";
 import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
@@ -2194,6 +2199,140 @@ const cases: Case[] = [
     name: "画像: 応募先が無い行は対象外",
     fn: () => isStoreNoticeImage("https://example.com/a.jpg", null),
     want: false,
+  },
+  // ── ページ内で一意のJANでも、その商品のJANとは限らない（2026-08-18・#92497） ──
+  {
+    // 実測した事故そのもの。同じコードの画像が、別の店のサムネイルとして2つの商品に付いた。
+    // URLは一致しないので image_shared では出ない＝URLの中のコードで束ねて初めて見える。
+    name: "画像: 同じ商品コードの写真が別商品に付いていたら指摘する",
+    fn: () =>
+      conflictingJanImages(
+        [
+          {
+            n: "ポケモンカードゲーム スタートデッキ100",
+            u: "https://thumbnail.image.rakuten.co.jp/@0_mall/yum-yum/cabinet/4521329427270.jpg",
+          },
+          {
+            n: "ポケモンカード 30th CELEBRATION 御三家カードセット(フシギダネ・ヒトカゲ・ゼニガメ)",
+            u: "https://thumbnail.image.rakuten.co.jp/@0_mall/auc-ookawaya/cabinet/10001/03/4521329427270.jpg",
+          },
+        ],
+        (r) => r.u,
+        (r) => r.n
+      ).length,
+    want: 1,
+  },
+  {
+    // 同じ商品の別ロット（再販・追加入荷）は同じ写真が付くのが正解＝指摘しない。
+    name: "画像: 同じ商品の別ロットに同じコードの写真が付くのは正常",
+    fn: () =>
+      conflictingJanImages(
+        [
+          { n: "ポケモンカードゲーム 拡張パック メガシンフォニア", u: "https://x/4521329431185.jpg" },
+          { n: "ポケモンカードゲーム 拡張パック メガシンフォニア（再販分）", u: "https://y/4521329431185.jpg" },
+        ],
+        (r) => r.u,
+        (r) => r.n
+      ).length,
+    want: 0,
+  },
+  {
+    // 収集元ごとの表記ゆれ（超 ↔ スーパー）で別商品扱いにしない。実測 2026-08-18 に
+    // この2行は同じ商品・同じ写真で、指摘する側だけが名前で不一致になっていた。
+    name: "画像: 表記ゆれ（超↔スーパー）だけの2行は別商品としない",
+    fn: () =>
+      conflictingJanImages(
+        [
+          { n: "ドラゴンボール超カードゲーム フュージョンワールド STORY BOOSTER 01", u: "https://x/4582770011982.jpg" },
+          {
+            n: "ドラゴンボール スーパーカードゲーム フュージョンワールド STORY BOOSTER 01[ST01]",
+            u: "https://y/4582770011982.jpg",
+          },
+        ],
+        (r) => r.u,
+        (r) => r.n
+      ).length,
+    want: 0,
+  },
+  // ── 作品名＋種別しか無い名前で画像を借りない（2026-08-18・#91599） ──
+  {
+    // 実測した事故。まとめ記事の見出しがそのまま商品名になっている行に、OP-17 の箱写真が付いた。
+    name: "画像: 作品名と種別しか無い名前では画像を借りない",
+    fn: () => isTooGenericForImageSearch("ONE PIECE カードゲーム"),
+    want: true,
+  },
+  {
+    name: "画像: 「◯◯各種」も商品を決められない",
+    fn: () => isTooGenericForImageSearch("人気ポケモンカード各種"),
+    want: true,
+  },
+  {
+    name: "画像: 弾名が入っていれば借りてよい",
+    fn: () => isTooGenericForImageSearch("ポケモンカードゲーム スタートデッキ100"),
+    want: false,
+  },
+  {
+    // 一般語だけの query は具体的な商品名すべてに一致してしまう＝長さの足切りでは防げない。
+    // だから**借りる側の入口**（pickListedImage）で止める。
+    name: "画像: 一般語だけの名前では検索結果から借りない",
+    fn: () =>
+      pickListedImage(
+        `<script type="application/ld+json">${JSON.stringify({
+          "@type": "ItemList",
+          itemListElement: [
+            {
+              item: {
+                name: "ONE PIECE カードゲーム ブースターパック 世界最強の戦士 OP-17 BOX",
+                image: ["https://thumbnail.image.rakuten.co.jp/@0_mall/x/cabinet/a.jpg"],
+                url: "https://item.rakuten.co.jp/x/a/",
+              },
+            },
+          ],
+        })}</script>`,
+        "ONE PIECE カードゲーム"
+      ) === null,
+    want: true,
+  },
+  {
+    // 逆側の固定: 同じ検索結果でも、弾名がある名前なら借りられる（止めすぎていないことの確認）。
+    name: "画像: 弾名がある名前なら検索結果から借りられる",
+    fn: () =>
+      pickListedImage(
+        `<script type="application/ld+json">${JSON.stringify({
+          "@type": "ItemList",
+          itemListElement: [
+            {
+              item: {
+                name: "ONE PIECE カードゲーム ブースターパック 世界最強の戦士 OP-17 BOX",
+                image: ["https://thumbnail.image.rakuten.co.jp/@0_mall/x/cabinet/a.jpg"],
+                url: "https://item.rakuten.co.jp/x/a/",
+              },
+            },
+          ],
+        })}</script>`,
+        "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】"
+      )?.via,
+    want: "listed",
+  },
+  {
+    // 「同じ商品か」の判定（keepableSameProduct）は作品名だけの行も相手にできる必要がある＝
+    // 借りる側の門を productNameMatches に入れてはいけない、という規約の固定。
+    name: "画像: 一般語だけの名前でも同一商品の判定には使える",
+    fn: () => productNameMatches("ONE PIECE カードゲーム", "ONE PIECE カードゲーム ブースターパック 世界最強の戦士 OP-17 BOX"),
+    want: true,
+  },
+  {
+    name: "画像: URLにコードが無い画像は対象外",
+    fn: () =>
+      conflictingJanImages(
+        [
+          { n: "商品A", u: "https://x/photo.jpg" },
+          { n: "まったく別の商品B", u: "https://y/photo2.jpg" },
+        ],
+        (r) => r.u,
+        (r) => r.n
+      ).length,
+    want: 0,
   },
 ];
 

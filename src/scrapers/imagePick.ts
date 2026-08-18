@@ -20,6 +20,7 @@
  */
 // 「個別商品ページか」の定義は itemFilter.ts の productUrlKey ただ1つ（重複解消と同じ物差し）。
 import { productUrlKey } from "../lib/itemFilter";
+import { franchiseAliases } from "../lib/franchise";
 
 
 /** meta[property|name=prop] の content（属性の順序どちらでも拾う）。 */
@@ -271,6 +272,34 @@ const SALE_CONDITION_RE =
 // 対象商品そのものではなく「その商品の付属品」を売る出品（画像が別物になる）。
 const ACCESSORY_RE = /スリーブ|プロテクター|ローダー|バインダー|デッキケース|収納ケース|保護|ホルダー|ポスター専用/;
 
+/** 商品の種別しか言っていない語（どの弾かを決めない）。 */
+const CATEGORY_WORDS =
+  /カードゲーム|トレーディングカード|ブースターパック|拡張パック|スタ[ーあ]?タ[ーあ]?デッキ|トライアルデッキ|関連商品|各種|新商品|グッズ|フィギュア|ぬいぐるみ|プラモデル|セット|カード|人気|話題|注目|新作|最新|おすすめ/g;
+
+/**
+ * その商品名は「どの商品か」を決められるか。**シリーズ名＋商品の種別しか無い名前**は決められない。
+ *
+ * 実測 2026-08-18: nyuka_now の `ONE PIECE カードゲーム`（まとめ記事の見出しがそのまま商品名に
+ * なっている行）に、**OP-17 の箱写真**が付いた。`productNameMatches` は「query の全語が候補名に
+ * 入っているか」を見るので、query が一般語だけだと**具体的な商品名すべてに一致してしまう**
+ * （「ONE PIECE」「カードゲーム」はどの弾の名前にも入っている）。特徴語の長さで足切りしても
+ * 「カードゲーム」は6字あるので通る＝長さでは防げない。
+ *
+ * → 作品名（`franchise.ts` の別名）と商品種別を落として**何も残らない**なら、画像は付けない。
+ *   ここで諦めた行は NoImage タイルのままになるが、**別商品の写真が付くより良い**
+ *   （[[UIラベルは裏取り済みのみ約束]]）。
+ *
+ * ⚠️ この判定は **「検索結果から写真を借りてよいか」専用**。`productNameMatches` 自体には
+ * 入れない。あちらは「この2行は同じ商品か」の判定にも使われており（`keepableSameProduct`）、
+ * そちらでは作品名だけの行も**比較の相手**として成立する必要がある。
+ */
+export function isTooGenericForImageSearch(query: string): boolean {
+  let rest = query;
+  for (const alias of franchiseAliases(query)) rest = rest.split(alias).join(" ");
+  rest = rest.replace(CATEGORY_WORDS, " ");
+  return nameTokens(rest).filter((t) => t.length >= 2).length === 0;
+}
+
 /**
  * `candidate`（検索結果の商品名）が `query`（掲載中の商品名）と同じ商品を指すか。
  * 判定は厳しめ＝迷ったら false。false のときは画像を付けない（NoImageのまま）。
@@ -383,8 +412,13 @@ export function parseRakutenItemList(html: string): ListedProduct[] {
   return out;
 }
 
-/** 検索結果から、商品名が一致するものの画像を1枚選ぶ（一致が無ければ null）。 */
+/**
+ * 検索結果から、商品名が一致するものの画像を1枚選ぶ（一致が無ければ null）。
+ * **作品名と種別しか無い名前では借りない**（`isTooGenericForImageSearch`。一般語だけの名前は
+ * どの弾の商品名にも一致するので、検索1位の写真がそのまま焼き付く。実測 #91599）。
+ */
 export function pickListedImage(html: string, productName: string, limit = 8): ImageCandidate | null {
+  if (isTooGenericForImageSearch(productName)) return null;
   for (const p of parseRakutenItemList(html).slice(0, limit)) {
     if (!productNameMatches(productName, p.name)) continue;
     if (!isUsableImageCandidate(p.image)) continue;
@@ -393,9 +427,62 @@ export function pickListedImage(html: string, productName: string, limit = 8): I
   return null;
 }
 
+/** 画像URLに埋まっている商品コード(JAN)。楽天の店は商品コードをファイル名にすることが多い。 */
+export function imageUrlJan(url: string | null | undefined): string | null {
+  return url?.match(/(?<![0-9])(4[59][0-9]{11})(?![0-9])/)?.[1] ?? null;
+}
+
+/**
+ * **同じ商品コードの画像が、別商品の行に付いていないか。**
+ *
+ * 既存の `image_shared` は「同じ画像URLが3件以上」で見ており、しかも
+ * **URLにJANが入っていたら同一商品とみなして素通り**させている（コードで特定した画像だから、
+ * という前提）。実測 2026-08-18 に、その前提が崩れる形が出た:
+ * Amazon の商品ページに載っていた唯一のJANが**カルーセルの別商品のもの**で、
+ * 「御三家カードセット」に「スタートデッキ100」の写真が付いた。このとき2つの行の画像URLは
+ * **別の店のサムネイル**（`yum-yum/…` と `auc-ookawaya/…`）なので、URLでは一致せず素通りする。
+ * 一致するのは**URLの中のJANだけ**。
+ *
+ * → 画像URLのJANで束ね、その束に**同じ商品と言えない行**が混ざっていたら指摘する。ネットに出ずに判定できる。
+ *
+ * 判定は `keepableSameProduct`（＝画像を付ける側のゲート）**より緩くする**。あちらは
+ * 「全語が入っているか」なので、収集元ごとの表記ゆれで簡単に不一致になる（実測:
+ * 「ドラゴンボール**超**カードゲーム…」と「ドラゴンボール **スーパー**カードゲーム…」は
+ * 同じ商品で、同じ写真が付いているのが正解）。ここは**指摘する側**なので、
+ * **特徴語（4字以上）を1つも共有しない**＝どう読んでも別商品、という所まで絞る。
+ * 迷ったら黙る（誤報を出すと、この検査自体が「またこれか」で読まれなくなる）。
+ */
+export function conflictingJanImages<T>(
+  rows: T[],
+  imageUrl: (r: T) => string | null | undefined,
+  name: (r: T) => string
+): { jan: string; rows: T[] }[] {
+  const byJan = new Map<string, T[]>();
+  for (const r of rows) {
+    const jan = imageUrlJan(imageUrl(r));
+    if (!jan) continue;
+    byJan.set(jan, [...(byJan.get(jan) ?? []), r]);
+  }
+  const keyTokens = (s: string) => new Set(nameTokens(s).filter((t) => t.length >= 4));
+  const out: { jan: string; rows: T[] }[] = [];
+  for (const [jan, a] of byJan) {
+    if (a.length < 2) continue;
+    const toks = a.map((r) => keyTokens(name(r)));
+    const apart = toks.some((x, i) =>
+      toks.some((y, j) => i !== j && ![...x].some((t) => y.has(t)))
+    );
+    if (apart) out.push({ jan, rows: a });
+  }
+  return out;
+}
+
 /**
  * ページ内で一意に決まる JAN/EAN（日本の商品コードは 45/49 始まりの13桁）。
  * 2つ以上あるページはどの商品のコードか決められないので null（＝使わない）。
+ *
+ * ⚠️ **「一意＝その商品のコード」ではない。** Amazon は自分の商品を ASIN で表すので本文にJANが
+ * 出ないことがあり、そのとき**カルーセルの関連商品のJANだけ**がページに残る（実測 2026-08-18・
+ * #92497）。ここを通ったコードは `imageByJan` 側で**商品名の全語一致**にかけてから使う。
  */
 export function extractSoleJan(html: string): string | null {
   const count = new Map<string, number>();

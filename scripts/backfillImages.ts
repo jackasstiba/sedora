@@ -40,6 +40,7 @@ import {
   isGenericImageUrl,
   isStoreNoticeImage,
   pickListedImage,
+  productNameMatches,
   pickMeta,
   pickPageImage,
   parseRakutenItemList,
@@ -111,14 +112,30 @@ async function siteCommonImage(pageUrl: string): Promise<string | null> {
   return abs;
 }
 
-/** JAN で楽天を検索し、**JANがURLに含まれる**結果の画像だけを返す（＝同一商品と確認できたもの）。 */
-async function imageByJan(jan: string): Promise<ImageCandidate | null> {
+/**
+ * JAN で楽天を検索し、**JANがURLに含まれる**結果の画像だけを返す（＝そのJANの商品と確認できたもの）。
+ *
+ * 🚨 **JANが一意でも「このページの商品のJAN」とは限らない。** 実測 2026-08-18:
+ * `/items/92497`「ポケモンカード 30th CELEBRATION 御三家カードセット(フシギダネ・ヒトカゲ・ゼニガメ)」の
+ * Amazon 商品ページに載っていた13桁コードは**1種類だけ**（3回出現）だったが、それは本文の商品ではなく
+ * カルーセルに並ぶ**「スタートデッキ100 バトルコレクション」のJAN**で、その写真が御三家セットの
+ * 商品画像として焼き付いた。Amazon は自分の商品を ASIN で表すのでJANが本文に出ないことがあり、
+ * **ページに出る唯一のJANが関連商品のもの**という形が成立する（`extractSoleJan` の
+ * 「一意なら本文の商品」という前提が崩れる面）。
+ *
+ * → JANを一意識別子として信用するのをやめ、**商品名の全語一致**（route C と同じゲート）を
+ * 通す。名前が一致しなければ画像を付けない（NoImage のままにする）＝
+ * [[UIラベルは裏取り済みのみ約束]] と同じ立場。
+ */
+async function imageByJan(jan: string, productName: string): Promise<ImageCandidate | null> {
   const html = await fetchText(`https://search.rakuten.co.jp/search/mall/${jan}/`);
   await sleep(RATE_MS);
   if (!html) return null;
   for (const p of parseRakutenItemList(html)) {
     if (!p.image.includes(jan) && !p.url.includes(jan)) continue; // 別商品の“おすすめ”を弾く
     if (isGenericImageUrl(p.image)) continue;
+    // そのJANの商品名が、掲載中の商品名と別物なら **JANの取り方を間違えている**（上記）。
+    if (!productNameMatches(productName, p.name)) return null;
     return { url: p.image, via: "jan", key: jan };
   }
   return null;
@@ -269,7 +286,7 @@ async function main() {
         //    楽天検索ページから拾ったコードは無関係な商品のものだった）。
         if (!cand && !isSearch) {
           const jan = extractSoleJan(html);
-          if (jan) cand = await imageByJan(jan);
+          if (jan) cand = await imageByJan(jan, cleanListTitle(r.source, r.title));
         }
       }
     }
@@ -282,7 +299,7 @@ async function main() {
         const html = await fetchText(article);
         await sleep(RATE_MS);
         const jan = html ? extractSoleJan(html) : null;
-        if (jan) cand = await imageByJan(jan);
+        if (jan) cand = await imageByJan(jan, cleanListTitle(r.source, r.title));
       }
     }
 
