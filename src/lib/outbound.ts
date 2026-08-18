@@ -122,13 +122,27 @@ export function isRakutenAffiliateId(v: string): boolean {
   return /^[0-9a-z]{4,12}(\.[0-9a-z]{4,12}){3}$/i.test(v.trim());
 }
 
-/** 商品名で楽天市場を検索する素のURL（アフィリエイトを通さない着地先）。 */
+/**
+ * 商品名で楽天市場を検索する素のURL（アフィリエイトを通さない着地先）。
+ *
+ * **保存・機械での取得（fetch）は必ずこちらを使う。** → `rakutenSearchUrl` の注意書き。
+ */
 export function rakutenSearchRawUrl(title: string): string {
   return `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(title.trim())}/`;
 }
 
 /**
  * 商品名で楽天市場を検索するURL。**収益導線はここ1箇所だけ**。
+ *
+ * ⚠ **この関数は「画面に出す瞬間」にだけ呼ぶこと。** 戻り値をDBに保存したり、スクリプトから
+ * fetch したりしてはいけない。アフィリのURLは踏むと `hb.afl` にクリックが記録されるので、
+ * 巡回や画像収集で機械が叩くと、**成果ゼロのクリックだけが毎日自分のIDに積み上がる**
+ * （楽天の禁止事項「自ら設置したアフィリエイトリンクを経由して成果を発生させる行為」
+ * 「不正クリック」に当たりうる＝アカウント停止＝収益が丸ごと消える）。
+ * 実際 2026-08-18 に、画像収集(scripts/backfillImages.ts)と巡回で保存する item.url の
+ * 2経路がこの形になっていた。保存も fetch も `rakutenSearchRawUrl` を使う。
+ * 保存側に混ざっていないかは audit の `own_affiliate_stored`、
+ * 呼び出し側に戻っていないかは audit:selftest の静的スキャンで見張っている。
  *
  * `RAKUTEN_AFFILIATE_ID` があればアフィリエイト経由に包む。IDが無い/形が違うときは
  * **素の検索URLに落とす**（＝リンクは必ず生きている。成果が付かないだけ）。
@@ -148,3 +162,18 @@ export function rakutenSearchUrl(title: string, affiliateId = RAKUTEN_AFFILIATE_
   if (!isRakutenAffiliateId(affiliateId)) return raw;
   return `https://hb.afl.rakuten.co.jp/hgc/${affiliateId}/?pc=${encodeURIComponent(raw)}&link_type=hybrid_url`;
 }
+
+/**
+ * 広告である旨の表示（ステマ規制／楽天アフィリエイトのガイドライン対応）。
+ *
+ * 楽天のガイドラインは「正しくPR表示がされていない」掲載を禁止事項に挙げ、文言は
+ * 「広告」「PR」「宣伝」「プロモーション」等の**日本語**で、**ファーストビュー**に、
+ * 一般消費者が視認できる大きさ・色で出すことを求めている
+ * （`sponsored` `AD` `Premium partner` は「認識しづらい」として不可）。
+ * → 文字列をここに1本化し、全ページ共通ヘッダ直下と、購入導線の隣の2箇所で使う。
+ *   実際に本番の全ページに出ているかは `npm run audit:page` が毎回確かめる。
+ */
+export const AD_DISCLOSURE = "本サイトはアフィリエイト広告（楽天アフィリエイト）を利用しています。";
+
+/** 購入導線の隣に置く一行（そのリンク自体が広告だと、押す直前に分かるようにする）。 */
+export const AD_DISCLOSURE_INLINE = "「楽天で探す」は広告（アフィリエイトリンク）です。";

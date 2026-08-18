@@ -33,7 +33,9 @@ import { sleep } from "../src/scrapers/util";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { cleanListTitle } from "../src/lib/title";
 import { parseStoresJson } from "../src/lib/stores";
-import { rakutenSearchUrl } from "../src/lib/outbound";
+// **素のURLだけを使う。** ここは機械が毎日叩く側なので、アフィリ経由(rakutenSearchUrl)で
+// 取りに行くと自分のアフィリリンクを自動でクリックし続けることになる（outbound.ts の注意書き）。
+import { rakutenSearchRawUrl } from "../src/lib/outbound";
 import {
   absolutize,
   extractSoleJan,
@@ -319,7 +321,7 @@ async function main() {
       const query = searchQueryName(name);
       const alreadyTried = isSearch && r.url.includes(encodeURIComponent(query));
       if (!alreadyTried) {
-        const html = await fetchText(rakutenSearchUrl(query));
+        const html = await fetchText(rakutenSearchRawUrl(query));
         await sleep(RATE_MS);
         // **一致判定にも `query`（販売条件を落とした名前）を渡す。**
         // 検索は掃除した名前で投げているのに突合だけ元の名前でやっていたので、

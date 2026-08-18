@@ -1,7 +1,7 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
-import { rakutenSearchUrl } from "../lib/outbound";
+import { rakutenSearchRawUrl } from "../lib/outbound";
 import { decodeHtmlEntities } from "./aggregatorUtil";
 
 // ガンプラ再販カレンダー（リーチャのガンプラ再販情報 / harmonizers-jp.com）。
@@ -84,7 +84,8 @@ export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
         eventDateText: null,
         price: yen ? `${yen.toLocaleString()}円` : null,
         // 収集元は非公開・記事内リンクはアフィリ＝商品名の楽天検索を導線にする。
-        url: rakutenSearchUrl(r.name),
+        // **保存するのは素の検索URL。** アフィリ化は画面に出す瞬間だけ（outbound.ts の注意書き）。
+        url: rakutenSearchRawUrl(r.name),
         imageUrl: null,
       });
     }

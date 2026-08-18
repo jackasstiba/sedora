@@ -554,27 +554,84 @@ const TITLE_HEADINGS = new Set([
  *  ・date    … eventDateLabel の結果（"short" 推奨。無いなら null）
  *  ・hasLottery … 抽選ありが裏取りできている行だけ true
  */
+/** タイトルに会場名を載せてよい上限。これを超えると商品名が押し出される。 */
+const VENUE_MAX_LEN = 24;
+
+/** 会場ではなく「地図を見る」導線の行（収集元のアクセス欄由来）。 */
+const VENUE_LINK_ROW = /(Googleマップ|マップ\s*で見る|地図|アクセス)/;
+
+/**
+ * <title> に載せてよい**単一の会場名**を選ぶ。載せられないなら null。
+ *
+ * なぜ厳しく落とすか: Search Console の実測で、このサイトに実際に付いている検索需要は
+ * 「コラボ・ポップアップ × 地名/店舗」だった（「ナガノマーケット 仙台」91表示）。
+ * 会場はその需要の中心なので載せたい。ただし **stores は会場とは限らない**（本番実測）:
+ *   ・「スイーツパラダイス 新宿東口店、天王寺ミオ店、…」（79字の羅列）
+ *   ・「全国 ※自動販売機を除く。※一部の店舗では…」（64字の注記）
+ * これらを切り詰めて載せると**開催していない店でやっていると読める**＝嘘になる。
+ * 切り詰めが嘘になる形（羅列・注記）は**載せない**方を選ぶ（詳細は本文の店舗欄が出す）。
+ */
+export function venueForTitle(
+  stores: { name?: string | null }[] | null | undefined,
+  name: string
+): string | null {
+  if (!stores?.length) return null;
+  for (const s of stores) {
+    const raw = (s.name ?? "").trim();
+    if (!raw) continue;
+    // 地図リンクの行は会場名ではないので次を見る（本番実測で1件だけ存在）。
+    if (VENUE_LINK_ROW.test(raw)) continue;
+    // 先頭の飾り記号（「■稲城天然温泉 季乃彩」等）だけ落とす。中身は言い換えない。
+    const v = raw.replace(/^[■●◆・\s]+/, "").trim();
+    if (!v) return null;
+    // 複数店の羅列・注記つきは、切ると嘘になるので載せない。
+    if (/[、,]/.test(v)) return null;
+    if (/[※]/.test(v)) return null;
+    if (v.length > VENUE_MAX_LEN) return null;
+    // 商品名と重複するなら足さない（「in 渋谷モディ｜… 渋谷モディ」を作らない）。
+    if (name.includes(v) || v.includes(name)) return null;
+    return v;
+  }
+  return null;
+}
+
 export function itemPageTitle(input: {
   name: string;
   heading: string | null;
   date: string | null;
   hasLottery: boolean;
+  /** eventPeriodText の結果（"8月21日〜8月30日" 等）。あれば date より優先する。 */
+  period?: string | null;
+  /** venueForTitle 済みの会場名。無ければ null。 */
+  venue?: string | null;
 }): string {
   const name = input.name;
+  const venue = input.venue ?? null;
 
   // 商品名にすでに同じ語が入っているなら足さない（「〇〇 発売日の発売日」を作らない）。
-  const heading =
+  const headingWord =
     input.heading && TITLE_HEADINGS.has(input.heading) && !name.includes(input.heading)
       ? input.heading
       : null;
+  // 会場を載せるときは見出し（「〜の開催日」）を落とす。
+  // 会場と期間が出ていれば何の日付かは読めば分かるうえ、見出しまで足すと商品名が
+  // 表示幅から押し出される（Googleの表示は概ね30〜35字）。会場が無い行は従来どおり
+  // 見出しを残す＝**実際に打たれるクエリの形**（「〇〇 発売日」）を保つ。
+  const heading = venue ? null : headingWord;
   const base = heading ? `${name}の${heading}` : name;
 
+  // 期間（"8/21〜8/30"）を持っているなら開始日より期間を出す。
+  // 「いつまでやっているか」がイベント系クエリの本題で、開始日だけでは答えていない。
+  const when = input.period && input.period.length <= 30 ? input.period : input.date;
+
   const facts = [
-    input.date,
+    when,
     // 名前や見出しに「抽選」が既にあるなら重ねない。
     input.hasLottery && !base.includes("抽選") ? "抽選あり" : null,
   ].filter((v): v is string => Boolean(v));
 
   const head = facts.length ? `${base}｜${facts.join("・")}` : base;
+  // 会場はサイト名より価値が高い（検索されているのは会場・地名の方）。
+  if (venue) return `${head} ${venue}`;
   return `${head} | ハツコレ`;
 }

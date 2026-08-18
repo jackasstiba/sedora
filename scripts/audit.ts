@@ -36,6 +36,7 @@ import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSear
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
 import { parsePrizesJson } from "../src/lib/prizes";
+import { GENRE_TO_GOOGLE_CATEGORY } from "../src/lib/productCategory";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { countWatchlist } from "../src/lib/watchlist";
@@ -396,6 +397,18 @@ async function main() {
       "語彙に無いジャンルが使われている（表示順・絞り込みから漏れる）",
       "error",
       [...unknown.entries()].map(([g, n]) => `「${g}」${n}件`),
+      baseline
+    );
+
+    // ジャンルを足したとき、構造化データの category（Google Product Taxonomy）の扱いを
+    // 決め忘れると、そのジャンルの商品ページだけ静かに category が消える。
+    // GPCを付ける/付けないのどちらでもよいが、**明示的に決めること**を強制する。
+    const undecided = GENRE_ORDER.filter((g) => !(g in GENRE_TO_GOOGLE_CATEGORY));
+    report(
+      "product_category_vocab",
+      "ジャンルの Google Product Taxonomy 対応が未定（src/lib/productCategory.ts に追記する）",
+      "error",
+      undecided.map((g) => `「${g}」`),
       baseline
     );
 
@@ -1047,6 +1060,38 @@ async function main() {
         files.length
       );
     }
+  }
+
+  // (11f) **自分の楽天アフィリリンクがDBに保存されていないか**（2026-08-18）。
+  //
+  // アフィリのURL(hb.afl.rakuten.co.jp)は踏むとクリックが記録される。DBに入ると、それを
+  // 読んで回る機械（画像収集 scripts/backfillImages.ts の fetchText(r.url) 等）が
+  // **毎日自分のリンクをクリックし続ける**。成果は1件も出ないので、楽天側には
+  // 「クリックだけが積み上がるパートナー」に見える＝禁止事項（自己クリック・不正クリック）。
+  // しかも画面は完全に正常なまま進むので、目視では絶対に見つからない。
+  //
+  // 正しい形: DBに保存するのは**素の検索URL**、アフィリ化は**画面に出す瞬間だけ**
+  // （src/lib/outbound.ts の rakutenSearchUrl / rakutenSearchRawUrl）。
+  // 呼び出し側が元に戻っていないかは audit:selftest の静的スキャンが別途見張る。
+  {
+    const bad: string[] = [];
+    const isOwnAffiliate = (u: string | null | undefined) =>
+      !!u && /^https?:\/\/hb\.afl\.rakuten\.co\.jp\//i.test(u);
+    for (const r of all) {
+      if (isOwnAffiliate(r.url)) bad.push(`[${r.source} #${r.id}] url が自分のアフィリリンク ${r.url.slice(0, 70)}`);
+      if (isOwnAffiliate(r.officialUrl))
+        bad.push(`[${r.source} #${r.id}] officialUrl が自分のアフィリリンク ${r.officialUrl!.slice(0, 70)}`);
+      for (const s of parseStoresJson(r.stores) ?? [])
+        if (isOwnAffiliate(s.url)) bad.push(`[${r.source} #${r.id}] ストアURLが自分のアフィリリンク ${s.url!.slice(0, 70)}`);
+    }
+    report(
+      "own_affiliate_stored",
+      "自分の楽天アフィリリンクがDBに保存されている（巡回が毎日クリックする＝規約違反の形）",
+      "error",
+      bad,
+      baseline,
+      all.length
+    );
   }
 
   // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。

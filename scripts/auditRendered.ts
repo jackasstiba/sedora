@@ -20,15 +20,61 @@ import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
 import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
+import { AD_DISCLOSURE, isRakutenAffiliateId } from "../src/lib/outbound";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
 const BASE = (baseIdx >= 0 ? args[baseIdx + 1] : "http://localhost:3000").replace(/\/$/, "");
 
+/**
+ * 期待する楽天アフィリリンクの先頭（＝手元の .env のID）。
+ *
+ * **本番のアフィリは、コードではなく Vercel の環境変数で決まる。** そこが消えても・typo でも
+ * リンクは楽天に飛ぶので画面は完全に正常なまま、成果だけが静かに0になる（目視では絶対に
+ * 見つからない型）。ここは実際に配信されたHTMLを見る唯一の検査なので、`--base` に本番を
+ * 渡したときに **手元のIDと同じアフィリリンクが本当に出ているか** を突き合わせる。
+ */
+const EXPECTED_ID = (process.env.RAKUTEN_AFFILIATE_ID ?? "").trim();
+const AFFILIATE_PREFIX = isRakutenAffiliateId(EXPECTED_ID)
+  ? `https://hb.afl.rakuten.co.jp/hgc/${EXPECTED_ID}/`
+  : null;
+
 type Finding = { page: string; kind: string; detail: string };
 const findings: Finding[] = [];
 function flag(page: string, kind: string, detail: string) {
   findings.push({ page, kind, detail });
+}
+
+/**
+ * 広告である旨の表示が、そのページに出ているか（ステマ規制／楽天のガイドライン）。
+ * ヘッダー直下＝`<main>` の外に出しているので、**body 全体**の文字列で見る。
+ */
+function checkAdDisclosure($: cheerio.CheerioAPI, page: string): boolean {
+  const body = $("body").text().replace(/\s+/g, " ");
+  if (body.includes(AD_DISCLOSURE)) return true;
+  flag(page, "広告表示の欠落", `「${AD_DISCLOSURE}」がページに出ていない`);
+  return false;
+}
+
+/**
+ * 楽天リンク（＝このサイト唯一の収益導線）が、期待するアフィリIDで出ているか。
+ * 返すのは「見たアフィリリンクの本数」＝母数。0本のまま終わったら検査が空振りしている。
+ */
+function checkRakutenLinks($: cheerio.CheerioAPI, page: string): number {
+  let seen = 0;
+  $('a[href*="rakuten.co.jp"]').each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    if (href.startsWith("https://search.rakuten.co.jp/")) {
+      // 素の検索URLがそのまま出ている＝アフィリを通っていない（成果が付かない）。
+      flag(page, "アフィリを通っていない楽天リンク", `素の検索URLが出ている ${href.slice(0, 80)}`);
+      return;
+    }
+    if (!href.startsWith("https://hb.afl.rakuten.co.jp/")) return; // 画像等（<a>以外の楽天ホスト）
+    seen++;
+    if (AFFILIATE_PREFIX && !href.startsWith(AFFILIATE_PREFIX))
+      flag(page, "別のアフィリIDのリンク", `期待と違うIDで出ている ${href.slice(0, 80)}`);
+  });
+  return seen;
 }
 
 async function fetchPage(url: string): Promise<string | null> {
@@ -140,6 +186,9 @@ async function main() {
   // 「受付中ストア」節の行を何行見たか。stores を持つ商品があるのに0行なら空振り。
   let storeRowsSeen = 0;
   let storeItemsCount = 0;
+  // 楽天アフィリリンクを何本見たか。本番に出ていなければ収益は0なので、0本で終わったら
+  // 「きれいだから0件」ではなく検査の空振り（＝収益導線が消えていても気付けない状態）。
+  let rakutenLinksSeen = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -151,6 +200,8 @@ async function main() {
     // <script>/<style> はテキスト検査から外す（JSONペイロードに undefined 等が出るため）。
     $("script, style, noscript").remove();
     const text = $("main").text().replace(/\s+/g, " ").trim() || $("body").text();
+    checkAdDisclosure($, p.name);
+    rakutenLinksSeen += checkRakutenLinks($, p.name);
     const titles = cardTitles($);
     cardsSeen += titles.length;
     listItemsSeen += $("ul > li, ol > li").length;
@@ -248,6 +299,8 @@ async function main() {
       const $ = cheerio.load(html);
       $("script, style, noscript").remove();
       const text = $("main").text().replace(/\s+/g, " ").trim();
+      checkAdDisclosure($, `/items/${r.id}`);
+      rakutenLinksSeen += checkRakutenLinks($, `/items/${r.id}`);
       for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
         if (text.includes(bad)) flag(`/items/${r.id}`, "未定義値の露出", `本文に「${bad}」が出ている`);
       }
@@ -287,8 +340,19 @@ async function main() {
   // 実際に検査した物量を必ず出す。セレクタが壊れると0枚になり、静かに素通りするのを防ぐ。
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
-      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品）`
+      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本`
   );
+  // 収益導線は詳細ページにしか無い。1本も見ていないなら、本番のアフィリが消えていても
+  // この監査は「指摘0件」と言ってしまう（＝守っていない）。
+  if (checked > 0 && rakutenLinksSeen === 0) {
+    flag(
+      "(全体)",
+      "検査が空振り",
+      AFFILIATE_PREFIX
+        ? "楽天アフィリリンクを1本も検出できていない（収益導線が消えている疑い／セレクタ破損）"
+        : "楽天アフィリリンクを1本も検出できていない（RAKUTEN_AFFILIATE_ID が手元に無いのでIDの照合もしていない）"
+    );
+  }
   // 「受付中ストア」の検査は母数が要る。stores を持つ商品があるのに1行も見ていないなら、
   // それは「きれいだから0件」ではなく「何も見ていない0件」（セレクタ・見出し文言の変更）。
   if (storeItemsCount > 0 && storeRowsSeen === 0) {

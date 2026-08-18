@@ -86,10 +86,10 @@ import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
 import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
 import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
-import { cleanListTitle, hasProductSegment, itemPageTitle } from "../src/lib/title";
+import { cleanListTitle, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import {
   AA_NORMAL,
   contrastHex,
@@ -155,6 +155,40 @@ const S = (rows: [at: string, kind: "締切" | "開始"][]): StoreEntry[] =>
 const PAST = "2023年4月発送予定";
 const FUTURE = "2027年4月発送予定";
 const THIS_MONTH = "2026年8月発送予定"; // 月精度は月末に倒すので「まだ過ぎていない」
+
+/**
+ * `rakutenSearchUrl`（＝アフィリのURLを作る関数）を呼んでいるファイルを、ソースを読んで数える。
+ * 値ではなく**書き方**を固定する検査なので、実行結果ではなくファイルの中身を見る。
+ */
+function rakutenAffiliateCallers(): string[] {
+  const roots = ["src", "scripts"];
+  const hits: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name === "node_modules" || e.name === "generated") continue;
+        walk(p);
+      } else if (/\.tsx?$/.test(e.name)) {
+        if (/\brakutenSearchUrl\s*\(/.test(readFileSync(p, "utf8"))) hits.push(p);
+      }
+    }
+  };
+  for (const r of roots) walk(r);
+  return hits;
+}
+
+/** 上のうち、**呼んではいけない場所**（機械が叩く側）だけを返す。 */
+function affiliateCallersOutsideRenderLayer(): string[] {
+  const allowed = [
+    /^src\/lib\/outbound\.ts$/, // 定義そのもの
+    /^src\/app\//, // 表示層（クリックするのは人間）
+    /^src\/components\//, // 表示層
+    /^scripts\/rakutenVerify\.ts$/, // アフィリリンクの着地を確かめるための専用スクリプト
+    /^scripts\/auditSelftest\.ts$/, // このファイル（形の固定に使う）
+  ];
+  return rakutenAffiliateCallers().filter((f) => !allowed.some((re) => re.test(f)));
+}
 
 type Case = { name: string; fn: () => unknown; want: unknown };
 
@@ -607,10 +641,127 @@ const cases: Case[] = [
       ).includes("search.rakuten.co.jp/search/mall/ポケカ/"),
     want: true,
   },
+  // (d-2b) **機械が叩く側でアフィリURLを作っていないか**（静的スキャン・2026-08-18）。
+  //
+  // アフィリのURLは踏むとクリックが記録される。巡回・画像収集・スクレイパーがこれを作ると、
+  // 保存した先や fetch でそのまま踏まれ、**成果ゼロのクリックだけが毎日自分のIDに積み上がる**
+  // ＝楽天の禁止事項（自己クリック・不正クリック）。実測 2026-08-18 に2経路がこの形だった
+  // （scripts/backfillImages.ts の画像探索と、gunpla_resale / sofvi が保存する item.url）。
+  // 直した後に**元の書き方へ戻っても画面は何も変わらない**ので、値ではなく書き方を固定する。
+  // 表示層(src/app, src/components)と outbound.ts 自身、検証用の rakutenVerify だけが呼んでよい。
+  {
+    name: "巡回・スクレイパーは楽天アフィリURLを作らない（自分のリンクを機械で叩かない）",
+    fn: () => affiliateCallersOutsideRenderLayer().join(" / "),
+    want: "",
+  },
+  {
+    name: "静的スキャン自体が空振りしていない（表示層の呼び出しは見えている）",
+    fn: () => rakutenAffiliateCallers().some((f) => f.startsWith("src/app/")),
+    want: true,
+  },
   { name: "IDの形（4ブロック）を認める", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p"), want: true },
   { name: "IDの形（3ブロック）は認めない", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l"), want: false },
   // 以下2件は「楽天のリンク作成ツールが実際に吐いたリンク」から写した形（2026-08-18実測）。
   // 仕様が公開されていないので、実物と違う形に戻したら気づけるようにここで固定する。
+
+  // (d-3) 会場つきタイトル。Search Console の実測で、付いている検索需要は
+  // 「コラボ・ポップアップ × 地名/店舗」だった（「ナガノマーケット 仙台」91表示・クリック0）。
+  // 会場と期間を出す代わりに、**切ると嘘になる形は載せない**を機械で固定する。
+  {
+    name: "会場: 単一の会場名は載せる",
+    fn: () => venueForTitle([{ name: "渋谷モディ 7F" }], "約ネバ 10周年 ポップアップストア in 渋谷"),
+    want: "渋谷モディ 7F",
+  },
+  {
+    name: "会場: 地図リンクの行は飛ばして次を見る",
+    fn: () =>
+      venueForTitle(
+        [{ name: "Googleマップ で見る" }, { name: "JR仙台駅 2階 ステンドグラス前催事場" }],
+        "ナガノマーケット ポップアップストア in 仙台駅"
+      ),
+    want: "JR仙台駅 2階 ステンドグラス前催事場",
+  },
+  {
+    name: "会場: 複数店の羅列は載せない（切ると開催してない店でやってると読める）",
+    fn: () =>
+      venueForTitle(
+        [{ name: "スイーツパラダイス 新宿東口店、天王寺ミオ店、横浜ビブレ店、名古屋パルコ店" }],
+        "ハイキュー!! × スイーツパラダイス9店舗"
+      ),
+    want: null,
+  },
+  {
+    name: "会場: 注記つき（※）は載せない",
+    fn: () => venueForTitle([{ name: "全国 ※自動販売機を除く。※一部の店舗では、お取り扱いがない場合がございます。" }], "ちいかわ × サントリー"),
+    want: null,
+  },
+  {
+    name: "会場: 長すぎる会場名は載せない（商品名が押し出される）",
+    fn: () => venueForTitle([{ name: "あ".repeat(25) }], "何かのコラボ"),
+    want: null,
+  },
+  {
+    name: "会場: 先頭の飾り記号だけ落とす（中身は言い換えない）",
+    fn: () => venueForTitle([{ name: "■稲城天然温泉 季乃彩" }], "ラブライブ × サウナ"),
+    want: "稲城天然温泉 季乃彩",
+  },
+  {
+    name: "会場: 商品名と重複するなら足さない",
+    fn: () => venueForTitle([{ name: "渋谷モディ" }], "約ネバ ポップアップストア in 渋谷モディ"),
+    want: null,
+  },
+  {
+    name: "タイトル: 会場があれば会場を出し、サイト名は落とす",
+    fn: () =>
+      itemPageTitle({
+        name: "約ネバ 10周年 ポップアップストア in 渋谷モディ",
+        heading: "開催日",
+        date: "2026年8月21日(金)",
+        hasLottery: false,
+        period: "2026年8月21日〜8月30日",
+        venue: "渋谷モディ 7F",
+      }),
+    want: "約ネバ 10周年 ポップアップストア in 渋谷モディ｜2026年8月21日〜8月30日 渋谷モディ 7F",
+  },
+  {
+    name: "タイトル: 期間を持っていれば開始日ではなく期間を出す",
+    fn: () =>
+      itemPageTitle({
+        name: "何かのコラボ",
+        heading: "開催日",
+        date: "8/21(金)",
+        hasLottery: false,
+        period: "2026年8月21日〜8月30日",
+        venue: "渋谷モディ",
+      }).includes("8月21日〜8月30日"),
+    want: true,
+  },
+  {
+    name: "タイトル: 会場が無い行は従来どおり見出しとサイト名を残す",
+    fn: () =>
+      itemPageTitle({
+        name: "ワンピースカード 新弾",
+        heading: "発売日",
+        date: "9/5(金)",
+        hasLottery: false,
+        period: null,
+        venue: null,
+      }),
+    want: "ワンピースカード 新弾の発売日｜9/5(金) | ハツコレ",
+  },
+  {
+    name: "タイトル: 長すぎる期間テキストは使わず日付に落とす",
+    fn: () =>
+      itemPageTitle({
+        name: "何かのくじ",
+        heading: "発売日",
+        date: "9/5(金)",
+        hasLottery: false,
+        period: "あ".repeat(31),
+        venue: null,
+      }),
+    want: "何かのくじの発売日｜9/5(金) | ハツコレ",
+  },
   {
     name: "アフィリリンクは link_type=hybrid_url を付ける（実物と同じ形）",
     fn: () => rakutenSearchUrl("ポケカ", "1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p").endsWith("&link_type=hybrid_url"),

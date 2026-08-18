@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Analytics } from "@vercel/analytics/next";
 import { SiteHeader } from "@/components/SiteHeader";
+import { AdDisclosure } from "@/components/AdDisclosure";
 import { SiteFooter } from "@/components/SiteFooter";
 import "./globals.css";
 
@@ -50,6 +51,9 @@ export default function RootLayout({
     <html lang="ja" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
         <SiteHeader />
+        {/* 広告である旨の表示。ヘッダー直下＝どのページでもファーストビューに入る位置に置く
+            （下部・フッターへの記載は不可とされている。根拠は lib/outbound.ts の AD_DISCLOSURE）。 */}
+        <AdDisclosure />
         {children}
         <SiteFooter />
         <Analytics />

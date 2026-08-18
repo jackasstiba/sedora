@@ -5,12 +5,13 @@ import { ItemCard } from "@/components/ItemCard";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
-import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
+import { AD_DISCLOSURE_INLINE, hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
-import { cleanListTitle, displaySubGenre, itemPageTitle } from "@/lib/title";
+import { cleanListTitle, displaySubGenre, itemPageTitle, venueForTitle } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
+import { productCategoryValue } from "@/lib/productCategory";
 import {
   groupStoresByLabel,
   parseStoresJson,
@@ -30,7 +31,11 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const item = await getItemById(Number(id));
   if (!item) return { title: "見つかりませんでした | ハツコレ" };
 
-  const dateStr = eventDateLabel(item.eventDate, item.eventDateText, "long") ?? "";
+  // 説明文の日付も、期間を持っている行は期間を出す（「いつまで」が本題）。
+  const dateStr =
+    eventPeriodText(item.eventDate, item.eventDateText) ??
+    eventDateLabel(item.eventDate, item.eventDateText, "long") ??
+    "";
   // 一覧カードと同じ整形を使う。以前は stripSourceLabel だけだったため、Xミラー由来の商品は
   // 一覧では商品名なのに、開いた先のタイトル・<title> がツイート全文（実況コメント込み）になり、
   // 同じ商品の名前がページ間で食い違っていた。
@@ -39,12 +44,21 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const past = isEventPast(item.eventDate, item.eventDateText, todayJst());
   // <title> は「商品名」単体ではなく「〇〇の発売日」の形にする（実際に打たれるクエリの形）。
   // 組み立て規則と、名前を切り詰めない理由は itemPageTitle 側に書いてある。
+  // 会場名は本文の店舗欄と同じ stores から採る（載せてよい形かは venueForTitle が判定）。
+  const venue = venueForTitle(parseStoresJson(item.stores), cleanTitle);
+  // 期間（"8月21日〜8月30日"）を持っている行は、開始日ではなく期間を出す。
+  const period = eventPeriodText(item.eventDate, item.eventDateText);
   const title = itemPageTitle({
     name: cleanTitle,
     heading: eventDateHeading(item.eventType, item.eventDateText, past),
-    // タイトルは短い方の書式（説明文は long を使う）。
-    date: eventDateLabel(item.eventDate, item.eventDateText, "short"),
+    // 会場・期間を載せない行は従来どおり短い日付（説明文は long を使う）。
+    // 会場を載せる行は年まで出す＝「ナガノ マーケット 仙台 2026」のようなクエリに当てる。
+    date: venue
+      ? eventDateLabel(item.eventDate, item.eventDateText, "long")
+      : eventDateLabel(item.eventDate, item.eventDateText, "short"),
     hasLottery: item.hasLottery === true,
+    period,
+    venue,
   });
   // 検索結果に出る説明文。**相場・転売実績は入れない**（[[System/rules]] ハツコレの立ち位置。
   // 相場を出すと転売サイト感が高まる）。載せるのは「逃すと買えない」側＝抽選の有無・
@@ -59,7 +73,12 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     // 画面側（下の注目賞品欄）と同じ規則で接頭辞を落としてから載せる。
     item.highlights ? trim(item.highlights.replace(/^[^：]+：/, "").trim(), 60) : null,
     item.salesChannel ? `取扱: ${trim(item.salesChannel, 30)}` : null,
-    `ジャンル: ${item.genre}`,
+    // 会場は検索結果で最も知りたい事実の1つ（「どこでやってるか」）。タイトルに載せられ
+    // なかった長い会場名も、説明文なら … で切れていることが分かる形で載せられる。
+    venue ? `会場: ${venue}` : null,
+    // ジャンル語は検索する人には価値が無い（「コラボ」で探す人はいない）。会場が出せた
+    // 行では枠を会場に譲る。出せなかった行だけ、従来どおりジャンルを残す。
+    venue ? null : `ジャンル: ${item.genre}`,
   ]
     .filter(Boolean)
     .join(" ／ ");
@@ -95,6 +114,10 @@ export default async function ItemPage({ params }: Props) {
   // 表示・構造化データは一覧カードと同じ整形後タイトルに揃える（情報元の定型ラベル除去を含む）。
   // ※ 楽天検索へのリンクだけは生タイトルを使う経路が別にある（検索語は情報量が多い方が当たる）。
   const displayTitle = cleanListTitle(item.source, item.title);
+  // 楽天（＝アフィリエイト＝広告）の導線を出すか。ボタンと、その旨の一行の両方が
+  // これ1つで決まるようにする（片方だけ出る＝広告表示の無い広告リンク、を作らないため）。
+  const showRakuten =
+    hasSearchableTitle(item.source) || (!isOfficialUrl(item.source) && !item.officialUrl);
   // 一番くじの各等賞。構造化JSON（画像＋賞ごと相場）があればギャラリー表示、
   // 無ければ highlights の畳み込み文字列からリスト展開（旧データ後方互換）。
   const prizeGallery = parsePrizesJson(item.prizes);
@@ -120,13 +143,29 @@ export default async function ItemPage({ params }: Props) {
   // 事実なので、読めた場合のみOfferを付ける。availabilityは抽選/予約/発売予定で確定できないため省略。
   // くじの「1回850円」は参加費であって商品の価格ではないので Offer には出さない
   // （検索結果に「¥850」と出ると、当たる賞品がその値段で買えるように読める）。
+  //
+  // ■ Search Console の警告に対して、**意図的に付けないもの**（2026-08-18 検出分）
+  //   Google は「商品スニペット」に3件・「販売者のリスティング」に5件の警告を出しているが、
+  //   どれも重大ではない問題＝推奨項目で、リッチリザルトからは外れない。付けない理由は以下。
+  //   ・review / aggregateRating … 実データが無い。付ければ嘘のレビューを申告することになる。
+  //   ・availability … 「予約」は収集元の記事が更新されないため受付中と裏取りできない
+  //     （itemFilter.ts の STATUS_EVENT_TYPES に同じ記述がある）。PreOrder/PreSale は
+  //     どちらも「今注文できる」という主張なので、確認できないまま出さない。
+  //     発売済みの行も在庫は分からないので InStock とは書けない。
+  //   ・gtin / brand … Item にメーカー・型番の列が無い。タイトルから推測すると別商品になる。
+  //   ・hasMerchantReturnPolicy / shippingDetails … **ハツコレは販売者ではない。**
+  //     Googleも「merchant listings require an Offer as the merchant has to be the seller」
+  //     として第三者の比較・まとめサイトを対象外にしている。返品規定も送料も持っていない。
+  //   ・category … これだけは実際に無効値だったので下で直した（productCategory.ts）。
   const teika = item.price && isPerDrawFee(item.price) ? null : parseYen(item.price);
   const productNode = teika
     ? {
         "@type": "Product",
         name: displayTitle,
         image: item.imageUrl ?? undefined,
-        category: item.genre,
+        // 日本語のジャンル名をそのまま入れると Google は無効値とみなす。GPCが一意に決まる
+        // ジャンルだけ CategoryCode を付け、決まらないジャンルは category ごと出さない。
+        category: productCategoryValue(item.genre),
         description: `${displayTitle}の${item.eventType}情報（${item.genre}）`,
         ...(SITE ? { url: `${SITE}/items/${item.id}` } : {}),
         offers: {
@@ -341,9 +380,10 @@ export default async function ItemPage({ params }: Props) {
                 {officialUrlLabel(item.highlights, item.source)}
               </OutboundLink>
             )}
-            {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）。将来アフィリンクに差し替え。
-                収集元URLを出さない代わりに、公式リンクを持たない商品でも行き止まりにしない導線。 */}
-            {(hasSearchableTitle(item.source) || (!isOfficialUrl(item.source) && !item.officialUrl)) && (
+            {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）＝サイトで唯一の収益導線。
+                収集元URLを出さない代わりに、公式リンクを持たない商品でも行き止まりにしない導線。
+                このリンクはアフィリエイト＝**広告**なので、押す直前に分かる位置にその旨を出す。 */}
+            {showRakuten && (
               <OutboundLink
                 href={rakutenSearchUrl(hasSearchableTitle(item.source) ? item.title : displayTitle)}
                 kind="rakuten"
@@ -356,6 +396,7 @@ export default async function ItemPage({ params }: Props) {
             )}
           </div>
           <p className="text-xs text-neutral-600 dark:text-neutral-400">
+            {showRakuten && <span>※ {AD_DISCLOSURE_INLINE}<br /></span>}
             ※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
           </p>
         </div>

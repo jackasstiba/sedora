@@ -2,7 +2,7 @@ import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
 import { fetchHtml } from "./util";
 import { stripTags } from "./aggregatorUtil";
-import { rakutenSearchUrl } from "../lib/outbound";
+import { rakutenSearchRawUrl } from "../lib/outbound";
 
 // sofvi.tokyo（メディコム・トイ運営のソフビ総合情報サイト）。
 // 実測（2026-08-15）: トップの新着一覧が
@@ -100,7 +100,8 @@ export async function scrapeSofvi(): Promise<ScrapedItem[]> {
       eventDateText: null,
       price: null,
       // 収集元の記事リンクはフロントに出さない方針＝導線は商品名の楽天検索。
-      url: rakutenSearchUrl(name),
+      // **保存するのは素の検索URL。** アフィリ化は画面に出す瞬間だけ（outbound.ts の注意書き）。
+      url: rakutenSearchRawUrl(name),
       imageUrl: null, // sofvi.tokyo ホストの画像を直リンクすると収集元が露見するため使わない
       hasLottery: info.eventType === "抽選",
       highlights: info.eventType === "抽選" ? `抽選受付 〜${info.date.getUTCMonth() + 1}/${info.date.getUTCDate()}` : null,

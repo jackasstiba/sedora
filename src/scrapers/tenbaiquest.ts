@@ -3,6 +3,7 @@ import { todayJst } from "../lib/date";
 import { parseJapaneseFullDate } from "./util";
 import { crawlPages } from "./crawl";
 import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
+import { rakutenSearchRawUrl } from "../lib/outbound";
 
 // 転売クエスト（tenbaiquest.com）の "抽選" 記事を全カテゴリ横断で収集する。
 //
@@ -93,10 +94,6 @@ export function cleanProductName(title: string): string {
   return title.replace(/^\s*【[^】]*】\s*/, "").trim();
 }
 
-function rakutenSearchUrl(name: string): string {
-  return `https://search.rakuten.co.jp/search/mall/${encodeURIComponent(name.trim())}/`;
-}
-
 export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
   // 「日本時間の今日」を暦日(UTC0時)で。締切が過去の抽選（＝受付終了）は載せない。
   const today = todayJst();
@@ -139,7 +136,8 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
       eventDateText: date ? null : "抽選 受付中",
       price: null,
       // 収集元（転売クエスト）は一切出さない。購入導線は商品名で楽天検索に寄せる。
-      url: rakutenSearchUrl(name),
+      // **保存するのは素の検索URL。** アフィリ化は画面に出す瞬間だけ（outbound.ts の注意書き）。
+      url: rakutenSearchRawUrl(name),
       imageUrl: null, // 競合ドメイン画像のホットリンクは情報源露見につながるため使わない。
       hasLottery: lottery,
     });
