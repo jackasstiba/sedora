@@ -287,7 +287,14 @@ async function main() {
       // パック」は部品セットで、単価が数千円でも正常（実測で ＭＧ 1/100 …ストライカーパック
       // 3,520円 を誤検知した）。カードの単パックという概念があるトレカ系に限定する。
       const isCardGenre = r.genre === "トレカ" || r.genre === "ポケモン";
-      const isSinglePack = isCardGenre && /(?:ブースター|スターター)?パック/.test(t) && !isBoxWord;
+      // 「パック」が**単位として立っている**ときだけ単パックとみなす。直後に文字が続く
+      // 「DreaMパックミュージアム」（タカラトミーモール限定の25th記念コレクションセット・
+      // 9,900円は正価）は商品名の一部で、単パックではない。実測 2026-08-18 に ERROR で
+      // 誤検知した＝**「パック」を含む＝単パック、という決め打ち**が原因だった。
+      const isSinglePack =
+        isCardGenre &&
+        /(?:ブースター|スターター)?パック(?![ァ-ヴーぁ-ん一-龥A-Za-z0-9])/.test(t) &&
+        !isBoxWord;
       if (y != null && isSinglePack && y >= 3000) bad.push(`[${r.source} #${r.id}] ${y.toLocaleString()}円(BOX表記なしの単パック?) ${t}`);
       if (y != null && (y <= 0 || y > 3_000_000)) bad.push(`[${r.source} #${r.id}] 異常価格 ${r.price} ${t}`);
     }
@@ -1032,20 +1039,44 @@ async function main() {
         if (!r.eventDate || r.eventDate >= today) e.upcoming++;
         dbBySrc.set(r.source, e);
       }
+      // **0件が正常な状態のソース**は、理由を書いて別枠にする（しきい値を緩めるのではなく
+      // 理由で分ける＝[[System/rules]] 2026-08-09）。受付が数日単位で開いては閉じる抽選サイトは、
+      // 開催の無い日に0件になるのが正しい挙動で、これをラチェットに混ぜると
+      // **翌朝の更新が誤報で止まる**（audit:tomorrow が実際にそう予告した）。
+      //
+      // ⚠️ 残るリスク: このソースが本当に壊れても 0件のままなので、ここでは気付けない。
+      // 気付ける経路は巡回時の健全性チェック（scrape 側）だけなので、0件が何日も続いたら
+      // 収集元を実際に開いて確かめること。
+      const MAY_BE_EMPTY: Record<string, string> = {
+        mita_draw: "抽選は数日単位で開いては閉じる。受付中の抽選が無い日は0件が正しい",
+        // ハツコレは手動更新なので、1週間更新しない期間が普通に起こる。窓の短いカレンダーは
+        // その間に中身が全部過去になる＝**古い発売日を出し続けるより0件の方が正しい**。
+        billys: "収集元のLAUNCHが約1週間先までしか出さない。更新が1週間空けば0件になるのが正しい",
+      };
       const zero: string[] = [];
+      const zeroByDesign: string[] = [];
       for (const [src, e] of dbBySrc) {
         if ((shownBySrc.get(src) ?? 0) > 0) continue;
-        zero.push(
+        const line =
           e.upcoming === 0
             ? `${src}: 表示0件 — DB${e.n}件が**すべて過去日**（収集元から「これから」を取れていない＝入口が違う）`
-            : `${src}: 表示0件 — DB${e.n}件のうち${e.upcoming}件は日付条件を満たすのに、掲載基準か重複解消で全部落ちている`
-        );
+            : `${src}: 表示0件 — DB${e.n}件のうち${e.upcoming}件は日付条件を満たすのに、掲載基準か重複解消で全部落ちている`;
+        if (MAY_BE_EMPTY[src]) zeroByDesign.push(`${line}（${MAY_BE_EMPTY[src]}）`);
+        else zero.push(line);
       }
       report(
         "source_contributes_zero",
         "巡回できているのに、サイトに1件も出ていないソースがある",
         "warn",
         zero,
+        baseline,
+        dbBySrc.size
+      );
+      report(
+        "source_empty_by_design",
+        "0件になるのが正常なソース（理由つき・ラチェット対象外）",
+        "warn",
+        zeroByDesign,
         baseline,
         dbBySrc.size
       );

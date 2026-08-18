@@ -20,6 +20,12 @@ import { scrapeOnePieceCard } from "./onepieceCard";
 import { scrapeCardChusen } from "./cardChusen";
 import { scrapeGunplaResale } from "./gunplaResale";
 import { scrapeSofvi } from "./sofvi";
+import { scrapeMitaDraw } from "./mitaDraw";
+import { scrapeChiikawaMarket } from "./chiikawaMarket";
+import { scrapeTakaraTomyMall } from "./takaratomyMall";
+import { scrapeBillys } from "./billys";
+import { scrapeMedicomToy } from "./medicomToy";
+import { scrapeGashapon } from "./gashapon";
 
 export type ScraperResult = {
   source: string;
@@ -51,6 +57,15 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   { source: "card_chusen", run: scrapeCardChusen },
   { source: "gunpla_resale", run: scrapeGunplaResale },
   { source: "sofvi", run: scrapeSofvi },
+  // 2026-08-18 追加: 本番データを数えて「0件だったカテゴリ」を一次情報で埋める5本。
+  // どれもアグリゲーターではなく公式ストア/公式抽選ページなので、収集元非公開の原則
+  // （[[収集元の扱い方]]）の対象外＝item.url を公式として直リンクする。
+  { source: "mita_draw", run: scrapeMitaDraw },
+  { source: "chiikawa_market", run: scrapeChiikawaMarket },
+  { source: "takaratomy_mall", run: scrapeTakaraTomyMall },
+  { source: "billys", run: scrapeBillys },
+  { source: "medicom_toy", run: scrapeMedicomToy },
+  { source: "gashapon", run: scrapeGashapon },
 ];
 
 /** 登録されている収集元の名前（`--only=` の検証に使う）。 */

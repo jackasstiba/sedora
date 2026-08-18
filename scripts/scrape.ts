@@ -13,7 +13,31 @@ import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 import { nowInstant } from "../src/lib/date";
 
 // 「受付中」が入れ替わり、消えたら載せ続けるべきでないソース。今回未検出＝受付終了として削除する。
-const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen"]);
+// billys＝発売カレンダー。同名の色違いを1枚に畳む都合で sourceId が商品名だけになっており、
+// 日付が変わると **古い sourceId の行が孤児として残る**。カレンダーから消えた＝発売済み/中止
+// なので、突き合わせて消す。
+const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen", "billys"]);
+
+/**
+ * **日付を持たない行だけ**を突き合わせるソース（2026-08-18 新設）。
+ *
+ * 公式ストアの「新着 / 再入荷 / いま在庫あり」系は、載せる根拠が *その一覧に今あること* で、
+ * 日付を持たない。日付が無い行は `eventDate < today` で落ちる仕組みが効かない＝
+ * **一度入ったら永久に「いま買える」として並び続ける**（実測: ちいかわマーケットの
+ * 在庫あり333件・タカラトミーモールの日付なし93件が該当）。売り切れて一覧から消えても
+ * サイトだけが「買える」と言い続けるので、消えた行は消す。
+ *
+ * 日付のある行（＝将来の発売日・予約）は触らない。新着一覧から押し出されただけで
+ * まだ有効な予約情報を消してしまうため。
+ */
+const RECONCILE_UNDATED_SOURCES = new Set([
+  "chiikawa_market",
+  "takaratomy_mall",
+  // 月精度の予定は、当月分だけ日付なしになる（monthPlanDate）。その月が終われば収集元から
+  // 消えるので、突き合わせないと「今月発売予定」のまま居座る。
+  "gashapon",
+  "medicom_toy",
+]);
 
 // `--only=<source>[,<source>…]`: その収集元だけを巡回する（定例更新では使わない）。
 // スクレイパーを1つ直しただけで21ソース・1時間の巡回を回す必要をなくすための入口。
@@ -119,6 +143,16 @@ async function main() {
         where: { source, sourceId: { notIn: liveIds } },
       });
       if (del.count > 0) console.log(`[${source}] 受付終了 ${del.count}件を削除`);
+    }
+
+    // 日付なしの行だけ突き合わせる（在庫連動の一次ストア）。上と同じく、巡回失敗時は
+    // `if (error) continue` でここに来ないので、取りこぼしで全消しする事故は起きない。
+    if (RECONCILE_UNDATED_SOURCES.has(source)) {
+      const liveIds = items.map((i) => i.sourceId);
+      const del = await prisma.item.deleteMany({
+        where: { source, eventDate: null, sourceId: { notIn: liveIds } },
+      });
+      if (del.count > 0) console.log(`[${source}] 在庫切れ/一覧落ち ${del.count}件を削除`);
     }
 
     // pokemon_goods は「直近30日の新着」だけを載せる設計（pokemonGoods.ts のコメント）。

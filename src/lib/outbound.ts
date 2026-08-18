@@ -17,6 +17,13 @@ const OFFICIAL_URL_SOURCES = new Set([
   "kujimap", // item.url は各くじブランドの公式LP（segaplaza/furyuprize等）に直リンク。無い行は掲載しない
   "onepiece_card", // ONE PIECEカードゲーム公式の商品ページに直リンク
   "card_chusen", // item.url は各店の応募ページ（抽選システム/店舗告知＝一次）に直リンク
+  // 2026-08-18 追加。いずれも公式ストア/公式の抽選告知そのものに直リンクする。
+  "mita_draw", // ミタスニーカーズ公式の抽選受付ページ（draw.mita-sneakers.co.jp）
+  "chiikawa_market", // ちいかわマーケット公式の商品ページ
+  "takaratomy_mall", // タカラトミーモール公式の商品ページ
+  "billys", // BILLY'S ENT 公式通販の商品/LAUNCH ページ
+  "medicom_toy", // メディコム・トイ公式の商品ページ
+  "gashapon", // ガシャポンオフィシャルサイトの商品ページ
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -80,6 +87,14 @@ const SEARCHABLE_SOURCES = new Set([
   "card_chusen", // 商品名（拡張パック名）で市場検索できる
   "gunpla_resale", // item.url は楽天検索（収集元は非公開）＝商品名で市場検索できる
   "sofvi", // item.url は楽天検索（収集元は非公開）＝商品名で市場検索できる
+  // 2026-08-18 追加。いずれもタイトルが「商品名そのもの」（文章タイトルではない）ので、
+  // 公式ページに加えて市場検索の導線を出せる＝定価と相場を突き合わせに行ける。
+  "chiikawa_market",
+  "takaratomy_mall",
+  "medicom_toy",
+  "gashapon",
+  "billys",
+  "mita_draw",
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */

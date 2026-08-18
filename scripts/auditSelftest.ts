@@ -58,6 +58,15 @@ import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChuse
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
+// 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
+// （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
+import { parseMedicomDetail } from "../src/scrapers/medicomToy";
+import { parseTakaraTomyRelease, takaraTomyEventType, takaraTomyGenre, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
+import { parseBillysLaunch } from "../src/scrapers/billys";
+import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
+import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
+import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
+import { monthPlanDate } from "../src/scrapers/util";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
@@ -1459,6 +1468,165 @@ const cases: Case[] = [
         TAILWIND_TEXT_COLORS
       ).length,
     want: 1,
+  },
+
+  // ── 2026-08-18 追加の一次ストア6ソース ────────────────────────────────────
+  // 「載せる基準」と「精度を足さない」の2点だけを固定する。どちらも実データで一度間違えた。
+
+  // メディコム・トイ: 商品名が <br> で複数行に割れている（BAPEコラボ）。先頭行だけ採ると
+  // **商品名が途中で切れたカード**になる。実測でそうなっていた。
+  {
+    name: "medicom: 商品名が2行に割れていても繋ぐ",
+    fn: () =>
+      parseMedicomDetail(
+        `<div id="p_descrip">2026年10月発売予定<br>MCT 30th ANNIV. BAPE(R) CAMO<br>REVERSIBLE BE@R SHARK FULL ZIP HOODIE<br><br>頒布価格各￥62,700（税込）<br>●サイズ：S/M/L</div>`
+      ).name,
+    want: "MCT 30th ANNIV. BAPE(R) CAMO REVERSIBLE BE@R SHARK FULL ZIP HOODIE",
+  },
+  {
+    name: "medicom: 「頒布価格各￥」も価格として読む",
+    fn: () =>
+      parseMedicomDetail(
+        `<div id="p_descrip">2026年10月発売予定<br>X<br><br>頒布価格各￥62,700（税込）</div>`
+      ).price,
+    want: "62,700円",
+  },
+  {
+    // 日が書いてあるのに月精度扱いすると、カードに「10/1」という実在しない発売日が出る（ミス15）。
+    name: "medicom: 日まで書いてあれば日を読む",
+    fn: () =>
+      parseMedicomDetail(`<div id="p_descrip">2026年7月25日発売予定<br>X<br><br>頒布価格￥100（税込）</div>`).day,
+    want: 25,
+  },
+  {
+    name: "medicom: 日が無ければ日を作らない",
+    fn: () =>
+      parseMedicomDetail(`<div id="p_descrip">2026年10月発売・発送予定<br>X<br><br>頒布価格￥100（税込）</div>`).day,
+    want: null,
+  },
+
+  // 月精度の予定日: 当月は月初がもう過去なので、日付を作らず null にする
+  // （月初を入れると「eventDate < today」で今月の新商品が丸ごと消える）。
+  {
+    name: "月精度: 月初が未来ならその日",
+    fn: () => monthPlanDate(2026, 10, new Date(Date.UTC(2026, 7, 18)))?.toISOString().slice(0, 10),
+    want: "2026-10-01",
+  },
+  {
+    name: "月精度: 当月（月初は過去）は日付を作らない",
+    fn: () => monthPlanDate(2026, 8, new Date(Date.UTC(2026, 7, 18))),
+    want: null,
+  },
+
+  // タカラトミーモール
+  {
+    name: "タカラトミー: 「2026年11月21日」は日まで読む",
+    fn: () => parseTakaraTomyRelease("2026年11月21日").date?.toISOString().slice(0, 10),
+    want: "2026-11-21",
+  },
+  {
+    name: "タカラトミー: 「2026年9月中旬」は日を作らず月精度テキストを残す",
+    fn: () => parseTakaraTomyRelease("2026年9月中旬").text,
+    want: "2026年9月中旬",
+  },
+  {
+    // 収集元が「抽選に応募する」と書いている時だけ抽選と言う（推測で抽選にしない）。
+    name: "タカラトミー: 「抽選に応募する」だけを抽選と呼ぶ",
+    fn: () =>
+      takaraTomyEventType({
+        labels: ["NEW", "予約"],
+        action: "抽選に応募する",
+      } as TakaraTomyCard),
+    want: "抽選",
+  },
+  {
+    name: "タカラトミー: 「予約する」は抽選ではない",
+    fn: () => takaraTomyEventType({ labels: ["NEW", "予約"], action: "予約する" } as TakaraTomyCard),
+    want: "予約",
+  },
+  {
+    name: "タカラトミー: 再入荷ラベルは再販",
+    fn: () => takaraTomyEventType({ labels: ["再入荷"], action: "カートに入れる" } as TakaraTomyCard),
+    want: "再販",
+  },
+  {
+    name: "タカラトミー: ポケモン玩具はポケモンジャンル",
+    fn: () => takaraTomyGenre("ポケットモンスター 超連動!ポケモン メガリングZ"),
+    want: "ポケモン",
+  },
+  { name: "タカラトミー: トミカは玩具ジャンル", fn: () => takaraTomyGenre("トミカ ギフトセット"), want: "玩具" },
+
+  // BILLY'S LAUNCH
+  {
+    // 収集元に「¥018,700」という先頭0付きの表記が実在する（MIZUNO WAVE MUSTANG LS）。
+    // そのまま出すと価格が嘘になる。
+    name: "BILLY'S: 「¥018,700」を18,700円として読む",
+    fn: () =>
+      parseBillysLaunch(
+        `<ul class="c-launchlist__list"><li><div class="c-itembox__cat">MIZUNO</div><div class="c-itembox__goodsname">WAVE MUSTANG LS</div><div class="c-price__default">¥018,700<br>予約受付中</div><div class="c-launchlist__date"><span>8/21</span></div></li></ul>`
+      )[0]?.price,
+    want: "18,700円",
+  },
+  {
+    name: "BILLY'S: 「予約受付中」が無ければ予約と言わない",
+    fn: () =>
+      parseBillysLaunch(
+        `<ul class="c-launchlist__list"><li><div class="c-itembox__cat">NB</div><div class="c-itembox__goodsname">U991WL2</div><div class="c-price__default">¥42,900</div><div class="c-launchlist__date"><span>8/20</span></div></li></ul>`
+      )[0]?.preorder,
+    want: false,
+  },
+
+  // ちいかわマーケット: コレクション名＝日付＋種別
+  { name: "ちいかわ: 20260807 は発売", fn: () => parseChiikawaCollection("20260807")?.kind, want: "発売" },
+  { name: "ちいかわ: pre20260724 は予約", fn: () => parseChiikawaCollection("pre20260724")?.kind, want: "予約" },
+  { name: "ちいかわ: re20260805 は再販", fn: () => parseChiikawaCollection("re20260805")?.kind, want: "再販" },
+  { name: "ちいかわ: newitems は日付コレクションではない", fn: () => parseChiikawaCollection("newitems"), want: null },
+  {
+    // classifyGenre は「ぬいぐるみ」をフィギュアに倒すが、ここは全件キャラクターグッズ。
+    name: "ちいかわ: ぬいぐるみはキャラグッズ（フィギュアに倒さない）",
+    fn: () => chiikawaGenre("ぬいぐるみ", "ちいかわ ひっかけぬいぐるみ"),
+    want: "キャラグッズ",
+  },
+  { name: "ちいかわ: ソフビはソフビ・アートトイ", fn: () => chiikawaGenre("フィギュア", "おっきいソフビフィギュア"), want: "ソフビ・アートトイ" },
+
+  // ガシャポン: 量産の300〜500円を載せない（載せる基準そのもの）
+  {
+    name: "ガシャポン: 300円の量産ガシャは載せない",
+    fn: () => isResaleWorthyGashapon({ name: "サンリオ めじるしアクセサリー", category: "ガシャポン", yen: 300 } as GashaponCard),
+    want: false,
+  },
+  {
+    name: "ガシャポン: プレミアムは載せる",
+    fn: () => isResaleWorthyGashapon({ name: "いきもの大図鑑 セミ02", category: "プレミアム", yen: 1500 } as GashaponCard),
+    want: true,
+  },
+  {
+    name: "ガシャポン: ショップ限定は安くても載せる",
+    fn: () => isResaleWorthyGashapon({ name: "【ガシャポンバンダイオフィシャルショップ限定】HG ONE PIECE 01", category: "ガシャポン", yen: 500 } as GashaponCard),
+    want: true,
+  },
+
+  // ミタスニーカーズ抽選: 締切が読めない記事は載せない（間に合うか判断できないため）
+  {
+    name: "mita: 抽選応募期間の締切日を読む",
+    fn: () =>
+      parseMitaDrawDetail(
+        `<div class="entry-content">NIKE MIND 001 ￥13,200(税込) 抽選応募期間 2026年8月15日(土)0:00am～2026年8月18日(火)19:00pm</div>`
+      ).deadline?.toISOString().slice(0, 10),
+    want: "2026-08-18",
+  },
+  {
+    name: "mita: 応募期間が無ければ締切なし（載せない側に倒す）",
+    fn: () => parseMitaDrawDetail(`<div class="entry-content">NIKE MIND 001 ￥13,200(税込)</div>`).deadline,
+    want: null,
+  },
+  {
+    name: "mita: 来店抽選は店頭と見分ける",
+    fn: () =>
+      parseMitaDrawDetail(
+        `<div class="entry-content">来店抽選受付 抽選応募期間 2026年8月15日(土)0:00am～2026年8月18日(火)19:00pm</div>`
+      ).inStore,
+    want: true,
   },
 ];
 

@@ -11,6 +11,79 @@ export async function fetchHtml(url: string): Promise<string> {
   return res.text();
 }
 
+/**
+ * 文字コードを見てから復号する fetch。**Shift_JIS で配信している一次ストア用**。
+ *
+ * `res.text()` は Content-Type に charset が無いと UTF-8 と決め打ちするので、
+ * タカラトミーモール（Shift_JIS・charset はHTML内の meta にしか無い）を素の fetchHtml で
+ * 取ると商品名が全部「???????」になる（実測 2026-08-18: 文字化けした一覧が丸ごと取れて
+ * しまい、fetch は成功・件数も正常に見えた＝**壊れたまま静かに通る**型）。
+ *
+ * ヘッダ → HTML先頭の meta charset の順に見て、読めない指定なら UTF-8 に落とす。
+ */
+export async function fetchHtmlDetectCharset(url: string): Promise<string> {
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  if (!res.ok) {
+    throw new Error(`fetch failed: ${url} (${res.status})`);
+  }
+  const buf = Buffer.from(await res.arrayBuffer());
+  const fromHeader = (res.headers.get("content-type") ?? "").match(/charset=["']?([\w-]+)/i)?.[1];
+  // meta は必ず HTML 先頭にあるので、latin1 で先頭だけ覗いて探す（本文の復号はこの後）。
+  const fromMeta = buf.subarray(0, 3000).toString("latin1").match(/charset=["']?([\w-]+)/i)?.[1];
+  const label = (fromHeader ?? fromMeta ?? "utf-8").toLowerCase().replace(/^x-/, "").replace(/^sjis$/, "shift_jis");
+  try {
+    return new TextDecoder(label).decode(buf);
+  } catch {
+    return buf.toString("utf8");
+  }
+}
+
+/**
+ * 「◯年◯月発売予定」しか分からない予定の eventDate を決める。
+ *
+ * 月精度の予定は並べ替え・月ページのために月初を持たせるのが慣例だが、**当月の途中で
+ * 巡回すると月初はもう過去**で、表示側の「過ぎたイベントは出さない」（eventDate >= today）
+ * に引っかかって**今月これから出る商品が丸ごと消える**。実測 2026-08-18: ガシャポンの
+ * 8月分は「8月第3週より順次」＝これからなのに、月初(8/1)を入れると全部非表示になった。
+ *
+ * → 月初がまだ来ていなければ月初を返す。既に過ぎていれば **null**（日付未定）を返し、
+ *   eventDateText（"2026年8月発売予定"）だけで見せる。**その月のどこかの日を作らない。**
+ */
+export function monthPlanDate(year: number, month1: number, today: Date): Date | null {
+  const first = calDate(year, month1, 1);
+  return first.getTime() >= today.getTime() ? first : null;
+}
+
+/** Shopify ストアの商品JSON（/collections/<handle>/products.json）。 */
+export type ShopifyProduct = {
+  id: number;
+  title: string;
+  handle: string;
+  product_type: string;
+  published_at: string;
+  tags: string[];
+  images: { src: string }[];
+  variants: { price: string; available: boolean }[];
+};
+
+/**
+ * Shopify の公開商品JSONを読む。HTMLの class 名を追いかけるより壊れにくく、
+ * 価格・在庫・タグ・画像が構造化されたまま取れる（テーマ変更で消えない）。
+ */
+export async function fetchShopifyProducts(
+  storeUrl: string,
+  collection: string,
+  limit = 250
+): Promise<ShopifyProduct[]> {
+  const url = `${storeUrl}/collections/${collection}/products.json?limit=${limit}`;
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  if (!res.ok) {
+    throw new Error(`fetch failed: ${url} (${res.status})`);
+  }
+  const data = (await res.json()) as { products?: ShopifyProduct[] };
+  return data.products ?? [];
+}
+
 // 日付は「時刻を持たない暦日」として UTC 0時で作る。
 // ローカル時刻(JST)で作ると、UTCで動く本番サーバーで1日ズレて表示されるため。
 function calDate(y: number, month1: number, d: number): Date {
