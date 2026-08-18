@@ -198,7 +198,24 @@ const NON_IDENTITY_TOKEN =
  * （実測 2026-08-16: カード抽選12件がこれ。同じ商品が別ソースからは画像付きで載っていた）。
  */
 export function searchQueryName(title: string): string {
-  return title
+  let s = title;
+  // ① **末尾の括弧が販売条件だけを言っているなら、括弧ごと落とす。**
+  //
+  //   以前は括弧の中の**語だけ**を消していたので、
+  //   「…「メガブレイブ」（再販・おひとり様1BOXまで）」→「…「メガブレイブ」 ・おひとり様 まで）」
+  //   という**壊れた断片**が検索語に残り、楽天に投げても商品に当たらなかった
+  //   （実測 2026-08-18: 店舗別トレカ抽選18件が画像ゼロ。括弧を丸ごと落とすと当たる）。
+  //
+  //   閉じ括弧が無い形も拾う。収集元（店のX投稿）でタイトルが途中で切れ、
+  //   「（事前抽選による」「（お1人様」のまま入っていることが実際にある。
+  //   **末尾に限る**のが肝で、商品名の途中の括弧（「ちいかわ（ハチワレ）」等）は触らない。
+  for (let i = 0; i < 3; i++) {
+    const m = s.match(/[（(]([^（()）]*)[)）]?\s*$/);
+    if (m?.index === undefined || !SALE_CONDITION_RE.test(m[1])) break;
+    s = s.slice(0, m.index).trim();
+  }
+  // ② 括弧に入っていない販売条件の語も落とす。
+  return s
     .replace(
       /[（(【\[]?\s*(再販分|再販|再入荷分|再入荷|追加入荷分|追加入荷|購入権抽選|購入権チケット|購入権|抽選販売|予約販売|数量限定|1BOX|1box)\s*[)）】\]]?/g,
       " "
@@ -206,6 +223,14 @@ export function searchQueryName(title: string): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
+/**
+ * 括弧の中身が「その店の売り方」だけを言っているか（＝商品の同一性に関係しない）。
+ * 商品名の一部である括弧を巻き込まないよう、**販売条件でしか使われない語**に限る
+ * （「限定」は「【限定販売】ねんどろいど…」のように商品名側にも出るので入れない）。
+ */
+const SALE_CONDITION_RE =
+  /再販|再入荷|追加入荷|購入権|抽選|予約|お一人様|おひとり様|おひとりさま|お1人様|1人\d|[0-9]+\s*(?:BOX|box|個|点|パック)まで|税込|税抜|現金|シュリンク|開封|事前|先着|購入制限|数量限定/;
 
 // 対象商品そのものではなく「その商品の付属品」を売る出品（画像が別物になる）。
 const ACCESSORY_RE = /スリーブ|プロテクター|ローダー|バインダー|デッキケース|収納ケース|保護|ホルダー|ポスター専用/;
@@ -250,6 +275,51 @@ export function productNameMatches(query: string, candidate: string): boolean {
     return false;
   }
   return true;
+}
+
+/**
+ * 商品を一意に指す型番（`OP-17` / `ST-30` / `SV11B`）。
+ * 商品名の**長さ**では特定性を測れない（「ONE PIECE カードゲーム」は長いが作品名でしかない）。
+ */
+export function identityCodes(name: string): string[] {
+  const t = name.normalize("NFKC").toLowerCase();
+  return [...new Set((t.match(/[a-z]{2,5}-?\d{1,3}(?![a-z0-9])/g) ?? []).map((c) => c.replace("-", "")))];
+}
+
+/**
+ * **同じ画像を共有してよい行はどれか**（商品名の集合 → 行ごとの可否）。
+ *
+ * 画像を付ける側（scripts/backfillImages.ts）と、付いた結果を検査する側
+ * （scripts/audit.ts の image_shared）の**唯一の定義**。以前は同じ趣旨の式が
+ * 両方に別々に書かれていて、付ける側だけ直した瞬間に**正しい付与を検査が誤報した**
+ * （実測 2026-08-18: ONE PIECE【OP-17】8件・ストームエメラルダ4件が ERROR）。
+ * [[System/rules]] 観点K「機能を広げたら、その機能を見ている検査も同時に開く」の再発なので、
+ * 置き場所を1つにして構造的に起きないようにする。
+ *
+ * 判定:
+ *  ・比較の前に `searchQueryName` で**店の売り方**（「（お1人様1BOX）」等）を落とす。
+ *    条件込みで比べるとどの2つも互いに含まない＝別商品と判定される。
+ *  ・全員の名前を含む「代表名（hub）」が無ければ全員 false（＝バナーか、別商品同士）。
+ *  ・hub が型番を持つなら、**その型番を持つ行だけ** true（作品名しか無い行を弾く唯一の根拠。
+ *    実測: OP-17 の箱写真に、12月のプレバン限定品「ONE PIECE カードゲーム」が紛れ込んだ）。
+ *  ・hub が型番を持たないなら、**全ペア一致を要求**する（緩めない）。
+ */
+export function keepableSameProduct(rawNames: string[]): boolean[] {
+  const names = rawNames.map((n) => searchQueryName(n));
+  const hub = names.find((h) => names.every((n) => productNameMatches(n, h)));
+  if (hub === undefined) return names.map(() => false);
+
+  const codes = identityCodes(hub);
+  if (codes.length === 0) {
+    const allPairs = names.every((a, i) =>
+      names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a))
+    );
+    return names.map(() => allPairs);
+  }
+  return names.map((n) => {
+    const mine = identityCodes(n);
+    return codes.every((c) => mine.includes(c));
+  });
 }
 
 export type ListedProduct = { name: string; image: string; url: string };

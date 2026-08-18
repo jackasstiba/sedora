@@ -41,7 +41,7 @@ import {
   pickMeta,
   pickPageImage,
   parseRakutenItemList,
-  productNameMatches,
+  keepableSameProduct,
   searchQueryName,
   type ImageCandidate,
 } from "../src/scrapers/imagePick";
@@ -183,6 +183,29 @@ type Found = { id: number; source: string; title: string; cand: ImageCandidate }
  *  本人から「更新した時も画像がないのが更新されたな」と指摘）。
  * 人が2つ目のコマンドを覚えていることに依存させない。
  */
+/**
+ * 同じ画像を取り合っている行が「同じ商品」か。
+ *
+ * **判定は「店の売り方」を落としてから行う。** 店舗別のトレカ抽選は、同じ商品を
+ * 「（お1人様1BOX）」「（5,760円税込・現金払いのみ）」「（再販・おひとり様1BOXまで）」と
+ * 各店の条件付きで出す。条件込みで比べるとどの2つも互いに含まない＝別商品と判定され、
+ * **同じ商品の正しい写真を9件まとめて捨てていた**（実測 2026-08-18・ONE PIECE【OP-17】）。
+ *
+ * ⚠️ この判定は**1周目と2周目（バナー落ちの再探索後）の両方**で必要で、以前は同じ式が
+ * 2箇所に書かれていた。片方だけ直しても症状は消えない（実際に消えなかった）ので、
+ * 定義はここ1つに保つこと。
+ */
+/**
+ * 同じ画像を取り合っているグループから、**その画像を渡してよい行だけ**を返す。
+ * 判定そのものは `keepableSameProduct`（src/scrapers/imagePick.ts）＝**検査side（audit の
+ * image_shared）と共有する唯一の定義**。ここに式を書き戻さないこと（書き戻すと、片方だけ
+ * 直したときに正しい付与を検査が誤報する型が再発する）。
+ */
+function keepableInGroup(group: Found[]): Found[] {
+  const keep = keepableSameProduct(group.map((f) => cleanListTitle(f.source, f.title)));
+  return group.filter((_, i) => keep[i]);
+}
+
 export async function runImageBackfill(): Promise<void> {
   await main();
 }
@@ -261,7 +284,11 @@ async function main() {
       if (!alreadyTried) {
         const html = await fetchText(rakutenSearchUrl(query));
         await sleep(RATE_MS);
-        if (html) cand = pickListedImage(html, name);
+        // **一致判定にも `query`（販売条件を落とした名前）を渡す。**
+        // 検索は掃除した名前で投げているのに突合だけ元の名前でやっていたので、
+        // 「おひとり様」「税込」「シュリンク」のような**店の売り方の語**が候補名に無い＝不一致、
+        // となって正しい商品の画像まで捨てていた（実測 2026-08-18: card_chusen 18件）。
+        if (html) cand = pickListedImage(html, query);
       }
     }
 
@@ -304,6 +331,9 @@ async function main() {
   const byUrl = new Map<string, Found[]>();
   for (const f of found) (byUrl.get(f.cand.url) ?? byUrl.set(f.cand.url, []).get(f.cand.url)!).push(f);
   const rejected = new Set<string>();
+  // **行単位の不採用**。同じ画像に解決した行の中に、1行だけ別商品が混ざることがあるので、
+  // URL単位（rejected）だけでは「全員通す or 全員落とす」しか選べない（keepableInGroup 参照）。
+  const rejectedIds = new Set<number>();
   for (const [url, group] of byUrl) {
     if (group.length <= SHARED_IMAGE_MAX) continue;
     // バナーは検索由来ではない経路（og:image/本文画像）で出る。こちらは無条件に不採用。
@@ -316,11 +346,9 @@ async function main() {
     const keys = group.map((f) => f.cand.key);
     if (keys.every((k) => k && k === keys[0])) continue;
 
-    const names = group.map((f) => cleanListTitle(f.source, f.title));
-    const sameProduct = names.every((a, i) =>
-      names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a))
-    );
-    if (!sameProduct) rejected.add(url);
+    const keep = new Set(keepableInGroup(group).map((f) => f.id));
+    for (const f of group) if (!keep.has(f.id)) rejectedIds.add(f.id);
+    if (keep.size === 0) rejected.add(url);
   }
 
   // ④ バナーとして落ちた行を、**ページ画像を飛ばして**もう一度探す。
@@ -352,10 +380,14 @@ async function main() {
         rejected.delete(url);
         continue;
       }
-      const names = group.map((f) => cleanListTitle(f.source, f.title));
-      const same = names.every((a, i) => names.every((b, j) => i === j || productNameMatches(a, b) || productNameMatches(b, a)));
       const bannerRoute = group.some((f) => f.cand.via !== "jan" && f.cand.via !== "listed");
-      if (same && !bannerRoute) rejected.delete(url);
+      const keep = bannerRoute ? [] : keepableInGroup(group);
+      const keepIds = new Set(keep.map((f) => f.id));
+      for (const f of group) {
+        if (keepIds.has(f.id)) rejectedIds.delete(f.id);
+        else rejectedIds.add(f.id);
+      }
+      if (keep.length) rejected.delete(url);
       else rejected.add(url);
     }
   }
@@ -363,7 +395,7 @@ async function main() {
   let updated = 0;
   let dead = 0;
   for (const f of found) {
-    if (rejected.has(f.cand.url)) continue;
+    if (rejected.has(f.cand.url) || rejectedIds.has(f.id)) continue;
     const url = await verifyImage(f.cand.url);
     if (!url) {
       dead++;

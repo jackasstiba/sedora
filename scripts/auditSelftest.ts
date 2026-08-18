@@ -67,6 +67,8 @@ import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawa
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
+import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
+import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
 import { cleanListTitle, hasProductSegment } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
@@ -1627,6 +1629,93 @@ const cases: Case[] = [
         `<div class="entry-content">来店抽選受付 抽選応募期間 2026年8月15日(土)0:00am～2026年8月18日(火)19:00pm</div>`
       ).inStore,
     want: true,
+  },
+
+  // ── 画像の後付け: 検索語から「店の売り方」を落とす（2026-08-18） ─────────────
+  // 括弧の中の語だけを消していたので壊れた断片が残り、楽天に投げても当たらなかった。
+  {
+    name: "画像検索語: 末尾の「（再販・おひとり様1BOXまで）」を括弧ごと落とす",
+    fn: () => imgSearchQueryName("ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」（再販・おひとり様1BOXまで）"),
+    want: "ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」",
+  },
+  {
+    name: "画像検索語: 「1BOX（5,760円税込・現金払いのみ）」も落とす",
+    fn: () => imgSearchQueryName("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）"),
+    want: "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】",
+  },
+  {
+    // 収集元（店のX投稿）でタイトルが切れ、閉じ括弧が無いまま入っていることがある。
+    name: "画像検索語: 閉じ括弧が無い「（事前抽選による」も落とす",
+    fn: () => imgSearchQueryName("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】（事前抽選による"),
+    want: "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】",
+  },
+  {
+    // **商品名の一部である括弧は触らない**（触ると別商品を指す名前になる）。
+    name: "画像検索語: 商品名の括弧（ハチワレ）は残す",
+    fn: () => imgSearchQueryName("ちいかわ ひっかけぬいぐるみ（ハチワレ）"),
+    want: "ちいかわ ひっかけぬいぐるみ（ハチワレ）",
+  },
+  {
+    name: "画像検索語: 「限定」は商品名側にも出るので括弧を落とす理由にしない",
+    fn: () => imgSearchQueryName("ねんどろいど ホロライブ（限定カラー）"),
+    want: "ねんどろいど ホロライブ（限定カラー）",
+  },
+
+  // 同じ画像に解決した行を「行ごと」に分ける根拠＝型番（2026-08-18）。
+  // 名前の長さでは特定性を測れない（「ONE PIECE カードゲーム」は長いが作品名でしかない）。
+  {
+    name: "型番: 【OP-17】を型番として拾う",
+    fn: () => identityCodes("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】").join(","),
+    want: "op17",
+  },
+  {
+    name: "型番: 短い名前でも型番があれば同じ商品と分かる",
+    fn: () => identityCodes("世界最強の戦士【OP-17】").join(","),
+    want: "op17",
+  },
+  {
+    // これが混ざっていたせいで、正しい8行の写真まで道連れで捨てていた。
+    name: "型番: 作品名だけの名前には型番が無い",
+    fn: () => identityCodes("ONE PIECE カードゲーム").length,
+    want: 0,
+  },
+
+  // 付ける側と検査側で共有する唯一の定義（両方に式を書いて片方だけ直した事故の再発防止）。
+  {
+    // 店の売り方が違うだけの同一商品＋短い別ソース名。全員に画像を渡してよい。
+    name: "同一商品: 型番が揃っていれば売り方の違いは無視して全員採用",
+    fn: () =>
+      keepableSameProduct([
+        "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】（お1人様1BOX）",
+        "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）",
+        "世界最強の戦士【OP-17】",
+      ]).join(","),
+    want: "true,true,true",
+  },
+  {
+    // **作品名しか無い行だけ**を落とす（12月のプレバン限定品が OP-17 の箱写真を借りていた）。
+    name: "同一商品: 作品名だけの行は型番が無いので落とす",
+    fn: () =>
+      keepableSameProduct([
+        "ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】（お1人様1BOX）",
+        "世界最強の戦士【OP-17】",
+        "ONE PIECE カードゲーム",
+      ]).join(","),
+    want: "true,true,false",
+  },
+  {
+    name: "同一商品: 型番が無い商品名は全ペア一致を要求（緩めない）",
+    fn: () =>
+      keepableSameProduct([
+        "ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」（再販・おひとり様1BOXまで）",
+        "ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」（8月下旬再販分）",
+      ]).join(","),
+    want: "true,true",
+  },
+  {
+    name: "同一商品: 別商品どうしが同じ画像なら全員不採用（バナー）",
+    fn: () => keepableSameProduct(["ちいかわ マスコット", "ガンダム デカール"]).join(","),
+    want: "false,false",
   },
 ];
 

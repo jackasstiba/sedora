@@ -42,7 +42,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
-import { isGenericImageUrl, productNameMatches } from "../src/scrapers/imagePick";
+import { isGenericImageUrl, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs } from "../src/lib/seo";
@@ -1508,8 +1508,12 @@ async function main() {
         // どれも記事内コード 4582770058406 で、正しく同じ商品の写真だった）。
         // タイトルは実況文なので、文字列としては一致しない＝ここを見ないと誤報になる。
         if (/(?<![0-9])4[0-9]{12}(?![0-9])/.test(u)) return false;
-        const names = a.map((r) => cleanListTitle(r.source, r.title));
-        return !names.every((x, i) => names.every((y, j) => i === j || productNameMatches(x, y) || productNameMatches(y, x)));
+        // 同一商品かは **付ける側と同じ定義**（keepableSameProduct）で見る。
+        // ここに式を書き直すと、片方だけ直したときに正しい付与を誤報する
+        // （実測 2026-08-18: 店の売り方を落とさずに比べていたので、OP-17 の8件・
+        //  ストームエメラルダの4件という**正しい付与**が ERROR になった）。
+        const keep = keepableSameProduct(a.map((r) => cleanListTitle(r.source, r.title)));
+        return keep.some((ok) => !ok);
       })
       .map(([u, a]) => `${a.length}件が同じ画像: ${u.slice(0, 80)}（${a[0].source} #${a[0].id} 他）`);
     report("image_shared", "別商品なのに同じ画像が3件以上で使い回されている", "error", shared, baseline, withImg.length);
