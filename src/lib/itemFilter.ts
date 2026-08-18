@@ -2,7 +2,13 @@
 // prisma を import しないこと（クライアントバンドルに載せるため）。
 import { isStalePlan, plannedDateFromText, todayJst } from "./date";
 import { parseYen } from "./margin";
-import { parseStoresJson, soonestOpenDeadline, summarizeStores, type StoreEntry } from "./stores";
+import {
+  parseStoresJson,
+  soonestOpenDeadline,
+  storeDayMs,
+  summarizeStores,
+  type StoreEntry,
+} from "./stores";
 import { cleanListTitle, hasProductSegment } from "./title";
 
 export type ItemStatus = "reserve" | "lottery" | "release" | "now";
@@ -94,11 +100,20 @@ export function sourceLabel(source: string): string {
  * 日本語にならない見出しが出る（実測・詳細ページで表示されていた）。
  * 「〜中」「〜予定」で終わる種別には「日」を付けない。
  */
-export function eventDateHeading(eventType: string, eventDateText?: string | null): string {
+export function eventDateHeading(
+  eventType: string,
+  eventDateText?: string | null,
+  past?: boolean,
+): string {
   // その日付が何の日なのかは、まず**収集元の文言**で決まる。プレミアムバンダイの
   // 「2026年10月発送予定」は予約日でも発売日でもなく発送月なので、eventType から
   // 「予約日」と機械的に作ると、10月に予約が始まるように読める（実測でそう出ていた）。
   if (eventDateText && /発送予定/.test(eventDateText)) return "発送予定";
+  // 日付が過ぎているのに見出しが「予定」のままだと、同じページのバッジ
+  // （displayEventType が「登場済み」に倒す）と真っ向から矛盾する。
+  // 実測 2026-08-18: sitemap掲載 2846件中 **222件** がこの状態だった（全て eventType="登場予定"）。
+  // past は date.ts の isEventPast で判定した結果を渡すこと（判定を二重に書かない）。
+  if (past && /予定$/.test(eventType)) return `${eventType.replace(/予定$/, "")}日`;
   return /(?:中|予定)$/.test(eventType) ? eventType : `${eventType}日`;
 }
 
@@ -493,6 +508,54 @@ function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
 }
 
 /**
+ * **同じ応募ページを指す同一ソースの行**が、商品名の書き方だけ違って2枚並ぶのを解消する。
+ *
+ * 実測（2026-08-18 観点B）: `/items/75445` と `/items/75446` は **url も stores も完全に同一**
+ * （Joshinアプリ・〜8/17 23:59）で、片方の商品名がもう片方に丸ごと含まれていた。トップの
+ * 1画面目に2枚並ぶので「**応募先が2つある**」と誤読する（＝1つの応募を2回できると思わせる）。
+ *
+ * **畳んでよいのは包含関係のあるものだけ。** 同じ応募ページURLを複数行が指すのは実測で
+ * 13組あるが、その大半は**1つの応募ページで複数商品を同時抽選する正当なケース**だった
+ * （例: 1つの店舗ページで「メガブレイブ」「メガシンフォニア」「スタートデッキ100」を同時受付）。
+ * 名前が包含関係にあるとき（"…プロトロ" ⊂ "…プロトロ LOTR"）だけが「同じ商品の書き分け」で、
+ * それ以外は別商品なので触らない。この条件で本番2177件を通すと**畳む対象は1組だけ**＝
+ * 誤マージの余地がほとんど無い形になっている。
+ *
+ * 既存の `dedupeSameProductUrlCrossSource` が届かない理由は2つ:
+ *   ①あちらは**別ソース同士**しか畳まない（同一ソースは温存する設計）
+ *   ②あちらの突合キーは「個別商品ページURL」に限られ、店舗の応募ページ（`/lottery` 等）は対象外
+ *
+ * 安全弁: **stores が完全一致**（両方 null も含む）かつ**同じ暦日**のものだけ。応募先の集合が
+ * 違うなら、それは畳むと情報が消える別の行。残すのは**より具体的な（長い）名前の方**
+ * ＝短い方は書きかけ・総称で、情報量が少ない側。
+ */
+function dedupeSameSourceSameUrlContained<T extends DedupeItem>(items: T[]): T[] {
+  const groups = new Map<string, T[]>();
+  for (const it of items) {
+    if (!it.url) continue;
+    const day = it.eventDate ? dayISO(it.eventDate) : "none";
+    const k = `${it.source}|${it.url}|${it.stores ?? "none"}|${day}`;
+    (groups.get(k) ?? groups.set(k, []).get(k)!).push(it);
+  }
+  const drop = new Set<number>();
+  for (const g of groups.values()) {
+    if (g.length < 2) continue;
+    const named = g.map((it) => ({ it, key: dedupeKey(cleanListTitle(it.source, it.title)) }));
+    for (const a of named) {
+      if (a.key.length < 8) continue; // 短い名前の偶発一致で別商品を潰さない
+      for (const b of named) {
+        if (a.it.id === b.it.id || drop.has(a.it.id) || drop.has(b.it.id)) continue;
+        // b の名前が a に丸ごと含まれる＝b は a の書きかけ/総称。a を残して b を落とす。
+        if (a.key === b.key || !a.key.includes(b.key)) continue;
+        inheritEnrichment(a.it, b.it);
+        drop.add(b.it.id);
+      }
+    }
+  }
+  return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
+}
+
+/**
  * 同じ収集元の「まとめ記事」由来の行が、**同じ表示名で複数**並ぶのを解消する。
  *
  * 2026-08-18 実測: 抽選まとめの巡回範囲を8ページ→終端（17ページ）に広げたら、
@@ -690,10 +753,12 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
   return dropUndatedMirrorPosts(dropStalePlans(dropNonProductPosts(
     dedupeSameSourceSameName(
       dedupeSneakerCrossSource(
-        dedupeSameSourceExact(
-          dedupeWordOrderCrossSource(
-            dedupeCrossSource(
-              dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(applyLiveStoreDeadline(items)))
+        dedupeSameSourceSameUrlContained(
+          dedupeSameSourceExact(
+            dedupeWordOrderCrossSource(
+              dedupeCrossSource(
+                dedupeSameProductUrlCrossSource(dedupeIdenticalTitle(applyLiveStoreDeadline(items)))
+              )
             )
           )
         )
@@ -701,6 +766,54 @@ export function dedupeItems<T extends DedupeItem>(items: T[]): T[] {
       todayJst()
     )
   )));
+}
+
+/**
+ * その行の**応募期間**（受付開始〜最後の締切）。月ページの所属を決めるのに使う。
+ *
+ * なぜ1点（eventDate）では足りないか（実測 2026-08-18）: 応募先(stores)を持つ行は
+ * 1行が「143店・8/15〜9/2」という**幅**を持つ。DBの eventDate は**最後の締切**で、
+ * 画面に出る日付は `applyLiveStoreDeadline` が today から作り直した**最短の締切**。
+ * その結果、9月の月ページに「8/16」と書かれたカードが載っていた（実測3件/628件）。
+ * 幅のあるものを1点として扱っている限り、どちらの月に置いても嘘になる。
+ *
+ * **表示日だけで絞ってはいけない**: 上の例を「表示日が8月だから8月ページへ」と動かすと、
+ * 9月ページから消える一方で、8月ページのSQL（eventDate が8月）にも入らない
+ * ＝**どちらの月にも出ない穴**が空く。だから所属は「**期間が月と重なるか**」で決める。
+ */
+export function itemPeriodMs(it: {
+  eventDate: Date | string | null;
+  stores?: string | null;
+}): { start: number; end: number } | null {
+  const days: number[] = [];
+  if (it.eventDate) days.push(dayMs(it.eventDate));
+  const stores = it.stores ? parseStoresJson(it.stores) : null;
+  if (stores) days.push(...storeDayMs(stores));
+  if (!days.length) return null;
+  const end = Math.max(...days);
+  // 幅は締切から遡って MAX_PERIOD_DAYS 日までに丸める。実測（2026-08-18）では
+  // 期間を持つ311件のうち **296件が7日以内**で、残りのごく少数だけが3〜9ヶ月に広がる
+  // ＝それは1本の抽選ではなく、**何回もの抽選をまとめたハブ記事**（応募先を溜め込んだ行）。
+  // そのまま扱うと1枚のカードが9ヶ月分の月ページに並ぶ。上限は月ページのSQLが前もって
+  // 見に行く範囲と同じ値にしてある（食い違うと、定義上は載るはずの行がSQLに入らない）。
+  return { start: Math.max(Math.min(...days), end - MAX_PERIOD_DAYS * 86_400_000), end };
+}
+
+/**
+ * 応募期間として扱う最大の幅（日）。月ページのSQLが月の後ろを見に行く日数でもある
+ * （＝1つの値。ここと `getItemsByMonth` がズレると、定義と取得が食い違う）。
+ */
+export const MAX_PERIOD_DAYS = 62;
+
+/** 応募期間が [start, end) と重なるか（＝その月に「応募できる日」があるか）。 */
+export function overlapsRange(
+  it: { eventDate: Date | string | null; stores?: string | null },
+  start: Date,
+  end: Date
+): boolean {
+  const p = itemPeriodMs(it);
+  if (!p) return false;
+  return p.start < end.getTime() && p.end >= start.getTime();
 }
 
 /**

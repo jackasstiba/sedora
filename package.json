@@ -35,7 +35,9 @@
     "db:deploy": "prisma migrate deploy",
     "verify": "npm run lint && tsc --noEmit && npm run build",
     "hooks:install": "git config core.hooksPath .githooks",
-    "deploy:check": "node --env-file-if-exists=.env --import tsx scripts/deployCheck.ts"
+    "deploy:check": "node --env-file-if-exists=.env --import tsx scripts/deployCheck.ts",
+    "x:verify": "node --env-file-if-exists=.env --import tsx scripts/xVerify.ts",
+    "x:post": "node --env-file-if-exists=.env --import tsx scripts/xPost.ts"
   },
   "dependencies": {
     "@libsql/client": "^0.17.4",

@@ -58,6 +58,9 @@ import { parseCardChusen, parseDue, productKey } from "../src/scrapers/cardChuse
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
+import { findCrawlViolations, isCrawlLinted } from "../src/lib/crawlLint";
+import { crawlDecision, lastIsOlderThan } from "../src/scrapers/crawl";
+import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
@@ -109,6 +112,9 @@ const ymd = (d: Date) => d.toISOString().slice(0, 10);
 
 /** 時計lint の呼び出しを短く書くための helper（ファイル名は検査対象になる任意の名前）。 */
 const cl = (src: string) => findClockViolations("src/scrapers/example.ts", src);
+
+/** ページ送りlint の呼び出しを短く書くための helper。 */
+const gl = (src: string) => findCrawlViolations("src/scrapers/example.ts", src);
 
 // 巡回で取り直した prizes（相場なし）に、既存の相場が引き継がれるか。
 // 実測: これが無かったため、付与直後に別件で scrape を回しただけで 67件すべての
@@ -427,6 +433,30 @@ const cases: Case[] = [
     want: "発送予定",
   },
   { name: "発送予定でなければ従来どおり", fn: () => eventDateHeading("抽選", "抽選 8/15"), want: "抽選日" },
+
+  // (b-2) 日付が過ぎたら見出しも「予定」と書かない。バッジ（displayEventType）は
+  //       「登場済み」に倒れるのに見出しだけ「登場予定」のままだと、同じページで矛盾する。
+  //       実測 2026-08-18: sitemap掲載 2846件中 222件がこの状態だった。
+  {
+    name: "登場予定・過去 → 見出しは『登場日』（バッジの登場済みと矛盾しない）",
+    fn: () => eventDateHeading("登場予定", null, true),
+    want: "登場日",
+  },
+  {
+    name: "登場予定・未来 → 見出しは『登場予定』のまま",
+    fn: () => eventDateHeading("登場予定", null, false),
+    want: "登場予定",
+  },
+  {
+    name: "過去でも『発送予定』は据え置き（発送月は予定のままが正しい）",
+    fn: () => eventDateHeading("予約", "2026年10月発送予定", true),
+    want: "発送予定",
+  },
+  {
+    name: "バッジと見出しが同じ過去判定を使う（登場予定・過去）",
+    fn: () => displayEventType("登場予定", null, PAST, today),
+    want: "登場済み",
+  },
 
   // (c) プレバンの発送月が過ぎたら「予約」→「予約終了」（受付中と断定しない新ラベルでも効く）
   { name: "予約・過去 → 表示が予約終了", fn: () => displayEventType("予約", null, PAST, today), want: "予約終了" },
@@ -1716,6 +1746,174 @@ const cases: Case[] = [
     name: "同一商品: 別商品どうしが同じ画像なら全員不採用（バナー）",
     fn: () => keepableSameProduct(["ちいかわ マスコット", "ガンダム デカール"]).join(","),
     want: "false,false",
+  },
+
+  // ── 巡回の窓（2026-08-18・同じ日に3ソースで取りこぼしが出た型） ─────────────
+  // 判定はこの純関数1つに集約してある（crawlPages はこれに従うだけ）。
+  {
+    name: "巡回: 新規が出続けていれば次のページへ",
+    fn: () => crawlDecision({ page: 3, added: 12, reachedOld: false, maxPages: 40 }),
+    want: "continue",
+  },
+  {
+    name: "巡回: 新規が0になったら終端",
+    fn: () => crawlDecision({ page: 3, added: 0, reachedOld: false, maxPages: 40 }),
+    want: "stop",
+  },
+  {
+    name: "巡回: 足切りより古くなったら終端",
+    fn: () => crawlDecision({ page: 3, added: 12, reachedOld: true, maxPages: 40 }),
+    want: "stop",
+  },
+  {
+    // ここが本体。**上限に当たったのにまだ新規が出続けている＝窓が追い越された。**
+    // 黙って半分だけ取り込むと「正常な巡回」に見える（nyuka_now が実際に53%落としていた）。
+    name: "巡回: 上限に当たってもまだ新規がある → 例外（取りこぼしを成功にしない）",
+    fn: () => crawlDecision({ page: 40, added: 12, reachedOld: false, maxPages: 40 }),
+    want: "overrun",
+  },
+  {
+    // 上限に当たっていても、それが**正常な終端**なら赤くしない（暦が進むだけで鳴る検査にしない）。
+    name: "巡回: 上限ちょうどで足切りに達したのは正常な終了",
+    fn: () => crawlDecision({ page: 40, added: 12, reachedOld: true, maxPages: 40 }),
+    want: "stop",
+  },
+  {
+    name: "巡回: ページ末尾が足切りより古い → 古い",
+    fn: () =>
+      lastIsOlderThan((d: Date | null) => d, Date.UTC(2026, 7, 8))([
+        new Date(Date.UTC(2026, 7, 10)),
+        new Date(Date.UTC(2026, 7, 1)),
+      ]),
+    want: true,
+  },
+  {
+    // 日付が読めない要素で巡回を止めない（書式が変わった日にソースが丸ごと縮む）。
+    name: "巡回: ページ末尾の日付が読めないなら止めない",
+    fn: () =>
+      lastIsOlderThan((d: Date | null) => d, Date.UTC(2026, 7, 8))([
+        new Date(Date.UTC(2026, 7, 10)),
+        null,
+      ]),
+    want: false,
+  },
+  {
+    name: "ページ送りlint: 自前のページ送りループを見つける",
+    fn: () =>
+      gl("for (let p = 1; p <= MAX_PAGES; p++) { const html = await fetchHtml(url(p)); }").length,
+    want: 1,
+  },
+  {
+    name: "ページ送りlint: crawlPages 経由なら鳴らない",
+    fn: () => gl('await crawlPages({ urlOf: (p) => url(p), maxPages: 40 });').length,
+    want: 0,
+  },
+  {
+    // 詳細ページを1件ずつ取りに行くループは「ページ送り」ではない＝対象外。
+    name: "ページ送りlint: 記事を1件ずつ取るループは対象外",
+    fn: () => gl("for (const it of items) { const html = await fetchHtml(it.url); }").length,
+    want: 0,
+  },
+  {
+    name: "ページ送りlint: crawl.ts 自身は検査対象外",
+    fn: () => isCrawlLinted("src/scrapers/crawl.ts"),
+    want: false,
+  },
+
+  // ── 同じ応募ページ・同じ応募先で、名前の書き方だけ違う2枚（2026-08-18 実測 #75445/#75446） ──
+  {
+    name: "重複: 同じurl・同じstores・同じ日で名前が包含関係 → 具体的な方を残す",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "nike_snkrs", title: "ナイキ エア フォース 1 LOW プロトロ", url: "https://x/y", eventDate: new Date(Date.UTC(2026, 7, 20)), eventType: "抽選" },
+        { id: 2, source: "nike_snkrs", title: "ナイキ エア フォース 1 LOW プロトロ LOTR", url: "https://x/y", eventDate: new Date(Date.UTC(2026, 7, 20)), eventType: "抽選" },
+      ] as never[]);
+      return (rows as { id: number }[]).map((r) => r.id).join(",");
+    },
+    want: "2",
+  },
+  {
+    // **1つの応募ページで複数商品を同時抽選する店は実在する**（実測13組中ほとんどがこれ）。
+    // 名前が包含関係にない＝別商品なので畳んではいけない。
+    name: "重複: 同じurlでも別商品（包含関係なし）は両方残す",
+    fn: () => {
+      const rows = dedupeItems([
+        { id: 1, source: "card_chusen", title: "ポケモンカードゲーム MEGA 拡張パック メガブレイブ", url: "https://shop/lottery", eventDate: new Date(Date.UTC(2026, 7, 21)), eventType: "抽選" },
+        { id: 2, source: "card_chusen", title: "ポケモンカードゲーム MEGA 拡張パック メガシンフォニア", url: "https://shop/lottery", eventDate: new Date(Date.UTC(2026, 7, 21)), eventType: "抽選" },
+      ] as never[]);
+      return (rows as { id: number }[]).length;
+    },
+    want: 2,
+  },
+  {
+    // 応募先が違えば別の応募＝畳むと情報が消える。
+    name: "重複: stores が違えば畳まない",
+    fn: () => {
+      const A = JSON.stringify([{ name: "Aストア", url: "https://a", form: null, when: null, note: null, at: "2026-08-20", kind: "締切" }]);
+      const B = JSON.stringify([{ name: "Bストア", url: "https://b", form: null, when: null, note: null, at: "2026-08-20", kind: "締切" }]);
+      const rows = dedupeItems([
+        { id: 1, source: "nyuka_now", title: "ポケモンカード メガブレイブ", url: "https://x/y", stores: A, eventDate: new Date(Date.UTC(2026, 7, 20)), eventType: "抽選" },
+        { id: 2, source: "nyuka_now", title: "ポケモンカード メガブレイブ BOX", url: "https://x/y", stores: B, eventDate: new Date(Date.UTC(2026, 7, 20)), eventType: "抽選" },
+      ] as never[]);
+      return (rows as { id: number }[]).length;
+    },
+    want: 2,
+  },
+
+  // ── 月ページの所属は「応募期間が月と重なるか」（2026-08-18 実測3件/628件） ─────
+  {
+    name: "月ページ: 応募期間が8/22〜9/2 の行は9月と重なる",
+    fn: () => {
+      const stores = JSON.stringify([
+        { name: "A", url: null, form: null, when: null, note: null, at: "2026-08-22", kind: "締切" },
+        { name: "B", url: null, form: null, when: null, note: null, at: "2026-09-02", kind: "締切" },
+      ]);
+      return overlapsRange(
+        { eventDate: new Date(Date.UTC(2026, 8, 2)), stores },
+        new Date(Date.UTC(2026, 8, 1)),
+        new Date(Date.UTC(2026, 9, 1))
+      );
+    },
+    want: true,
+  },
+  {
+    // **8月にも出る**のが要点。表示日だけで動かすと「8月にも9月にも出ない」穴が空く。
+    name: "月ページ: 同じ行は8月とも重なる（どちらの月からも見つかる）",
+    fn: () => {
+      const stores = JSON.stringify([
+        { name: "A", url: null, form: null, when: null, note: null, at: "2026-08-22", kind: "締切" },
+        { name: "B", url: null, form: null, when: null, note: null, at: "2026-09-02", kind: "締切" },
+      ]);
+      return overlapsRange(
+        { eventDate: new Date(Date.UTC(2026, 8, 2)), stores },
+        new Date(Date.UTC(2026, 7, 1)),
+        new Date(Date.UTC(2026, 8, 1))
+      );
+    },
+    want: true,
+  },
+  {
+    name: "月ページ: 期間がかからない月には出さない",
+    fn: () =>
+      overlapsRange(
+        { eventDate: new Date(Date.UTC(2026, 8, 2)), stores: null },
+        new Date(Date.UTC(2026, 6, 1)),
+        new Date(Date.UTC(2026, 7, 1))
+      ),
+    want: false,
+  },
+  {
+    // 応募先を何ヶ月分も溜め込んだハブ記事を、そのまま9ヶ月分の月ページに並べない。
+    name: "月ページ: 期間の幅は締切から62日までに丸める",
+    fn: () => {
+      const stores = JSON.stringify([
+        { name: "古", url: null, form: null, when: null, note: null, at: "2026-01-10", kind: "締切" },
+        { name: "新", url: null, form: null, when: null, note: null, at: "2026-08-20", kind: "締切" },
+      ]);
+      const p = itemPeriodMs({ eventDate: new Date(Date.UTC(2026, 7, 20)), stores })!;
+      return Math.round((p.end - p.start) / 86_400_000);
+    },
+    want: 62,
   },
 ];
 

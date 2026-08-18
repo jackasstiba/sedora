@@ -1,0 +1,80 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 640" width="1080" height="640">
+  <defs><clipPath id="clip-La"><circle cx="210" cy="180" r="120"/></clipPath><clipPath id="clip-Lb"><circle cx="540" cy="180" r="120"/></clipPath><clipPath id="clip-Lc"><circle cx="870" cy="180" r="120"/></clipPath><clipPath id="clip-a40048"><circle cx="154" cy="458" r="24"/></clipPath><clipPath id="clip-a40032"><circle cx="236" cy="450" r="16"/></clipPath><clipPath id="clip-b40048"><circle cx="484" cy="458" r="24"/></clipPath><clipPath id="clip-b40032"><circle cx="566" cy="450" r="16"/></clipPath><clipPath id="clip-c40048"><circle cx="814" cy="458" r="24"/></clipPath><clipPath id="clip-c40032"><circle cx="896" cy="450" r="16"/></clipPath><clipPath id="clip-a52048"><circle cx="154" cy="578" r="24"/></clipPath><clipPath id="clip-a52032"><circle cx="236" cy="570" r="16"/></clipPath><clipPath id="clip-b52048"><circle cx="484" cy="578" r="24"/></clipPath><clipPath id="clip-b52032"><circle cx="566" cy="570" r="16"/></clipPath><clipPath id="clip-c52048"><circle cx="814" cy="578" r="24"/></clipPath><clipPath id="clip-c52032"><circle cx="896" cy="570" r="16"/></clipPath></defs>
+  <rect width="1080" height="640" fill="#ffffff"/>
+  <g clip-path="url(#clip-La)"><g transform="translate(90,60) scale(7.5)"><defs><linearGradient id="gLa" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gLa)"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g><text x="210" y="342" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#1c1917" text-anchor="middle">A</text><g clip-path="url(#clip-Lb)"><g transform="translate(420,60) scale(7.5)"><defs><linearGradient id="gLb" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gLb)"/>
+    <circle cx="16" cy="16" r="10.8" fill="none" stroke="#fff" stroke-width="0.55" opacity="0.30"/>
+    <circle cx="16" cy="16" r="13.6" fill="none" stroke="#fff" stroke-width="0.45" opacity="0.17"/>
+    <g transform="translate(16,16) scale(0.72) translate(-16,-16)"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g></g><text x="540" y="342" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#1c1917" text-anchor="middle">B</text><g clip-path="url(#clip-Lc)"><g transform="translate(750,60) scale(7.5)"><defs><linearGradient id="gLc" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="#1c1917"/>
+    <circle cx="16" cy="16" r="13.2" fill="none" stroke="url(#gLc)" stroke-width="0.5" opacity="0.45"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="url(#gLc)"/></g></g><text x="870" y="342" font-family="Arial,sans-serif" font-size="30" font-weight="bold" fill="#1c1917" text-anchor="middle">C</text><rect x="0" y="400" width="1080" height="120" fill="#ffffff"/><text x="40" y="430" font-family="Arial,sans-serif" font-size="17" fill="#57534e">timeline / light</text><g clip-path="url(#clip-a40048)"><g transform="translate(130,434) scale(1.5)"><defs><linearGradient id="ga40048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#ga40048)"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g><text x="154" y="502" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">48px</text><g clip-path="url(#clip-a40032)"><g transform="translate(220,434) scale(1)"><defs><linearGradient id="ga40032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#ga40032)"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g><text x="236" y="486" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">32px</text><g clip-path="url(#clip-b40048)"><g transform="translate(460,434) scale(1.5)"><defs><linearGradient id="gb40048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gb40048)"/>
+    <circle cx="16" cy="16" r="10.8" fill="none" stroke="#fff" stroke-width="0.55" opacity="0.30"/>
+    <circle cx="16" cy="16" r="13.6" fill="none" stroke="#fff" stroke-width="0.45" opacity="0.17"/>
+    <g transform="translate(16,16) scale(0.72) translate(-16,-16)"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g></g><text x="484" y="502" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">48px</text><g clip-path="url(#clip-b40032)"><g transform="translate(550,434) scale(1)"><defs><linearGradient id="gb40032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gb40032)"/>
+    <circle cx="16" cy="16" r="10.8" fill="none" stroke="#fff" stroke-width="0.55" opacity="0.30"/>
+    <circle cx="16" cy="16" r="13.6" fill="none" stroke="#fff" stroke-width="0.45" opacity="0.17"/>
+    <g transform="translate(16,16) scale(0.72) translate(-16,-16)"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g></g><text x="566" y="486" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">32px</text><g clip-path="url(#clip-c40048)"><g transform="translate(790,434) scale(1.5)"><defs><linearGradient id="gc40048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="#1c1917"/>
+    <circle cx="16" cy="16" r="13.2" fill="none" stroke="url(#gc40048)" stroke-width="0.5" opacity="0.45"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="url(#gc40048)"/></g></g><text x="814" y="502" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">48px</text><g clip-path="url(#clip-c40032)"><g transform="translate(880,434) scale(1)"><defs><linearGradient id="gc40032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="#1c1917"/>
+    <circle cx="16" cy="16" r="13.2" fill="none" stroke="url(#gc40032)" stroke-width="0.5" opacity="0.45"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="url(#gc40032)"/></g></g><text x="896" y="486" font-family="Arial,sans-serif" font-size="13" fill="#57534e" text-anchor="middle">32px</text><rect x="0" y="520" width="1080" height="120" fill="#15202b"/><text x="40" y="550" font-family="Arial,sans-serif" font-size="17" fill="#8b98a5">timeline / dark</text><g clip-path="url(#clip-a52048)"><g transform="translate(130,554) scale(1.5)"><defs><linearGradient id="ga52048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#ga52048)"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g><text x="154" y="622" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">48px</text><g clip-path="url(#clip-a52032)"><g transform="translate(220,554) scale(1)"><defs><linearGradient id="ga52032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#ga52032)"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g><text x="236" y="606" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">32px</text><g clip-path="url(#clip-b52048)"><g transform="translate(460,554) scale(1.5)"><defs><linearGradient id="gb52048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gb52048)"/>
+    <circle cx="16" cy="16" r="10.8" fill="none" stroke="#fff" stroke-width="0.55" opacity="0.30"/>
+    <circle cx="16" cy="16" r="13.6" fill="none" stroke="#fff" stroke-width="0.45" opacity="0.17"/>
+    <g transform="translate(16,16) scale(0.72) translate(-16,-16)"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g></g><text x="484" y="622" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">48px</text><g clip-path="url(#clip-b52032)"><g transform="translate(550,554) scale(1)"><defs><linearGradient id="gb52032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="url(#gb52032)"/>
+    <circle cx="16" cy="16" r="10.8" fill="none" stroke="#fff" stroke-width="0.55" opacity="0.30"/>
+    <circle cx="16" cy="16" r="13.6" fill="none" stroke="#fff" stroke-width="0.45" opacity="0.17"/>
+    <g transform="translate(16,16) scale(0.72) translate(-16,-16)"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#fff"/></g></g></g><text x="566" y="606" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">32px</text><g clip-path="url(#clip-c52048)"><g transform="translate(790,554) scale(1.5)"><defs><linearGradient id="gc52048" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="#1c1917"/>
+    <circle cx="16" cy="16" r="13.2" fill="none" stroke="url(#gc52048)" stroke-width="0.5" opacity="0.45"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="url(#gc52048)"/></g></g><text x="814" y="622" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">48px</text><g clip-path="url(#clip-c52032)"><g transform="translate(880,554) scale(1)"><defs><linearGradient id="gc52032" x1="0" y1="0" x2="1" y2="1">
+    <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+  </linearGradient></defs>
+    <rect width="32" height="32" fill="#1c1917"/>
+    <circle cx="16" cy="16" r="13.2" fill="none" stroke="url(#gc52032)" stroke-width="0.5" opacity="0.45"/>
+    <path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="url(#gc52032)"/></g></g><text x="896" y="606" font-family="Arial,sans-serif" font-size="13" fill="#8b98a5" text-anchor="middle">32px</text>
+</svg>

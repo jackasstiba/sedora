@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="500" viewBox="0 0 1500 500">
+  <defs>
+    <linearGradient id="ac" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#ff8a5c"/><stop offset="1" stop-color="#ef5322"/>
+    </linearGradient>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#241c19"/><stop offset="1" stop-color="#14100e"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.09" cy="1" r="0.8">
+      <stop offset="0" stop-color="#ef5322" stop-opacity="0.40"/>
+      <stop offset="1" stop-color="#ef5322" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="1500" height="500" fill="url(#bg)"/><rect width="1500" height="500" fill="url(#glow)"/>
+  <circle cx="133" cy="497" r="200" fill="none" stroke="#ff8a5c" stroke-width="2.5" opacity="0.26"/><circle cx="133" cy="497" r="310" fill="none" stroke="#ff8a5c" stroke-width="2.2" opacity="0.21000000000000002"/><circle cx="133" cy="497" r="430" fill="none" stroke="#ff8a5c" stroke-width="1.9" opacity="0.16"/><circle cx="133" cy="497" r="560" fill="none" stroke="#ff8a5c" stroke-width="1.6" opacity="0.10999999999999999"/>
+  <g transform="translate(1163,93) scale(1.5625)" opacity="0.28"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#ff8a5c"/></g><g transform="translate(1333,307) scale(0.9375)" opacity="0.22"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#ff8a5c"/></g><g transform="translate(1055.5,381.5) scale(0.65625)" opacity="0.18"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#ff8a5c"/></g><g transform="translate(868,84) scale(0.75)" opacity="0.16"><path d="M16 3.5c1 7.6 3.9 10.5 11.5 11.5C19.9 16 17 18.9 16 26.5 15 18.9 12.1 16 4.5 15 12.1 14 15 11.1 16 3.5Z" fill="#ff8a5c"/></g>
+  <rect x="330" y="140" width="8" height="210" rx="4" fill="url(#ac)"/>
+  <text x="360" y="217" font-family="Yu Gothic UI,Meiryo,Noto Sans JP,sans-serif" font-size="92" font-weight="bold" fill="#fff" letter-spacing="2">ハツコレ</text>
+  <text x="362" y="286" font-family="Yu Gothic UI,Meiryo,Noto Sans JP,sans-serif" font-size="34" fill="#ece2dc">レア・限定品の 予約 / 抽選 / 発売 を一画面に。</text>
+  <text x="362" y="336" font-family="Yu Gothic UI,Meiryo,Noto Sans JP,sans-serif" font-size="26" letter-spacing="1.2" fill="#b9a89e">フィギュア・トレカ・スニーカー・一番くじ・コラボグッズ</text>
+  <text x="1450" y="428" font-family="Yu Gothic UI,Meiryo,Noto Sans JP,sans-serif" font-size="30" font-weight="bold" fill="#ff8a5c" text-anchor="end" opacity="0.92">hatsukore.com</text>
+</svg>

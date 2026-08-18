@@ -361,17 +361,27 @@ const PAST_TENSE_LABELS: Record<string, string> = {
  * どちらも**掲載可否ではなく表記の問題**。落とすと、もう買えないからこそ価値がある
  * プレ値情報まで消える（実測: /premium が 63→36 件に激減した）。ここでラベルだけを直す。
  */
+/**
+ * 予定日が過ぎたか。**バッジ（displayEventType）と日付の見出し（eventDateHeading）で
+ * 同じ判定を使う**ために切り出した。ここが二重定義になると、同じページで
+ * 「登場済み」バッジの下に「登場予定」という見出しが並ぶ（実測 2026-08-18: 222件）。
+ */
+export function isEventPast(
+  eventDate: Date | string | null,
+  eventDateText: string | null,
+  today: Date
+): boolean {
+  const planned = plannedDateFromText(eventDateText) ?? (eventDate ? new Date(eventDate) : null);
+  return planned !== null && planned.getTime() < today.getTime();
+}
+
 export function displayEventType(
   eventType: string,
   eventDate: Date | string | null,
   eventDateText: string | null,
   today: Date
 ): string {
-  const past = (() => {
-    const planned = plannedDateFromText(eventDateText) ?? (eventDate ? new Date(eventDate) : null);
-    return planned !== null && planned.getTime() < today.getTime();
-  })();
-  if (!past) return eventType;
+  if (!isEventPast(eventDate, eventDateText, today)) return eventType;
   return PAST_TENSE_LABELS[eventType] ?? eventType;
 }
 

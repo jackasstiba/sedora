@@ -8,7 +8,7 @@ import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
-import { countdown, displayEventType, eventDateLabel, eventPeriodText, isMonthPrecision, todayJst } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import {
@@ -37,9 +37,20 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const cleanTitle = cleanListTitle(item.source, item.title);
   const title = `${cleanTitle} | ハツコレ`;
   // 事実だけを簡潔に（宣伝文句は入れない）
+  const past = isEventPast(item.eventDate, item.eventDateText, todayJst());
+  // 検索結果に出る説明文。**相場・転売実績は入れない**（[[System/rules]] ハツコレの立ち位置。
+  // 相場を出すと転売サイト感が高まる）。載せるのは「逃すと買えない」側＝抽選の有無・
+  // 賞品ラインナップ・取扱店。以前は日付/価格/ジャンルだけで、28.5%が持つ highlights も
+  // 3.0%が持つ salesChannel も捨てていた＝どの商品も同じ書式の説明文になっていた。
+  const trim = (v: string, max: number) => (v.length > max ? `${v.slice(0, max)}…` : v);
   const description = [
-    dateStr ? `${eventDateHeading(item.eventType, item.eventDateText)}: ${dateStr}` : null,
+    dateStr ? `${eventDateHeading(item.eventType, item.eventDateText, past)}: ${dateStr}` : null,
     item.price ? `価格: ${item.price}` : null,
+    item.hasLottery ? "抽選あり" : null,
+    // highlights は「各賞ラインナップ：A賞…」のように接頭辞つきで入っているので、
+    // 画面側（下の注目賞品欄）と同じ規則で接頭辞を落としてから載せる。
+    item.highlights ? trim(item.highlights.replace(/^[^：]+：/, "").trim(), 60) : null,
+    item.salesChannel ? `取扱: ${trim(item.salesChannel, 30)}` : null,
     `ジャンル: ${item.genre}`,
   ]
     .filter(Boolean)
@@ -190,7 +201,7 @@ export default async function ItemPage({ params }: Props) {
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
             {dateLabel && (
               <>
-                <dt className="text-neutral-600 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText)}</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText, isEventPast(item.eventDate, item.eventDateText, todayJst()))}</dt>
                 <dd className="font-semibold text-rose-600 dark:text-rose-400">
                   {dateLabel}
                   {cd && (
