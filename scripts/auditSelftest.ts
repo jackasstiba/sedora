@@ -43,7 +43,6 @@ import {
   pageExcludesPast,
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
-import { cleanListTitle, cutsMidWord } from "../src/lib/title";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
 import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, matchesQuery, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
 import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
@@ -89,7 +88,7 @@ import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
 import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
 import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
-import { cleanListTitle, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
+import { cleanListTitle, cutsMidWord, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, isUnlicensedImageHost, isUsableImageCandidate, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
