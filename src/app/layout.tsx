@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Analytics } from "@vercel/analytics/next";
+import { SiteAnalytics } from "@/components/SiteAnalytics";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AdDisclosure } from "@/components/AdDisclosure";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -56,7 +56,7 @@ export default function RootLayout({
         <AdDisclosure />
         {children}
         <SiteFooter />
-        <Analytics />
+        <SiteAnalytics />
       </body>
     </html>
   );

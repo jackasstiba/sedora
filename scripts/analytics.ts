@@ -10,6 +10,7 @@
 
 import { prisma } from "@/lib/prisma";
 import { nowInstant } from "../src/lib/date";
+import { NOLOG_OPTOUT_EVENT } from "../src/lib/nolog";
 
 const BASE = "https://api.vercel.com/v1/query/web-analytics";
 
@@ -338,6 +339,16 @@ async function readSelfHosted(since: Date) {
     { name: "search", title: "検索キーワード（需要シグナル）", unit: "検索" },
     { name: "outbound_click", title: "外部送客（購入導線クリック＝収益成果）", unit: "クリック" },
   ];
+  // 除外を始めたブラウザの数。**?nolog=1 の付いたURLが外に漏れると本物の読者が黙って消える**ので、
+  // ここが不自然に増えていないかを毎回見る（自分の端末ぶんだけのはず）。
+  const optOuts = events.filter((e) => e.name === NOLOG_OPTOUT_EVENT).length;
+  console.log(`
+■ 自分のアクセス除外  この期間に除外を始めたブラウザ ${optOuts} 台`);
+  if (optOuts > 5) {
+    console.log(
+      "  ⚠ 台数が多い。?nolog=1 の付いたURLが外部に共有されていないか確認する（本物の読者が数から消える）。"
+    );
+  }
   for (const spec of specs) {
     const counts = new Map<string, number>();
     for (const e of events) {

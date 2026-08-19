@@ -15,6 +15,7 @@ import {
   countdownBadgeProblem,
   parseDisplayedDate,
   renderedDateProblems,
+  displayEventDateText,
   displayEventType,
   eventPeriodText,
   hasFrozenRelativeDate,
@@ -50,16 +51,33 @@ import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSumma
 import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
 import { ROLLOVER_CRON_PATH, cronJstHour, rolloverProblem } from "../src/lib/rollover";
 import { imageVerdict } from "../src/lib/deadImage";
+import {
+  decideNolog,
+  isAutomationUserAgent,
+  isCountableUserAgent,
+  isCrawlerUserAgent,
+  isProductionHostname,
+  readNologParam,
+} from "../src/lib/nolog";
 import { buildLaunchPosts, buildPost, findForbidden, findNumberClaims, findStaleNumbers, type DraftRow } from "../src/lib/xDraftText";
 
 /** テスト内の改行。TSの "
 " を埋め込むと生成側で壊れやすいので定数にする */
 const LF = String.fromCharCode(10);
-import { isRakutenAffiliateId, officialUrlLabel, rakutenSearchUrl } from "../src/lib/outbound";
+
+/** 実測のUA（2026-08-19）。推測で足すと本物の読者を消すので、確かめたものだけを置く。 */
+const CLAUDE_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Claude/1.32352.1 Chrome/148.0.7778.280 Electron/42.9.2 Safari/537.36 MSIX";
+const ANDROID_UA =
+  "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36";
+const WINDOWS_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
+import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
+import { figislandListPlaceholder } from "../src/scrapers/figisland";
 import { extractRaffleUrl } from "../src/scrapers/channeltono";
 import { buildRecentEndedItem, cleanProductName, cleanRestockName, parseEndedStores, parseRestockStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
@@ -3022,6 +3040,51 @@ const cases: Case[] = [
     want: 1,
   },
 
+  // ── ポケモン公式グッズの日付（裏の取れない「登場日」を約束しない） ──
+  // 実測 2026-08-19（観点A・無作為10件）: API の start_date は記事の掲載日で、
+  // 10件すべてが同じ日。一次情報と読み比べられた2件はどちらも食い違っていた。
+  { name: "ポケ公式: 掲載日は日付欄に出さない", fn: () => displayEventDateText("掲載日 2026/08/14"), want: null },
+  { name: "ポケ公式: 「登場」と書けば出てしまう（だから書かない）", fn: () => displayEventDateText("登場 2026/08/14"), want: "登場 2026/08/14" },
+  { name: "ポケ公式: 掲載日からでも新着期間は判定できる", fn: () => parseAppearedDate("掲載日 2026/08/14")?.toISOString().slice(0, 10), want: "2026-08-14" },
+  {
+    name: "ポケ公式: 30日を過ぎた掲載は新着から外れる",
+    fn: () => isRecentPokemonGoods("掲載日 2026/07/01", new Date(Date.UTC(2026, 7, 19))),
+    want: false,
+  },
+
+  // ── 採用0件の見分け（静かな日 / 壊れた） ────────────────────
+  // 実測 2026-08-19: mita_draw が採用0件でも 🟢 だった（前回1件＝しきい値5に届かないため）。
+  // 収集元を開いたら本当に受付中が無い日で、0件が正しかった。壊れた場合も同じ 🟢 になるので、
+  // 「一覧から記事が取れたか」で分ける。
+  { name: "採用0件: 一覧も0件なら壊れている", fn: () => zeroAdoptionVerdict(0, 0)?.level, want: "error" },
+  { name: "採用0件: 記事は取れているなら静かな日（鳴らさず観測に出す）", fn: () => zeroAdoptionVerdict(0, 20)?.level, want: "info" },
+  { name: "採用0件: 巡回件数が分からないソースは判定しない", fn: () => zeroAdoptionVerdict(0, null), want: null },
+  { name: "採用0件: 1件でも採用していれば対象外", fn: () => zeroAdoptionVerdict(3, 0), want: null },
+
+  // ── 個別ページが無い行の置き場（figisland の一覧URL） ──────────
+  {
+    name: "置き場: 一覧URLは商品ページとして数えない",
+    fn: () => figislandListPlaceholder("figisland", "https://figisland.net/prizes-schedule/"),
+    want: true,
+  },
+  {
+    name: "置き場: 個別ページを持つ行は対象外",
+    fn: () => figislandListPlaceholder("figisland", "https://figisland.net/fi12345_s/"),
+    want: false,
+  },
+  {
+    name: "置き場: 他のソースには広げない",
+    fn: () => figislandListPlaceholder("torecasoku", "https://figisland.net/prizes-schedule/"),
+    want: false,
+  },
+  {
+    // 置き場が成立する前提＝そのURLを画面に出さないこと。
+    // figisland を「公式ページで見る」を出すソースに入れた瞬間、一覧に送客することになる。
+    name: "置き場: 置き場を持つソースの url は画面に出さない",
+    fn: () => isOfficialUrl("figisland"),
+    want: false,
+  },
+
   // ── リポジトリの衛生（検索が空振りしない） ──────────────────
   {
     name: "ソースが全文検索から外れる書き方になっていない（BOM・生の制御文字）",
@@ -3140,6 +3203,119 @@ const cases: Case[] = [
       if (!existsSync(route)) return `ルートの実ファイルが無い: ${route}`;
       if (!readFileSync(route, "utf8").includes("revalidatePath"))
         return "ルートがキャッシュを捨てていない（revalidatePath が無い）";
+      return "";
+    },
+    want: "",
+  },
+  // ── 自分のアクセス除外（2026-08-19）────────────────────────────
+  // 「入れた日に一度も確かめられない」型なのでここで固定する。
+  // 本物で確かめるには自分のブラウザで踏むしかなく、踏んだ瞬間に結果（＝記録）が消える。
+  {
+    // 実測UA（2026-08-19）。このブラウザは navigator.webdriver が false なので、
+    // webdriver だけを見る実装では**落ちない**。UAの印で落ちることを固定する。
+    name: "除外: Claude Code の内蔵ブラウザ(Electron)は自動操作として落とす",
+    fn: () => isAutomationUserAgent(CLAUDE_UA),
+    want: true,
+  },
+  {
+    name: "除外: 普通のAndroid Chromeは落とさない（本物の読者を消さない）",
+    fn: () => isAutomationUserAgent(ANDROID_UA) || isCrawlerUserAgent(ANDROID_UA),
+    want: false,
+  },
+  {
+    name: "除外: 普通のWindows Chromeは落とさない",
+    fn: () => isCountableUserAgent(WINDOWS_UA),
+    want: true,
+  },
+  { name: "除外: 巡回UAは落とす", fn: () => isCountableUserAgent("Googlebot/2.1"), want: false },
+  { name: "除外: localhost は本番ではない", fn: () => isProductionHostname("localhost"), want: false },
+  {
+    name: "除外: プレビュー配信(*.vercel.app)は本番ではない",
+    fn: () => isProductionHostname("sedora-three.vercel.app"),
+    want: false,
+  },
+  { name: "除外: 本番ドメインは本番", fn: () => isProductionHostname("hatsukore.com"), want: true },
+  {
+    name: "除外: app.localhost のようなサブドメインも開発機（完全一致だけ見ると素通りする）",
+    fn: () => isProductionHostname("app.localhost"),
+    want: false,
+  },
+  {
+    // いちばん大事な「鳴らない側」。ここが壊れると誰も数えなくなる。
+    name: "除外: 本番・普通のブラウザ・印なしの訪問は記録する",
+    fn: () =>
+      decideNolog({
+        userAgent: ANDROID_UA,
+        href: "https://hatsukore.com/items/516",
+        hostname: "hatsukore.com",
+        storedFlag: null,
+      }).skip,
+    want: false,
+  },
+  {
+    name: "除外: ?nolog=1 を踏んだら落として印を残す",
+    fn: () =>
+      JSON.stringify(
+        decideNolog({
+          userAgent: WINDOWS_UA,
+          href: "https://hatsukore.com/?nolog=1",
+          hostname: "hatsukore.com",
+          storedFlag: null,
+        })
+      ),
+    want: JSON.stringify({ skip: true, store: "set", reason: "opt-out-now" }),
+  },
+  {
+    name: "除外: 印が残っていれば以後の訪問は落ちる",
+    fn: () =>
+      decideNolog({
+        userAgent: WINDOWS_UA,
+        href: "https://hatsukore.com/",
+        hostname: "hatsukore.com",
+        storedFlag: "1",
+      }).reason,
+    want: "opted-out",
+  },
+  {
+    name: "除外: ?nolog=0 で解除でき、その訪問は数える",
+    fn: () =>
+      JSON.stringify(
+        decideNolog({
+          userAgent: WINDOWS_UA,
+          href: "https://hatsukore.com/?nolog=0",
+          hostname: "hatsukore.com",
+          storedFlag: "1",
+        })
+      ),
+    want: JSON.stringify({ skip: false, store: "clear", reason: null }),
+  },
+  {
+    // 解除の抜け道で自分の検証ブラウザを数え始めない（判定順の固定）。
+    name: "除外: ?nolog=0 でも自動操作は数え始めない",
+    fn: () =>
+      decideNolog({
+        userAgent: CLAUDE_UA,
+        href: "https://hatsukore.com/?nolog=0",
+        hostname: "hatsukore.com",
+        storedFlag: null,
+      }).reason,
+    want: "automation",
+  },
+  { name: "除外: 値の無い ?nolog も除外と読む", fn: () => readNologParam("https://hatsukore.com/?nolog"), want: "on" },
+  { name: "除外: 壊れたURLでも例外にしない", fn: () => readNologParam("not a url"), want: null },
+  {
+    // 3つ揃って初めて効く。1つ欠けても画面は正常なままなので突き合わせる。
+    name: "除外: 設置口・イベント送信・受け口の3つが同じ判定を通っている",
+    fn: () => {
+      const layout = readFileSync("src/app/layout.tsx", "utf8");
+      if (/<Analytics\s*\/>/.test(layout)) return "layout が素の <Analytics /> を置いている（beforeSend が効かない）";
+      if (!layout.includes("SiteAnalytics")) return "layout が除外つきの設置口を使っていない";
+      const wrapper = readFileSync("src/components/SiteAnalytics.tsx", "utf8");
+      if (!wrapper.includes("beforeSend")) return "設置口に beforeSend が無い";
+      if (!readFileSync("src/lib/logEvent.ts", "utf8").includes("currentNologDecision"))
+        return "logEvent が除外判定を通っていない";
+      if (!readFileSync("src/app/api/track/route.ts", "utf8").includes("isCountableUserAgent"))
+        return "/api/track が共通の UA 判定を使っていない";
       return "";
     },
     want: "",
