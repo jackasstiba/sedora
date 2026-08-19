@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import { crawledCount } from "../src/scrapers/crawl";
 import path from "node:path";
 import type { ScraperResult } from "../src/scrapers";
 import { nowInstant } from "../src/lib/date";
@@ -58,6 +59,29 @@ function saveSnapshot(stats: Record<string, SourceStat>): void {
  * スクレイプ結果を診断し、警告を表示＋ログ追記する。
  * @returns 警告があれば true
  */
+/**
+ * 採用0件のソースについて、**「静かな日」と「壊れた」を見分ける**。
+ *
+ * 実測 2026-08-19: `mita_draw` は前回1件しか無かったため `MIN_PREV_FOR_DROP`(=5) に届かず、
+ * 何度0件になっても 🟢 のまま。収集元を実際に開いて確かめたところ、最新記事は前日の
+ * NIKE MIND 001（既に取り込み済み）で**本当に受付中が無い日**だった＝0件が正しい。
+ * ただし壊れた場合も同じ 🟢 になる。**一覧から記事が取れたかどうか**だけが両者を分ける。
+ */
+export function zeroAdoptionVerdict(
+  adopted: number,
+  crawled: number | null
+): { level: "error" | "info"; message: string } | null {
+  if (adopted > 0) return null;
+  // 巡回の記事数が分からないソース（crawlPages を通らない・label が source 名と違う）は判定しない。
+  if (crawled === null) return null;
+  if (crawled === 0)
+    return { level: "error", message: "一覧そのものが0件（入口が壊れた疑い。件数の大小に関係なく異常）" };
+  return {
+    level: "info",
+    message: `記事${crawled}件は取れているが採用0件（受付中が無い＝静かな日の可能性。収集元を開いて確かめる）`,
+  };
+}
+
 export function checkHealth(results: ScraperResult[]): boolean {
   const stats = computeStats(results);
   const prev = loadSnapshot();
@@ -93,6 +117,19 @@ export function checkHealth(results: ScraperResult[]): boolean {
         console.log(`🟠 ${base} ← 日付付与率が急落 (前回${pp}%)`);
         continue;
       }
+    }
+
+    // 採用0件は、件数の大小に関係なく「静かな日」か「壊れた」のどちらか。
+    // 一覧から記事が取れたかで分ける（前回件数のしきい値では小さいソースが永久に沈黙する）。
+    const zero = zeroAdoptionVerdict(s.count, crawledCount(source));
+    if (zero) {
+      if (zero.level === "error") {
+        warnings.push(`${source}: ${zero.message}`);
+        console.log(`🔴 ${base} ← ${zero.message}`);
+      } else {
+        console.log(`⚪ ${base} ← ${zero.message}`);
+      }
+      continue;
     }
 
     const mark = p ? "🟢" : "⚪"; // 前回基準なしは白

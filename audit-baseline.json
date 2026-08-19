@@ -59,7 +59,7 @@
     "intake_face_dead": 0,
     "image_generic": 0,
     "image_shared": 0,
-    "image_missing": 106,
+    "image_missing": 109,
     "image_source_zero": 0,
     "image_rate_dropped": 0,
     "frozen_relative_date": 0,
@@ -75,7 +75,7 @@
     "dup_contained_name": 0,
     "month_page_out_of_range": 0,
     "crawl_discipline": 0,
-    "thin_pages": 14,
+    "thin_pages": 15,
     "image_from_store_page": 0,
     "watchlist_zero": 1,
     "image_jan_conflict": 0

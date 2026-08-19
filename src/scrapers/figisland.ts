@@ -2,7 +2,22 @@ import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
 import { fetchHtml, parseYyyymmdd } from "./util";
 
-const LIST_URL = "https://figisland.net/prizes-schedule/";
+/**
+ * 一覧ページ。**個別ページがまだ無い行の置き場**としても使う（`url` は必須列なので null にできない）。
+ *
+ * 実測 2026-08-19: 392件中3件が詳細リンクを持たない（収集元側にまだ個別ページが無い商品）。
+ * 商品としては本物（名前・入荷月・写真がある）ので落とさない。ただし**商品のページではない**ので、
+ * 「複数商品が同じリンク先を指している」の検査からは外す（audit が実物の粗と区別できるように、
+ * 判定は figislandListPlaceholder ひとつに寄せる）。
+ * ⚠️ この置き場が成立する前提は「figisland の item.url を画面に出さない」こと
+ * （`isOfficialUrl("figisland") === false`）。前提が崩れたら audit:selftest が落ちる。
+ */
+export const LIST_URL = "https://figisland.net/prizes-schedule/";
+
+/** その行の url が「個別ページが無いための置き場」か。 */
+export function figislandListPlaceholder(source: string, url: string): boolean {
+  return source === "figisland" && url === LIST_URL;
+}
 
 export async function scrapeFigisland(): Promise<ScrapedItem[]> {
   const html = await fetchHtml(LIST_URL);

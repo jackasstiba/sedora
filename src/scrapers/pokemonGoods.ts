@@ -29,7 +29,7 @@ const MAX_PAGES = 12;
  */
 export const POKEMON_GOODS_RECENT_DAYS = 30;
 
-/** 「登場 2026/08/14」から登場日（暦日）を読む。読めなければ null。 */
+/** 「掲載日 2026/08/14」から日付（暦日）を読む。読めなければ null。 */
 export function parseAppearedDate(eventDateText: string | null | undefined): Date | null {
   const m = /(\d{4})\/(\d{1,2})\/(\d{1,2})/.exec(eventDateText ?? "");
   if (!m) return null;
@@ -105,7 +105,15 @@ export async function scrapePokemonGoods(): Promise<ScrapedItem[]> {
       subGenre: r.pokecen === 1 ? "ポケセン限定" : "グッズ",
       eventType: "発売",
       eventDate: null,
-      eventDateText: r.start_date ? `登場 ${r.start_date.replace(/\./g, "/")}` : null,
+      // **`start_date` は商品の登場日ではなく、ポケモン公式サイトに記事が載った日。**
+      // 実測 2026-08-19（観点A・無作為10件の突合）: 10件すべてが同じ `2026.08.14` で、
+      // 記事のパス自身が `/goods/2026/08/260814_ph01.html` と同じ日付だった。
+      // リンク先の一次情報と読み比べられた2件は**どちらも食い違い**（一次 8/04・8/06 ↔ 8/14）、
+      // 別の1件も一次「7月28日より順次登場予定」に対しサイトは「登場 7/24」だった。
+      // ＝「登場 M/D」と書くと**商品がその日に出たと断定**することになり、裏が取れていない。
+      // 掲載日として持つ（`displayEventDateText` が日付欄から落とす＝画面では約束しない）。
+      // 値自体は「新着として載せてよい期間」の判定に使うので捨てない。
+      eventDateText: r.start_date ? `掲載日 ${r.start_date.replace(/\./g, "/")}` : null,
       price: null,
       url,
       imageUrl: r.img_1 || null,

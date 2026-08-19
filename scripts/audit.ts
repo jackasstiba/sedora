@@ -46,6 +46,7 @@ import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { conflictingJanImages, isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
+import { figislandListPlaceholder } from "../src/scrapers/figisland";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs, hasSubstance } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
@@ -648,6 +649,9 @@ async function main() {
     for (const [url, arr] of byUrl) {
       if (arr.length < 2) continue;
       if (arr.every((x) => PAGE_COVERS_MANY[x.source])) continue;
+      // 個別ページがまだ無い行の「置き場」（figisland の一覧URL）は商品ページではないので数えない。
+      // 画面にも出ないURLなので、ここで数えても直しようがなく、本物の粗（送客先が一覧止まり）が埋もれる。
+      if (arr.every((x) => figislandListPlaceholder(x.source, x.url))) continue;
       bad.push(
         `${arr.length}件が同じURLを共有 → ${url}\n        ` +
           arr.slice(0, 3).map((x) => `[${x.source} #${x.id}] ${cleanListTitle(x.source, x.title).slice(0, 34)}`).join("\n        ")

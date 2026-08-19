@@ -104,6 +104,21 @@ export type CrawlPagesOptions<T> = {
  *
  * @throws 上限ページに達してもまだ新規が出続けているとき（＝窓が収集元に追い越された）
  */
+/**
+ * 直近の巡回で**一覧から取れた記事数**（label 別）。
+ *
+ * なぜ控えるか（2026-08-19 実測）: `mita_draw` が採用0件で、健全性チェックは 🟢 だった。
+ * ログには `[crawl] mita_draw: 2ページ / 20件` と出ていて、**記事は取れているが受付中が無い**
+ * ＝静かな日だと分かる情報が既にあったのに、どこも読んでいなかった。
+ * 「静かな日」と「入口が壊れて一覧が空」は、この数字でしか区別できない。
+ */
+const crawledCounts = new Map<string, number>();
+
+/** 直近の巡回で取れた記事数（その label を巡回していなければ null）。 */
+export function crawledCount(label: string): number | null {
+  return crawledCounts.get(label) ?? null;
+}
+
 export async function crawlPages<T>(o: CrawlPagesOptions<T>): Promise<T[]> {
   const get = o.fetchPage ?? fetchHtml;
   const byKey = new Map<string, T>();
@@ -136,6 +151,7 @@ export async function crawlPages<T>(o: CrawlPagesOptions<T>): Promise<T[]> {
   }
   // **どこまで辿ったかを毎回ログに出す。** 窓が実際に効いているかは、この数字を上限
   // (maxPages) と見比べれば分かる（上限に張り付いていたら、例外になる前に気付ける）。
+  crawledCounts.set(o.label, byKey.size);
   console.log(`[crawl] ${o.label}: ${pages}ページ / ${byKey.size}件（上限${o.maxPages}）`);
   return [...byKey.values()];
 }
