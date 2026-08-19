@@ -1,7 +1,7 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay } from "./util";
 import { decodeHtmlEntities, stripTags } from "./aggregatorUtil";
-import { lastDeadline, summarizeStores } from "../lib/stores";
+import { lastDeadline, preferredStoreUrl, summarizeStores } from "../lib/stores";
 import { todayJst } from "../lib/date";
 
 // 「今日」は必ず src/lib/date.ts の todayJst()（日本時間の暦日）から取る。
@@ -246,12 +246,9 @@ export function buildCardChusenItems(entries: Entry[]): ScrapedItem[] {
     const lastDue = lastDeadline(stores);
 
     // item.url は「公式ページ」表示になるため、店舗ドメイン＞Googleフォーム＞X告知の順で選ぶ。
-    const isX = (u: string) => /(^|\.)x\.com|twitter\.com/i.test(new URL(u).hostname);
-    const isForm = (u: string) => /docs\.google\.com|forms\.gle/i.test(u);
-    const pick =
-      sorted.find((e) => !isX(e.url) && !isForm(e.url)) ??
-      sorted.find((e) => !isX(e.url)) ??
-      sorted[0];
+    // 選び方は表示側（詳細ページの「公式ページで見る」）と同じ関数を使う。別実装にすると
+    // 片方だけ締切済みの店を指す（表示側は受付中の店だけに絞ってからこれを呼ぶ）。
+    const pickUrl = preferredStoreUrl(stores) ?? sorted[0].url;
     const sub = GAME_LABELS.find(([re]) => re.test(title))?.[1] ?? null;
 
     items.push({
@@ -264,7 +261,7 @@ export function buildCardChusenItems(entries: Entry[]): ScrapedItem[] {
       eventDate: lastDue,
       eventDateText: lastDue ? null : "抽選 受付中",
       price: null,
-      url: pick.url,
+      url: pickUrl,
       imageUrl: null,
       highlights: `受付中ストア：${summarizeStores(stores, 3)}`,
       hasLottery: true,

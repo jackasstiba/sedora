@@ -19,6 +19,7 @@ import { sourceCode } from "@/lib/sourceCode";
 import {
   groupStoresByLabel,
   parseStoresJson,
+  preferredStoreUrl,
   splitStoresByDeadline,
   storeSectionCopy,
   storeWhenLabel,
@@ -46,6 +47,9 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const cleanTitle = cleanListTitle(item.source, item.title);
   // 事実だけを簡潔に（宣伝文句は入れない）
   const past = isEventPast(item.eventDate, item.eventDateText, todayJst());
+  // 抽選の日付が「応募締切」なのか「受付開始」なのかは行の実データで決まる。
+  // 渡さないと `${eventType}日`＝「抽選日」に落ちて、締切を抽選日と言ってしまう。
+  const lotteryCtx = { source: item.source, eventDate: item.eventDate, stores: item.stores };
   // <title> は「商品名」単体ではなく「〇〇の発売日」の形にする（実際に打たれるクエリの形）。
   // 組み立て規則と、名前を切り詰めない理由は itemPageTitle 側に書いてある。
   // 会場名は本文の店舗欄と同じ stores から採る（載せてよい形かは venueForTitle が判定）。
@@ -54,7 +58,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const period = eventPeriodText(item.eventDate, item.eventDateText);
   const title = itemPageTitle({
     name: cleanTitle,
-    heading: eventDateHeading(item.eventType, item.eventDateText, past),
+    heading: eventDateHeading(item.eventType, item.eventDateText, past, lotteryCtx),
     // 会場・期間を載せない行は従来どおり短い日付（説明文は long を使う）。
     // 会場を載せる行は年まで出す＝「ナガノ マーケット 仙台 2026」のようなクエリに当てる。
     date: venue
@@ -70,7 +74,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   // 3.0%が持つ salesChannel も捨てていた＝どの商品も同じ書式の説明文になっていた。
   const trim = (v: string, max: number) => (v.length > max ? `${v.slice(0, max)}…` : v);
   const description = [
-    dateStr ? `${eventDateHeading(item.eventType, item.eventDateText, past)}: ${dateStr}` : null,
+    dateStr ? `${eventDateHeading(item.eventType, item.eventDateText, past, lotteryCtx)}: ${dateStr}` : null,
     item.price ? `価格: ${item.price}` : null,
     item.hasLottery ? "抽選あり" : null,
     // highlights は「各賞ラインナップ：A賞…」のように接頭辞つきで入っているので、
@@ -140,6 +144,12 @@ export default async function ItemPage({ params }: Props) {
   const closedStoreCount = storeSplit?.closed.length ?? 0;
   // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
   const storeGroups = groupStoresByLabel(openStores);
+  // 「公式ページで見る」の行き先。item.url は巡回時に選んだ1店で、日が経つと
+  // **締切済みの店**を指す（実測 2026-08-19: 掲載中の抽選5件。#75419 のリンク先は8/18に終了）。
+  // 受付中の店があるなら、巡回時と同じ優先順（店舗ドメイン＞フォーム＞X）でそちらへ送る。
+  const officialHref = (openStores.length ? preferredStoreUrl(openStores) : null) ?? item.url;
+  // 日付見出しの材料（generateMetadata 側と同じものを本文でも使う）。
+  const lotteryCtx = { source: item.source, eventDate: item.eventDate, stores: item.stores };
   // 節の見出し・説明・ボタン文言は中身に合わせる（コラボに「応募ページ」と書かない）。
   const storeCopy = storeSectionCopy(item.source);
 
@@ -257,7 +267,7 @@ export default async function ItemPage({ params }: Props) {
           <dl className="grid grid-cols-[5rem_1fr] gap-y-1 text-sm">
             {dateLabel && (
               <>
-                <dt className="text-neutral-600 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText, isEventPast(item.eventDate, item.eventDateText, todayJst()))}</dt>
+                <dt className="text-neutral-600 dark:text-neutral-400">{eventDateHeading(item.eventType, item.eventDateText, isEventPast(item.eventDate, item.eventDateText, todayJst()), lotteryCtx)}</dt>
                 <dd className="font-semibold text-rose-600 dark:text-rose-400">
                   {dateLabel}
                   {cd && (
@@ -363,7 +373,7 @@ export default async function ItemPage({ params }: Props) {
           <div className="mt-2 flex flex-col gap-2">
             {isOfficialUrl(item.source) && (
               <OutboundLink
-                href={item.url}
+                href={officialHref}
                 kind="official"
                 source={sourceCode(item.source)}
                 itemId={item.id}

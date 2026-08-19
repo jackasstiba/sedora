@@ -113,8 +113,26 @@ export function parseTakaraTomyRelease(
   return { date: null, text };
 }
 
+/**
+ * もう買えない・応募できない状態か（純関数・selftest対象）。
+ *
+ * 🚨 2026-08-19 実測: 一覧のボタンは「予約する」だけではなく
+ * **「予約期間終了」28件・「販売期間終了」10件・「在庫なし」36件**がある。
+ * `takaraTomyEventType` は `/予約/` で判定していたので、**「予約期間終了」も『予約』**になり、
+ * 受注が終わった商品を「予約」として掲載し続けていた
+ * （掲載238件中 **59件(25%)** が該当。リンク先には「予約期間は終了しました。」と書いてある）。
+ * 「今なら買える／申し込める」と約束するサイトなので、この状態の行は載せない。
+ */
+export function takaraTomyUnavailable(action: string | null): boolean {
+  if (!action) return false;
+  // 「入荷案内申込」＝在庫が無いので入荷したら知らせる、の意味（買えない）。
+  return /期間終了|在庫なし|入荷案内|受付終了|販売終了/.test(action);
+}
+
 /** ボタン文言とラベルから、サイトの eventType 語彙に落とす（純関数・selftest対象）。 */
 export function takaraTomyEventType(card: TakaraTomyCard): string {
+  // 「予約期間終了」を『予約』と読まないため、終了系はここでも先に外す。
+  if (takaraTomyUnavailable(card.action)) return "発売";
   // 収集元が「抽選に応募する」と書いている時だけ抽選と言う（推測で抽選にしない）。
   if (card.action && /抽選/.test(card.action)) return "抽選";
   if (card.labels.some((l) => /再入荷/.test(l))) return "再販";
@@ -151,6 +169,8 @@ export async function scrapeTakaraTomyMall(): Promise<ScrapedItem[]> {
 
     for (const card of parseTakaraTomyList(html)) {
       if (byId.has(card.goodsId)) continue;
+      // もう買えない／申し込めない行は載せない（「予約期間終了」を予約として出していた）。
+      if (takaraTomyUnavailable(card.action)) continue;
       const { date, text } = parseTakaraTomyRelease(card.releaseText);
       // 発売日が過ぎた行はそのまま入れても表示側で落ちる。巡回結果を膨らませないため先に切る。
       if (date && date.getTime() < today.getTime() && !/中旬|上旬|下旬/.test(card.releaseText ?? "")) {

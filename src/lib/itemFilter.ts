@@ -96,6 +96,47 @@ export function sourceLabel(source: string): string {
   return SOURCE_LABELS[source] ?? source;
 }
 
+/** 抽選の日付が何の日かを決めるために要る材料。呼び出し側が行から渡す */
+export type LotteryDateContext = {
+  source: string;
+  eventDate: Date | null;
+  /** Item.stores（JSON配列文字列）。応募先ごとの締切/開始を持つ */
+  stores?: string | null;
+};
+
+/**
+ * 抽選の `eventDate` が **応募締切なのか受付開始なのか**を、実データから決める。
+ * 決まらなければ null（＝断定しない）。
+ *
+ * 2026-08-19 に収集元ごとの実装を1本ずつ読んで確かめた:
+ *  ・card_chusen … `lastDeadline()`＝締切。応募先ごとの締切は stores に入っている
+ *  ・raffle_kuji … 応募締切日
+ *  ・mita_draw   … 応募締切
+ *  ・tenbaiquest … 「抽選＝タイトル内の締切日」
+ *  ・nike_snkrs  … カレンダーの抽選/発売日（締切は eventDateText に別途入る）＝「抽選日」で正しい
+ *  ・channeltono … タイトルに出た最初の「M月D日」を拾うだけ＝**何の日かは分からない**
+ */
+const LOTTERY_DEADLINE_SOURCES = new Set(["card_chusen", "raffle_kuji", "mita_draw", "tenbaiquest"]);
+/** 日付を拾っただけで意味が確かめられない収集元（Xミラー系）。断定しない */
+const LOTTERY_DATE_UNKNOWN_SOURCES = new Set(["channeltono", "rarecheck"]);
+
+export function lotteryDateMeaning(ctx?: LotteryDateContext): string | null {
+  if (!ctx) return null;
+  // ① 応募先が同じ日を持っているなら、その店の言い方（締切/開始）が答え
+  if (ctx.eventDate) {
+    const stores = parseStoresJson(ctx.stores ?? null);
+    const iso = ctx.eventDate.toISOString().slice(0, 10);
+    const same = stores?.filter((s) => s.at === iso) ?? [];
+    if (same.some((s) => s.kind === "締切")) return "応募締切";
+    if (same.length && same.every((s) => s.kind === "開始")) return "受付開始";
+  }
+  // ② 収集元の実装で決まっているもの
+  if (LOTTERY_DEADLINE_SOURCES.has(ctx.source)) return "応募締切";
+  // ③ 意味が確かめられない収集元は「抽選日」と断定しない。拾った日付だとだけ言う
+  if (LOTTERY_DATE_UNKNOWN_SOURCES.has(ctx.source)) return "告知の日付";
+  return null;
+}
+
 /**
  * 日付欄の見出し。`${eventType}日` と機械的に繋ぐと「予約受付中日」「登場予定日」のような
  * 日本語にならない見出しが出る（実測・詳細ページで表示されていた）。
@@ -105,11 +146,19 @@ export function eventDateHeading(
   eventType: string,
   eventDateText?: string | null,
   past?: boolean,
+  lottery?: LotteryDateContext,
 ): string {
   // その日付が何の日なのかは、まず**収集元の文言**で決まる。プレミアムバンダイの
   // 「2026年10月発送予定」は予約日でも発売日でもなく発送月なので、eventType から
   // 「予約日」と機械的に作ると、10月に予約が始まるように読める（実測でそう出ていた）。
   if (eventDateText && /発送予定/.test(eventDateText)) return "発送予定";
+  // 抽選は `${eventType}日` に落とすと **「抽選日」＝抽選が行われる日** と読める。
+  // 実体は応募締切であることが多い（実測 2026-08-19: カーナベルの「〜8/21 23:59」＝応募締切を
+  // 「抽選日 2026年8月21日(金)」と表示していた）。実データで決まるときだけ言い切る。
+  if (eventType === "抽選") {
+    const meaning = lotteryDateMeaning(lottery);
+    if (meaning) return meaning;
+  }
   // 日付が過ぎているのに見出しが「予定」のままだと、同じページのバッジ
   // （displayEventType が「登場済み」に倒す）と真っ向から矛盾する。
   // 実測 2026-08-18: sitemap掲載 2846件中 **222件** がこの状態だった（全て eventType="登場予定"）。

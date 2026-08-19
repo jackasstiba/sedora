@@ -157,6 +157,33 @@ export function splitStoresByDeadline(
 }
 
 /**
+ * 応募先の一覧から「代表として出してよいURL」を1本選ぶ。
+ * 優先順は **店舗ドメイン ＞ 応募フォーム ＞ Xの告知**（Xは投稿が流れて辿れなくなる）。
+ *
+ * 巡回時（cardChusen が item.url を決める）と表示時（詳細ページの「公式ページで見る」）の
+ * 両方がこれを使う。**別実装にすると片方だけ締切済みの店を指す**（実測 2026-08-19:
+ * 巡回時に「締切が近い順の先頭」を選ぶので、日が経つと item.url が締切済みの店を指していた。
+ * 掲載中の抽選5件がこの状態で、#75419 のリンク先は8/18に応募が終わっていた）。
+ */
+export function preferredStoreUrl(stores: StoreEntry[]): string | null {
+  const withUrl = stores.filter((s): s is StoreEntry & { url: string } => !!s.url);
+  const isX = (u: string) => {
+    try {
+      return /(^|\.)(x\.com|twitter\.com)$/i.test(new URL(u).hostname);
+    } catch {
+      return false;
+    }
+  };
+  const isForm = (u: string) => /docs\.google\.com|forms\.gle/i.test(u);
+  return (
+    withUrl.find((s) => !isX(s.url) && !isForm(s.url))?.url ??
+    withUrl.find((s) => !isX(s.url))?.url ??
+    withUrl[0]?.url ??
+    null
+  );
+}
+
+/**
  * **まだ締切前の枠のうち、いちばん早い締切**（＝この商品で今いちばん急ぐ日）。
  * 締切付きの枠が1つも無い／全部過ぎている場合は null。
  *

@@ -17,6 +17,7 @@
     "audit:clocklint": "node --import tsx scripts/clockScan.ts",
     "sweep:dump": "node --env-file-if-exists=.env --import tsx scripts/sweepDump.ts",
     "audit:facts": "node --env-file-if-exists=.env --import tsx scripts/auditFacts.ts",
+    "audit:links": "node --env-file-if-exists=.env --import tsx scripts/auditFacts.ts --linked-all",
     "reenrich:collabo": "node --env-file-if-exists=.env --import tsx scripts/reenrichCollabo.ts",
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "prices:recheck": "node --env-file-if-exists=.env --import tsx scripts/recheckPrices.ts",

@@ -27,12 +27,14 @@ import {
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
   lastDeadline,
+  preferredStoreUrl,
   soonestOpenDeadline,
   splitStoresByDeadline,
   storeWhenLabel,
   type StoreEntry,
 } from "../src/lib/stores";
 import { unfreezeStoreWhen } from "./backfillDisplayText";
+import { zeroAdoptionVerdict } from "./health";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
   accumulateUnexplained,
@@ -80,7 +82,7 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
-import { parseTakaraTomyRelease, takaraTomyEventType, takaraTomyGenre, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
+import { parseTakaraTomyRelease, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
@@ -632,6 +634,108 @@ const cases: Case[] = [
     want: "発送予定",
   },
   { name: "発送予定でなければ従来どおり", fn: () => eventDateHeading("抽選", "抽選 8/15"), want: "抽選日" },
+
+  // (b-1b) 「抽選日」は**抽選が行われる日**と読める。実体は応募締切であることが多い
+  //        （実測 2026-08-19: カーナベルの「〜8/21 23:59」＝応募締切を「抽選日 8月21日」と
+  //        表示していた。掲載2183件中125件がこの見出し）。実データで決まるときだけ言い切る。
+  {
+    name: "抽選: 同じ日の応募先が『締切』なら見出しは『応募締切』",
+    fn: () =>
+      eventDateHeading("抽選", null, false, {
+        source: "card_chusen",
+        eventDate: new Date("2026-08-21T00:00:00.000Z"),
+        stores: JSON.stringify([
+          { name: "カーナベル", url: "https://example.test/", form: "抽選", when: "〜8/21 23:59", at: "2026-08-21", kind: "締切" },
+        ]),
+      }),
+    want: "応募締切",
+  },
+  {
+    name: "抽選: 同じ日の応募先が『開始』だけなら『受付開始』",
+    fn: () =>
+      eventDateHeading("抽選", null, false, {
+        source: "nyuka_now",
+        eventDate: new Date("2026-08-21T00:00:00.000Z"),
+        stores: JSON.stringify([
+          { name: "店A", url: "https://example.test/", form: "抽選", when: "8/21 10:00〜", at: "2026-08-21", kind: "開始" },
+        ]),
+      }),
+    want: "受付開始",
+  },
+  {
+    name: "抽選: 応募先が無くても、収集元の実装で締切と決まっていれば『応募締切』",
+    fn: () =>
+      eventDateHeading("抽選", null, false, {
+        source: "raffle_kuji",
+        eventDate: new Date("2026-08-24T00:00:00.000Z"),
+        stores: null,
+      }),
+    want: "応募締切",
+  },
+  {
+    // channeltono はタイトルに出た最初の「M月D日」を拾うだけ＝何の日かは分からない。
+    // 分からないものを「抽選日」と断定しない（[[UIラベルは裏取り済みのみ約束]]）。
+    name: "抽選: 日付の意味が確かめられない収集元は『抽選日』と断定しない",
+    fn: () =>
+      eventDateHeading("抽選", null, false, {
+        source: "channeltono",
+        eventDate: new Date("2026-08-25T00:00:00.000Z"),
+        stores: null,
+      }),
+    want: "告知の日付",
+  },
+  {
+    // nike_snkrs の eventDate はカレンダーの抽選/発売日そのもの（締切は eventDateText 側）。
+    // ここまで一律に「応募締切」と書き換えると、今度は逆向きの嘘になる。
+    name: "抽選: eventDate が本当に抽選日の収集元は『抽選日』のまま",
+    fn: () =>
+      eventDateHeading("抽選", "抽選応募締切 8/20 23:59", false, {
+        source: "nike_snkrs",
+        eventDate: new Date("2026-08-22T00:00:00.000Z"),
+        stores: null,
+      }),
+    want: "抽選日",
+  },
+  {
+    name: "抽選: 材料を渡さなければ従来どおり（呼び出し漏れで文言が勝手に変わらない）",
+    fn: () => eventDateHeading("抽選", null, false),
+    want: "抽選日",
+  },
+
+  // (b-1c) 応募先リンクの選び方。巡回時と表示時で**同じ関数**を使う。
+  //        実測 2026-08-19: item.url は巡回時に「締切が近い順の先頭」で決まるので、
+  //        日が経つと締切済みの店を指す（掲載中の抽選5件。#75419 は8/18に終了した店だった）。
+  {
+    name: "応募先: 店舗ドメインをフォーム・Xより優先する",
+    fn: () =>
+      preferredStoreUrl([
+        { name: "X告知", url: "https://x.com/shop/status/1", form: null, when: null, note: null, at: null, kind: null },
+        { name: "フォーム", url: "https://docs.google.com/forms/d/e/abc/viewform", form: null, when: null, note: null, at: null, kind: null },
+        { name: "店", url: "https://shop.example/lottery", form: null, when: null, note: null, at: null, kind: null },
+      ]),
+    want: "https://shop.example/lottery",
+  },
+  {
+    name: "応募先: 店舗ドメインが無ければフォーム（Xは最後）",
+    fn: () =>
+      preferredStoreUrl([
+        { name: "X告知", url: "https://x.com/shop/status/1", form: null, when: null, note: null, at: null, kind: null },
+        { name: "フォーム", url: "https://docs.google.com/forms/d/e/abc/viewform", form: null, when: null, note: null, at: null, kind: null },
+      ]),
+    want: "https://docs.google.com/forms/d/e/abc/viewform",
+  },
+  {
+    name: "応募先: 締切済みの店を除いてから選べば、生きている店が出る",
+    fn: () => {
+      const stores = [
+        { name: "締切済みの店", url: "https://closed.example/", form: null, when: "〜8/18 23:59", note: null, at: "2026-08-18", kind: "締切" },
+        { name: "受付中の店", url: "https://open.example/", form: null, when: "〜8/25 23:59", note: null, at: "2026-08-25", kind: "締切" },
+      ] as StoreEntry[];
+      const { open } = splitStoresByDeadline(stores, new Date("2026-08-19T00:00:00.000Z"));
+      return preferredStoreUrl(open);
+    },
+    want: "https://open.example/",
+  },
 
   // (b-2) 日付が過ぎたら見出しも「予定」と書かない。バッジ（displayEventType）は
   //       「登場済み」に倒れるのに見出しだけ「登場予定」のままだと、同じページで矛盾する。
@@ -2205,6 +2309,34 @@ const cases: Case[] = [
     name: "タカラトミー: 再入荷ラベルは再販",
     fn: () => takaraTomyEventType({ labels: ["再入荷"], action: "カートに入れる" } as TakaraTomyCard),
     want: "再販",
+  },
+  // 🚨 2026-08-19 実測: 一覧のボタンには「予約期間終了」28件・「販売期間終了」10件・
+  //    「在庫なし」36件がある。`/予約/` で判定していたので**「予約期間終了」も『予約』**になり、
+  //    受注の終わった商品を予約として掲載していた（238件中59件・25%）。
+  //    リンク先には「予約期間は終了しました。」と書いてある。
+  {
+    name: "タカラトミー: 「予約期間終了」は買えない（予約と読まない）",
+    fn: () => takaraTomyUnavailable("予約期間終了"),
+    want: true,
+  },
+  {
+    name: "タカラトミー: 「予約期間終了」を eventType でも予約にしない",
+    fn: () => takaraTomyEventType({ labels: ["オリジナル"], action: "予約期間終了" } as TakaraTomyCard),
+    want: "発売",
+  },
+  {
+    name: "タカラトミー: 「販売期間終了」「在庫なし」「入荷案内申込」も買えない",
+    fn: () =>
+      ["販売期間終了", "在庫なし", "入荷案内申込"].every((a) => takaraTomyUnavailable(a)),
+    want: true,
+  },
+  {
+    name: "タカラトミー: 買える状態のボタンは落とさない（巻き添えを出さない）",
+    fn: () =>
+      ["予約する", "カートに入れる", "カートに入れる（残りわずか！）", "抽選に応募する"].some((a) =>
+        takaraTomyUnavailable(a),
+      ),
+    want: false,
   },
   {
     name: "タカラトミー: ポケモン玩具はポケモンジャンル",
