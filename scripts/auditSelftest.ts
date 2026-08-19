@@ -48,7 +48,7 @@ import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSumma
 import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
 import { ROLLOVER_CRON_PATH, cronJstHour, rolloverProblem } from "../src/lib/rollover";
 import { imageVerdict } from "../src/lib/deadImage";
-import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
+import { buildLaunchPosts, buildPost, findForbidden, findNumberClaims, findStaleNumbers, type DraftRow } from "../src/lib/xDraftText";
 
 /** テスト内の改行。TSの "
 " を埋め込むと生成側で壊れやすいので定数にする */
@@ -680,7 +680,25 @@ const cases: Case[] = [
     want: ["【今日の予定】8/18(火)", "", "・抽選 商品A", "・開催 商品B", "", "→ https://hatsukore.com/"].join(LF),
   },
   {
-    name: "投稿: 日付が混在したら行頭に日付を残す（受付中を含む）",
+    name: "投稿: 日付が混在したら行頭に日付を残す（日付なしは収集元の文言）",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "商品B", type: "抽選", dateLabel: null, noDateLabel: "受付中" },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ x",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【抽選】", "", "・8/18(火) 商品A", "・受付中 商品B", "", "→ x"].join(LF),
+  },
+  // 🚨 2026-08-19 実測: 日付が無い行を機械が「受付中」で埋めていて、
+  //    `eventDateText="受付終了（直近 7/1）"`＝もう応募できない商品を
+  //    「受付中 ニッカウイスキー竹鶴」と書いていた。**日付が無い＝受付中ではない。**
+  {
+    name: "投稿: 日付も収集元の文言も無い行は載せない（受付中を勝手に書かない）",
     fn: () =>
       buildPost({
         rows: [
@@ -692,7 +710,38 @@ const cases: Case[] = [
         weigh: (t: string) => t.length,
         budget: 500,
       }).text,
-    want: ["【抽選】", "", "・8/18(火) 商品A", "・受付中 商品B", "", "→ x"].join(LF),
+    want: ["【抽選】8/18(火)", "", "・商品A", "", "→ x"].join(LF),
+  },
+  {
+    name: "投稿: 受付終了の文言はそのまま出る（受付中に化けない）",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "8/18(火)" },
+          { name: "竹鶴", type: "抽選", dateLabel: null, noDateLabel: "受付終了（直近 7/1）" },
+        ] as DraftRow[],
+        headBase: "今日の予定",
+        tail: "→ x",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【抽選】", "", "・8/18(火) 商品A", "・受付終了（直近 7/1） 竹鶴", "", "→ x"].join(LF),
+  },
+  {
+    name: "投稿: 見出しに足す語（応募受付中）は【】の後ろに出る",
+    fn: () =>
+      buildPost({
+        rows: [
+          { name: "商品A", type: "抽選", dateLabel: "〜8/19(水)" },
+          { name: "商品B", type: "抽選", dateLabel: "〜8/24(月)" },
+        ] as DraftRow[],
+        headBase: "抽選",
+        headNote: "応募受付中",
+        tail: "→ x",
+        weigh: (t: string) => t.length,
+        budget: 500,
+      }).text,
+    want: ["【抽選】応募受付中", "", "・〜8/19(水) 商品A", "・〜8/24(月) 商品B", "", "→ x"].join(LF),
   },
   {
     name: "投稿: 予算で落ちた行の種別は見出し判定に混ぜない",
@@ -719,6 +768,62 @@ const cases: Case[] = [
   {
     name: "投稿: 通常の本文は禁止語に引っかからない",
     fn: () => findForbidden("【抽選】8/18(火) ・NIKE MIND 001").length,
+    want: 0,
+  },
+  // (b-4) 本文に書いた「数」の腐り（2026-08-19 実測）。8/18に手で書いた告知が
+  //       `2,139件` `26の情報源` のまま残り、実データは `1,873件` `24` になっていた。
+  //       数は書いた瞬間から腐るのに、本人にもレビュアーにも誤りが見えない。
+  {
+    name: "数: 古い件数を拾う（実データに無い数は通さない）",
+    fn: () =>
+      findStaleNumbers("いま掲載 2,139件", { 件: [1873, 225, 103], 収集元: [24], ジャンル: [15] }).length,
+    want: 1,
+  },
+  {
+    name: "数: 実データと一致する件数は通す（桁区切りありでも）",
+    fn: () =>
+      findStaleNumbers("いま掲載 1,873件", { 件: [1873, 225, 103], 収集元: [24], ジャンル: [15] }).length,
+    want: 0,
+  },
+  {
+    name: "数: 同じ単位なら別の候補（今後7日）と一致してもよい",
+    fn: () =>
+      findStaleNumbers("予定が225件あります", { 件: [1873, 225, 103], 収集元: [24], ジャンル: [15] }).length,
+    want: 0,
+  },
+  {
+    name: "数: 収集元の数は件数の候補では通らない（単位ごとに突き合わせる）",
+    fn: () =>
+      findStaleNumbers("26の情報源から集めて", { 件: [1873, 26, 103], 収集元: [24], ジャンル: [15] }).length,
+    want: 1,
+  },
+  {
+    name: "数: 単位の無い数（日付・URL・商品名）は主張として拾わない",
+    fn: () => findNumberClaims("8/19(水) ポケカ 30th BOX https://hatsukore.com/items/92479").length,
+    want: 0,
+  },
+  {
+    name: "告知: 数は facts から入る（文面に手書きの数が残っていない）",
+    fn: () =>
+      buildLaunchPosts({ items: 1873, sources: 24, within7: 225, site: "https://hatsukore.com" })
+        .map((p) => findStaleNumbers(p.text, { 件: [1873, 225, 103], 収集元: [24], ジャンル: [15] }).length)
+        .reduce((a, b) => a + b, 0),
+    want: 0,
+  },
+  {
+    name: "告知: facts を変えると本文の数も変わる（定数が焼き付いていない）",
+    fn: () =>
+      buildLaunchPosts({ items: 42, sources: 7, within7: 3, site: "https://hatsukore.com" })
+        .map((p) => findStaleNumbers(p.text, { 件: [42, 3], 収集元: [7], ジャンル: [1] }).length)
+        .reduce((a, b) => a + b, 0),
+    want: 0,
+  },
+  {
+    name: "告知: 立ち位置に反する語が入っていない",
+    fn: () =>
+      buildLaunchPosts({ items: 1873, sources: 24, within7: 225, site: "https://hatsukore.com" })
+        .map((p) => findForbidden(p.text).length)
+        .reduce((a, b) => a + b, 0),
     want: 0,
   },
   // ── 表示層の語彙（静的スキャン・2026-08-18） ──────────────

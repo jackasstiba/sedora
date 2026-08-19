@@ -64,3 +64,8 @@ sweep-dump.txt
 # 使い捨ての調査スクリプト（_ 始まり / scratch_）。コミットに紛れ込ませない
 scripts/_*.ts
 scratch_*.mjs
+# X下書きのうち、その日のデータから作る使い捨て（launch_* は告知の文面なので残す）
+drafts/lottery.txt
+drafts/week.txt
+drafts/pick.txt
+drafts/pick_*.txt

@@ -146,7 +146,11 @@ async function call<T>(method: string, path: string, creds: XCreds, body?: unkno
           ? "\nヒント: 4つのキーの取り違え・前後の空白・改行混入を確認してください。"
           : res.status === 429
             ? "\nヒント: 無料枠の投稿上限に当たっています。開発者ポータルの Usage で残量を確認してください。"
-            : "";
+            : res.status === 402
+              ? "\nヒント: **投稿はクレジットを消費します**（2026-08-19 実測。読み取りは残高$0でも通るが" +
+                "POST /2/tweets は 402 credits depleted で弾かれる）。開発者ポータルの Billing で" +
+                "支払い方法を登録し、クレジットを買う必要があります。**本人操作**。"
+              : "";
     throw new Error(`X API ${method} ${path} が ${res.status} で失敗: ${detail}${hint}`);
   }
   if (json?.data === undefined) throw new Error(`X API ${path} の応答に data がありません: ${text.slice(0, 300)}`);
