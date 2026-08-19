@@ -31,6 +31,7 @@ import {
   monthPrecisionFromTitle,
   todayJst,
 } from "../src/lib/date";
+import { dateTextConflict, extractDates } from "../src/lib/dateText";
 import { cleanListTitle, cutsMidWord } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, overlapsRange, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
@@ -508,6 +509,44 @@ async function main() {
       baseline
     );
     console.log(`(参考) タイトルに日付が1つだけある ${compared}件を突合 / 食い違い ${bad.length}件`);
+  }
+
+  // (8b) **同じカードの中で、日付と日付の文言が食い違っている。**
+  //
+  // (8) はタイトルとの突合だった。こちらは `eventDate`（画面に出る日付ラベル「9/4(金)」）と
+  // `eventDateText`（収集元の文言「2026年09月18日登場予定」）を比べる。
+  // **文言のほうは画面に出ないことが多い**（時刻も期間も無い文言は eventPeriodText が出さない）。
+  // だから読者にも自分にも見えないまま、正解を同じ行に持ったまま間違った日付を出せる。
+  // 実測 2026-08-19: figisland 21件が最大2週間早い日付で本番に出ていた。
+  //
+  // 原因の型は「**表示文言ではない何か**（id 属性・data 属性・URL）から日付を作る」こと。
+  // 収集元が `id="20260904"` を 9/4・9/11・9/18 の3つの見出しで使い回していたため、
+  // 2週間ずれた日付が入った。表示文言で精度を決める（2026-08-15 のワンピース公式
+  // `datetime="2026-10-01"` と同型＝ミス15）。
+  //
+  // 文言に暦日が1つも無い行（「2026年9月上旬」「抽選 受付中」）は判定しない。
+  // 精度の話は date_fabricated_precision が別に見る。
+  {
+    const bad: string[] = [];
+    let compared = 0;
+    for (const r of shown) {
+      if (!r.eventDate || !r.eventDateText) continue;
+      // 母数は「文言に暦日があって突合できた行」だけを数える。突合できない行まで
+      // 母数に入れると、日付の文言が消えた日に**検査が痩せたことに気付けない**
+      // （check_coverage_shrunk が鳴らない）。
+      if (!extractDates(r.eventDateText).length) continue;
+      compared++;
+      const conflict = dateTextConflict(new Date(r.eventDate), r.eventDateText);
+      if (conflict) bad.push(`[${r.source} #${r.id}] ${conflict} ${cleanListTitle(r.source, r.title).slice(0, 34)}`);
+    }
+    report(
+      "date_text_mismatch",
+      "同じ行の日付と日付の文言が食い違っている（表示文言でない値から日付を作っている疑い）",
+      "error",
+      bad,
+      baseline,
+      compared
+    );
   }
 
   // (9) タイトル末尾の宙ぶらりん助詞（文が途中で切れた痕跡）
@@ -1929,6 +1968,15 @@ async function main() {
       ? []
       : ["scripts/scrape.ts が画像の後付け（runImageBackfill）を呼んでいない。更新のたびに画像なしの新着が公開される"];
     report("scrape_skips_images", "更新の経路から画像の後付けが外れている", "error", bad, baseline, 1);
+
+    // **一覧から落ちた行の締切を引き直す掃除**が、更新の経路に残っているか（同じ型の穴）。
+    // 実測 2026-08-20: 収集元の一覧は開催中のくじを全部は載せないので、落ちた行は更新されず
+    // **1日早い締切**のまま居座っていた（31件中11件が一覧の外・うち4件はまだ先の日付）。
+    // 外しても画面は普通に見えるので、外れたことに気付く手立てはこれしか無い。
+    const skipsRaffle = /^\s*(?:const .* = )?await\s+refreshRafflePeriods\s*\(/m.test(src)
+      ? []
+      : ["scripts/scrape.ts が締切の引き直し（refreshRafflePeriods）を呼んでいない。一覧から落ちた抽選が1日早い締切のまま残る"];
+    report("scrape_skips_raffle_refresh", "更新の経路から締切の引き直しが外れている", "error", skipsRaffle, baseline, 1);
   }
   {
     // **死んだ画像の掃除が更新の経路から外れていないか**（scrape_skips_images と同じ型の穴）。

@@ -3,6 +3,7 @@ import { todayJst } from "../lib/date";
 import { classifyGenre, fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import {
   extractDrawFee,
+  extractRafflePeriod,
   extractRafflePrizes,
   formatRafflePrizeHighlights,
 } from "./raffleKujiEnrich";
@@ -66,7 +67,11 @@ export async function scrapeRaffleKuji(): Promise<ScrapedItem[]> {
       subGenre: null,
       eventType: "抽選",
       eventDate: deadline,
-      eventDateText: deadline ? null : "抽選 受付中",
+      // 収集元の締切文言をそのまま持つ（"2026年08月20日 23:59 まで"）。捨てていたので:
+      //  ① **時刻が画面から消えていた**。「今から間に合うか」を決めるのは時刻のほう
+      //     （eventPeriodText が時刻を含む文言だけを日付の下に出す）。
+      //  ② 日付と突き合わせる相手が無く、audit の date_text_mismatch の母数から丸ごと外れていた。
+      eventDateText: deadlineText ?? "抽選 受付中",
       price: null,
       // 応募が実際に行われる一次ページ（＝応募ページ）に直リンク。
       url: `https://raffle-kuji.jp/lotteries/${id}`,
@@ -86,6 +91,14 @@ export async function scrapeRaffleKuji(): Promise<ScrapedItem[]> {
       const detail = await fetchHtml(item.url);
       const fee = extractDrawFee(detail);
       if (fee) item.price = fee;
+      // 受付期間は**応募ページ側を正とする**。一覧カードの「M月D日 23:59 まで」は
+      // 個別ページの「~ 翌日 08:59」と9時間ズレていた（実測6件すべて）。一覧だけを信じると、
+      // まだ応募できる朝に「締切済み」と表示することになる。
+      const period = extractRafflePeriod(detail);
+      if (period) {
+        item.eventDate = period.end;
+        item.eventDateText = period.text;
+      }
       const prizes = extractRafflePrizes(detail);
       if (prizes.length) {
         const highlights = formatRafflePrizeHighlights(prizes);

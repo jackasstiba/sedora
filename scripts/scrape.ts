@@ -9,6 +9,7 @@ import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { cleanupPokemonGoodsWindow } from "./cleanupRecentWindow";
 import { cleanupTakaraTomyEnded } from "./cleanupTakaraTomyEnded";
+import { refreshRafflePeriods } from "./refreshRafflePeriods";
 import { runImageBackfill } from "./backfillImages";
 import { runDeadImagePrune } from "./pruneDeadImages";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
@@ -169,6 +170,16 @@ async function main() {
     // 終了と言っている場合だけ**消す（一覧から消えただけの、まだ有効な予約を巻き込まないため）。
     if (source === "takaratomy_mall") {
       await cleanupTakaraTomyEnded(prisma, items.map((i) => i.sourceId));
+    }
+
+    // raffle_kuji の一覧も開催中のくじを全部は載せない。一覧から落ちた行は更新されないので、
+    // **一覧カード由来の1日早い締切**（応募ページの本当の受付終了は翌朝08:59）を出したまま
+    // 居座る。消すのではなく、応募ページを開いて日付を引き直す。
+    if (source === "raffle_kuji") {
+      const r = await refreshRafflePeriods(prisma, items.map((i) => i.sourceId));
+      console.log(
+        `[raffle_kuji] 一覧から落ちた行の締切を引き直し: 対象${r.checked}件 / 更新${r.updated}件 / 期間を読めず${r.unreadable}件`
+      );
     }
 
     console.log(`[${source}] ${items.length}件処理`);

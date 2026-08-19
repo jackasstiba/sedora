@@ -8,8 +8,9 @@
  * ただし突合は誤報しやすい（SPA・画像内テキスト・表記ゆれ）。実測した信号の強さは:
  *   ・識別語がリンク先に出るか … 強い（商品の同一性。0/2以上で外れは実際に陳腐化・誤リンク）
  *   ・価格が本文にあるか       … 中（数字は載っていることが多いが、税抜/税込で揺れる）
- *   ・日付が本文にあるか       … 弱い（書式が多様・画像化されている）→ **判定しない。参考値だけ出す**
- * よって指摘するのは「識別語が1つも出ない」「価格が本文に無い」の2つに絞り、
+ *   ・日付が本文にあるか       … **暦日として取り出して比べれば判定できる**（2026-08-19 に実装）。
+ *                                 ただし鳴らすのは「こちらの日付が一次情報のどこにも無い」ときだけの片側の網。
+ * よって指摘するのは「識別語が1つも出ない」「価格が本文に無い」「日付がどこにも無い」に絞り、
  * どちらも WARN（要確認）に留める。誤報する検査は本物を埋もれさせるため。
  *
  * 使い方: npm run audit:facts [-- --per-source 3] [-- --source figisland]
@@ -26,6 +27,9 @@ import { normalizeForSearch } from "../src/lib/itemFilter";
 import { franchiseAliases } from "../src/lib/franchise";
 import { identityTokens, pageShowsProduct } from "../src/lib/identity";
 import { parseYen } from "../src/lib/margin";
+import { datesInclude, extractDates } from "../src/lib/dateText";
+import { isMonthPrecision } from "../src/lib/date";
+import { parseStoresJson } from "../src/lib/stores";
 
 // 本文の代わりにログイン壁・同意画面を返すホスト。文字数は十分あるので「本文が取れた」と
 // 誤認し、識別語が1つも出ない＝要確認、という**中身を見ていない誤報**になる（実測: x_watch の
@@ -258,15 +262,48 @@ async function main() {
         }
       }
 
-      // (3) 日付は参考値のみ（書式が多様で判定に耐えない）。
-      if (r.eventDate) {
-        const d = new Date(r.eventDate);
-        dateTotal++;
-        if (
-          text.includes(`${d.getUTCMonth() + 1}月${d.getUTCDate()}日`) ||
-          text.includes(`${d.getUTCMonth() + 1}/${d.getUTCDate()}`)
-        )
-          dateHit++;
+      // (3) 日付が一次情報に書かれているか。
+      //
+      // 2026-08-19 まで、ここは **substring で数えるだけの参考値** だった（「書式が多様だから
+      // 判定に耐えない」）。だが日付はこのサイトが一番強く言い切る値で、間違えると読者は
+      // 応募・発売を逃す。実際、投稿の下書きを作った日に「日付だけ裏が取れていない」ことが
+      // 露見した。substring が弱いのは**比べ方**が悪いからで、暦日として取り出してから
+      // 比べれば判定できる（src/lib/dateText.ts）。
+      //
+      // ⚠️ **片側の網**にする。鳴らすのは「こちらの日付が一次情報のどこにも無い」ときだけ。
+      // 一覧・カレンダーのように日付が大量に載るページでは偶然一致して見逃す（＝感度は落ちる）が、
+      // それは誤報より安い。誤報する検査は本物を埋もれさせる（ENDED_WORDS で実測済み）。
+      // **通販の商品ページ・検索結果は日付の一次情報ではない**ので対象外にする。
+      // 抽選日・再販日を告知しているのは収集元の記事や応募ページであって、通販の棚ではない。
+      // 実測 2026-08-19/20 の誤報2件:
+      //   ・楽天検索 … 並ぶ「08/20・9/10」等はお届け日や別商品の日付
+      //   ・Amazon の商品ページ … 本文の日付は**全部レビュー日**（「2026年3月9日に日本で
+      //     レビュー済み」）。何を載せても掲載日付と一致しないので、必ず鳴る＝ただの雑音。
+      // 読めないものを根拠に指摘しない（価格の判定で通った道と同じ）。
+      const urlIsMarketplace = urlIsSearchPage || /amazon\.co\.jp\/(?:dp|gp\/product)\//.test(r.url);
+      if (r.eventDate && !isMonthPrecision(r.eventDateText) && !urlIsMarketplace) {
+        // 商品がそのページに載っていない行は、日付ではなく**リンクが違う**問題。
+        // (1) が既に指摘しているので二重に鳴らさない。
+        const pageDates = matched ? extractDates(text) : [];
+        if (pageDates.length) {
+          dateTotal++;
+          // 1つの行が複数の応募先を束ねている場合（card_chusen は最大17店・締切がばらける）、
+          // 画面の日付は「全店が締め切る日」で、リンク先は**その中の1店**。店の締切と
+          // 食い違って当然なので、この行が持つ締切のどれかに当たれば一致とみなす。
+          const candidates = [new Date(r.eventDate)];
+          for (const s of parseStoresJson(r.stores) ?? [])
+            if (s.kind === "締切" && s.at) candidates.push(new Date(`${s.at}T00:00:00.000Z`));
+          if (candidates.some((c) => datesInclude(pageDates, c))) dateHit++;
+          else
+            findings.push({
+              kind: "日付が一次情報に見当たらない",
+              detail:
+                `[${source} #${r.id}] 掲載 ${new Date(r.eventDate).toISOString().slice(0, 10)}` +
+                `${candidates.length > 1 ? `（応募先の締切 ${candidates.length - 1}件を含めても不一致）` : ""}` +
+                ` ↔ 一次情報の日付 ${[...new Set(pageDates.map((p) => p.raw))].slice(0, 6).join("・")}` +
+                ` ${title.slice(0, 30)} → ${r.url}`,
+            });
+        }
       }
       await new Promise((s) => setTimeout(s, 300));
     }
@@ -274,7 +311,7 @@ async function main() {
 
   console.log(
     `突合できたページ ${checked}件 / 本文を取れず判定不能 ${unusable}件 / 画像を確かめた ${imageChecked}件 / ` +
-      `日付が本文に見つかった割合 ${dateTotal ? Math.round((dateHit / dateTotal) * 100) : 0}%（参考・判定には使わない）`
+      `日付を突合できた ${dateTotal}件のうち一致 ${dateHit}件`
   );
 
   if (endedRows.length) {

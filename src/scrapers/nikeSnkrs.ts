@@ -176,5 +176,28 @@ export async function scrapeNikeSnkrs(): Promise<ScrapedItem[]> {
     });
   }
 
-  return items;
+  return disambiguateSameTitle(items);
+}
+
+/**
+ * 同じ回に**まったく同じ商品名**が2つ以上あるとき、品番を付けて区別する。
+ *
+ * 実測 2026-08-20: 「ナイキ ブレイジー」が2件（IM2523-001＝10/1発売 / IM2523-100＝8/28発売）。
+ * SNKRS の商品名にはカラーが入らないので、一覧には**同じ名前・違う日付のカードが2枚**並ぶ。
+ * このサイトは「どれがいつ買えるか」を出すのが役目なので、名前で区別が付かないと
+ * 日付そのものが読者にとって意味を失う（どちらの日付か分からない）。
+ *
+ * 付けるのは**品番（styleColor）**。収集元がカラー名を日本語で持っていないので、
+ * URLのスラッグ（"blazy-white-and-sail"）から色名を作ると**こちらが訳した言葉**になる。
+ * 品番は収集元が持っている識別子そのもので、せどらーが実際に照合に使う値でもある。
+ * 衝突したときだけ付ける（毎回付けると、区別の要らない商品名まで長くなる）。
+ */
+export function disambiguateSameTitle(items: ScrapedItem[]): ScrapedItem[] {
+  const count = new Map<string, number>();
+  for (const it of items) count.set(it.title, (count.get(it.title) ?? 0) + 1);
+  return items.map((it) =>
+    (count.get(it.title) ?? 0) > 1 && /^[A-Z0-9-]+$/.test(it.sourceId)
+      ? { ...it, title: `${it.title}（${it.sourceId}）` }
+      : it
+  );
 }

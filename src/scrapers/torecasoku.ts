@@ -75,6 +75,7 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
       .filter((_, ul) => $(ul).children("li.releasedate-section").length > 0)
       .each((_, ul) => {
         let currentDate: Date | null = null;
+        let currentDateText: string | null = null;
 
         $(ul)
           .children("li")
@@ -84,6 +85,13 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
             if ($li.hasClass("releasedate-section")) {
               const dr = $li.attr("data-release") ?? "";
               currentDate = parseYyyymmdd(dr);
+              // 見出しの**文言**も持ち帰る。理由は2つ:
+              //  ① 日付を属性(`data-release`)から作っているので、属性と文言が食い違ったときに
+              //     気付く手立てが要る（figisland は収集元が id を使い回していて2週間ズレた）。
+              //     文言を保存しておけば audit の date_text_mismatch が毎回突き合わせる。
+              //  ② 収集元は「8月1日（土）頃発売」と**頃**を付けている。こちらが「発売日 8/1(土)」
+              //     と言い切ると、収集元より強い約束をすることになる。
+              currentDateText = $li.text().replace(/\s+/g, " ").trim() || null;
               return;
             }
             if (!$li.hasClass("goods_info")) return;
@@ -122,7 +130,7 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
               subGenre: maker || null,
               eventType: "発売",
               eventDate: currentDate,
-              eventDateText: null,
+              eventDateText: currentDateText,
               // 販売単位の表記が無いのにBOX級の価格が付く商品がある（定価ともBOX価格とも
               // 裏取りできない）。裏取りできない価格は載せない。
               price: isSuspectPackPrice(genre, title, price) ? null : price,

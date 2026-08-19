@@ -39,6 +39,25 @@ export function extractDrawFee(html: string): string | null {
   return /\d/.test(t) ? t : null;
 }
 
+/**
+ * 受付期間（"2026年08月19日 03:00 ~ 2026年09月01日 08:59"）と、その終わりの暦日を返す。
+ *
+ * なぜ個別ページを読むのか（2026-08-19 実測・6件すべてで再現）: 一覧カードの締切は
+ * **「2026年08月31日 23:59 まで」なのに、個別ページの受付期間は「~ 2026年09月01日 08:59」**。
+ * 収集元の中で9時間ぶんズレていて、一覧だけを信じると**まだ応募できる朝を「締切済み」と
+ * 表示する**。応募の可否を決めるのは応募ページ側の期間なので、そちらを正とする。
+ */
+export function extractRafflePeriod(html: string): { text: string; end: Date } | null {
+  const m = strip(html).match(
+    /(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2})\s*[~〜～]\s*(\d{4})年(\d{1,2})月(\d{1,2})日\s*(\d{1,2}:\d{2})/
+  );
+  if (!m) return null;
+  return {
+    text: `${m[1]}年${m[2]}月${m[3]}日 ${m[4]} ~ ${m[5]}年${m[6]}月${m[7]}日 ${m[8]}`,
+    end: new Date(Date.UTC(Number(m[5]), Number(m[6]) - 1, Number(m[7]))),
+  };
+}
+
 export type RafflePrize = { label: string; name: string; image: string | null };
 
 /**

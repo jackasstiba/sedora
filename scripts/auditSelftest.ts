@@ -46,6 +46,10 @@ import {
   pageExcludesPast,
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
+import { dateTextConflict, extractDates } from "../src/lib/dateText";
+import { parseFigislandHeadingDate } from "../src/scrapers/figisland";
+import { extractRafflePeriod } from "../src/scrapers/raffleKujiEnrich";
+import { disambiguateSameTitle } from "../src/scrapers/nikeSnkrs";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
 import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, matchesQuery, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
 import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
@@ -150,7 +154,7 @@ const EVENT_ARTICLE_HTML =
   '<a href="https://anime-store.jp/products/4934054076093">関連グッズ</a>' +
   "</div>";
 
-const ymd = (d: Date) => d.toISOString().slice(0, 10);
+const ymd = (d: Date | null) => (d ? d.toISOString().slice(0, 10) : null);
 
 /** 時計lint の呼び出しを短く書くための helper（ファイル名は検査対象になる任意の名前）。 */
 const cl = (src: string) => findClockViolations("src/scrapers/example.ts", src);
@@ -387,6 +391,60 @@ const cases: Case[] = [
   { name: "近い未来はそのまま今年", fn: () => ymd(resolveMonthDay(9, 20, today)), want: "2026-09-20" },
   { name: "年またぎの先行情報は翌年", fn: () => ymd(resolveMonthDay(1, 7, today)), want: "2027-01-07" },
   { name: "基準を記事の投稿日にすると当時の年で読む", fn: () => ymd(resolveMonthDay(4, 28, new Date(Date.UTC(2026, 3, 20)))), want: "2026-04-28" },
+
+  // ── 文章から暦日を取り出す（date_text_mismatch と audit:facts の日付突合の土台） ──────
+  // 2026-08-19 実測: 収集元の見出しが `id="20260904"` を 9/4・9/11・9/18 の3つで使い回しており、
+  // id を信じていた 23件が本番で「9/4(金)」と「2026年09月18日登場予定」を同時に表示していた。
+  // 鳴る側と、**誤報しやすい表記で鳴らない側**の両方を固定する。
+  { name: "年付きの日付を取り出す", fn: () => extractDates("2026年09月18日登場予定").map((d) => `${d.year}-${d.month}-${d.day}`).join(","), want: "2026-9-18" },
+  { name: "全角の日付も取り出す", fn: () => extractDates("８月２１日（金）").map((d) => `${d.month}/${d.day}`).join(","), want: "8/21" },
+  { name: "期間は両端とも取り出す", fn: () => extractDates("2026年8月19日〜10月20日").map((d) => `${d.month}/${d.day}`).join(","), want: "8/19,10/20" },
+  // 「それらしく読めてしまう」表記ほど誤報になる（過去に週表記を8月5日と読んで93件誤報した）。
+  { name: "週表記から日付を作らない", fn: () => extractDates("2026年08月05週登場予定").length, want: 0 },
+  { name: "上旬・下旬から日付を作らない", fn: () => extractDates("2026年09月上旬").length, want: 0 },
+  { name: "月精度の文言から日付を作らない", fn: () => extractDates("2026年9月発送予定").length, want: 0 },
+  { name: "スケール表記を日付と読まない", fn: () => extractDates("1/144スケール ガンダム").length, want: 0 },
+  // 年付きの日付を「年の無い日付」として二度拾うと、年だけ違う日付が一致扱いになる。
+  { name: "年だけ違う日付は食い違いとして鳴る", fn: () => dateTextConflict(new Date(Date.UTC(2027, 7, 19)), "2026年8月19日") !== null, want: true },
+  { name: "日付が文言と一致していれば鳴らない", fn: () => dateTextConflict(new Date(Date.UTC(2026, 8, 18)), "2026年09月18日登場予定"), want: null },
+  { name: "日付が文言と食い違えば鳴る", fn: () => dateTextConflict(new Date(Date.UTC(2026, 8, 4)), "2026年09月18日登場予定") !== null, want: true },
+  { name: "期間のどちらの端でも一致とみなす", fn: () => dateTextConflict(new Date(Date.UTC(2026, 9, 20)), "2026年8月19日〜10月20日"), want: null },
+  { name: "暦日が書かれていない文言は判定しない", fn: () => dateTextConflict(new Date(Date.UTC(2026, 8, 1)), "2026年09月上旬"), want: null },
+  // 収集元の見出しは**文言**で読む（id 属性は収集元の内部都合で、使い回されていた）。
+  { name: "見出しの文言から日付を作る", fn: () => ymd(parseFigislandHeadingDate("2026年09月18日登場予定")), want: "2026-09-18" },
+  { name: "日が公表されていない見出しは日付を作らない", fn: () => parseFigislandHeadingDate("2026年09月02週登場予定"), want: null },
+  { name: "月だけの見出しも日付を作らない", fn: () => parseFigislandHeadingDate("2026年09月登場予定"), want: null },
+  // 受付期間は応募ページ側を正とする（一覧カードは「08月31日 23:59 まで」＝9時間手前を指していた）。
+  {
+    name: "応募ページの受付期間から締切日を採る",
+    fn: () => ymd(extractRafflePeriod('<div>2026年08月19日 03:00 ~ 2026年09月01日 08:59</div>')?.end ?? null),
+    want: "2026-09-01",
+  },
+  {
+    name: "受付期間は収集元の文言のまま持つ",
+    fn: () => extractRafflePeriod('<div>2026年08月19日 03:00 ~ 2026年09月01日 08:59</div>')?.text,
+    want: "2026年08月19日 03:00 ~ 2026年09月01日 08:59",
+  },
+  { name: "期間が書かれていなければ作らない", fn: () => extractRafflePeriod("<div>受付中</div>"), want: null },
+  // 同名・別日付が並ぶと、日付がどちらのものか読者に決められない（実測: ナイキ ブレイジー 2件）。
+  {
+    name: "同名が並んだら品番で区別する",
+    fn: () =>
+      disambiguateSameTitle([
+        { source: "nike_snkrs", sourceId: "IM2523-001", title: "ナイキ ブレイジー", genre: "スニーカー", subGenre: null, eventType: "発売", eventDate: null, eventDateText: null, price: null, url: "u1", imageUrl: null },
+        { source: "nike_snkrs", sourceId: "IM2523-100", title: "ナイキ ブレイジー", genre: "スニーカー", subGenre: null, eventType: "発売", eventDate: null, eventDateText: null, price: null, url: "u2", imageUrl: null },
+      ]).map((i) => i.title).join(" / "),
+    want: "ナイキ ブレイジー（IM2523-001） / ナイキ ブレイジー（IM2523-100）",
+  },
+  {
+    name: "重なっていない商品名は触らない",
+    fn: () =>
+      disambiguateSameTitle([
+        { source: "nike_snkrs", sourceId: "IM2523-001", title: "ナイキ ブレイジー", genre: "スニーカー", subGenre: null, eventType: "発売", eventDate: null, eventDateText: null, price: null, url: "u1", imageUrl: null },
+        { source: "nike_snkrs", sourceId: "HF1234-001", title: "ナイキ ダンク", genre: "スニーカー", subGenre: null, eventType: "発売", eventDate: null, eventDateText: null, price: null, url: "u2", imageUrl: null },
+      ]).map((i) => i.title).join(" / "),
+    want: "ナイキ ブレイジー / ナイキ ダンク",
+  },
 
   // ── 掲載減の理由分け（実測: 閾値だけの検査がスニーカーで毎日誤報していた型） ──────
   // 「暦のせいで減った」を故障と鳴らさない／「コード変更で削った」を見逃さない、の両方を固定する。

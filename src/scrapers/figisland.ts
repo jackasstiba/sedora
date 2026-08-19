@@ -1,6 +1,6 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
-import { fetchHtml, parseYyyymmdd } from "./util";
+import { fetchHtml, parseJapaneseFullDate } from "./util";
 
 /**
  * 一覧ページ。**個別ページがまだ無い行の置き場**としても使う（`url` は必須列なので null にできない）。
@@ -19,6 +19,17 @@ export function figislandListPlaceholder(source: string, url: string): boolean {
   return source === "figisland" && url === LIST_URL;
 }
 
+/**
+ * 見出しの文言（"2026年09月18日登場予定"）→ 暦日。
+ *
+ * 日まで書かれているものだけを日付にする。「2026年09月02週登場予定」「2026年08月下旬登場予定」
+ * 「2026年09月登場予定」は**日が公表されていない**ので日付を作らない（null）＝
+ * 月精度の情報から特定日を合成しない（date_fabricated_precision と同じ約束）。
+ */
+export function parseFigislandHeadingDate(headingText: string): Date | null {
+  return parseJapaneseFullDate(headingText);
+}
+
 export async function scrapeFigisland(): Promise<ScrapedItem[]> {
   const html = await fetchHtml(LIST_URL);
   const $ = cheerio.load(html);
@@ -27,9 +38,15 @@ export async function scrapeFigisland(): Promise<ScrapedItem[]> {
   $("div.entry-content.cf[itemprop='mainEntityOfPage'] > div.yoteiall").each((_, groupEl) => {
     const group = $(groupEl);
     const heading = group.find("> h2[id]").first();
-    const headingId = heading.attr("id") ?? "";
-    const eventDate = parseYyyymmdd(headingId);
     const headingText = heading.text().trim();
+    // 日付は **見出しの文言** から作る。id 属性から作ってはいけない。
+    //
+    // 実測 2026-08-19: 収集元の9月分は `id="20260904"` が **3つの見出しで使い回されていた**
+    // （9月04日／9月11日／9月18日）。id を信じていたため 21件が最大2週間早い日付で本番に出ていた
+    // （/items/95479 の `<title>` が「…の登場予定｜9/4(金)」＝正しくは 9/18）。
+    // 読者に見えているのは見出しの文言のほうで、id は収集元の内部都合（アンカー）に過ぎない。
+    // ワンピース公式の `datetime="2026-10-01"`（表示は「2026.10」）と同じ型＝ミス15。
+    const eventDate = parseFigislandHeadingDate(headingText);
 
     group.find("> div.yotei").each((_, itemEl) => {
       const el = $(itemEl);
