@@ -44,7 +44,7 @@ import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKey
 import { readPreviousPageIds, runDrift } from "./auditDrift";
 import { isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
-import { conflictingJanImages, isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
+import { cannotSourceImage, conflictingJanImages, isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { figislandListPlaceholder } from "../src/scrapers/figisland";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
@@ -1811,21 +1811,30 @@ async function main() {
 
     // ③ **ソース丸ごと画像ゼロ**＝今回の型そのもの。新しいスクレイパーを足したのに
     //    画像の取り方を用意し忘れると、全体の率では薄まって見えないのでソース単位で見る。
-    const bySrcImg = new Map<string, { n: number; withImage: number }>();
+    // **取れないのが正常な行は母数から外す。** 実測 2026-08-19: nyuka_now が 95%→61% に
+    // 落ちて壊れたように見えたが、画像なし30件のうち28件はAmazonへのリンク＝
+    // 方針として採らないと決めている先だった（cannotSourceImage）。母数に入れたままだと、
+    // 次に見た人が「直そう」として方針を覆しにいく。
+    const bySrcImg = new Map<string, { n: number; withImage: number; noSource: number }>();
     for (const r of shown) {
-      const e = bySrcImg.get(r.source) ?? { n: 0, withImage: 0 };
-      e.n++;
-      if (r.imageUrl) e.withImage++;
+      const e = bySrcImg.get(r.source) ?? { n: 0, withImage: 0, noSource: 0 };
+      if (!r.imageUrl && cannotSourceImage(r.url)) e.noSource++;
+      else {
+        e.n++;
+        if (r.imageUrl) e.withImage++;
+      }
       bySrcImg.set(r.source, e);
     }
     const zero: string[] = [];
     const dropped: string[] = [];
     for (const [src, e] of bySrcImg) {
+      if (e.n === 0) continue; // 全部「取りようがない」行＝率を出す意味が無い
       const now = e.withImage / e.n;
       if (e.n >= 10) {
         metrics[`image_rate:${src}`] = Math.round(now * 100) / 100;
         if (e.withImage === 0)
           zero.push(`${src}: 表示${e.n}件すべて画像なし（画像の取り方が用意されていない）`);
+        if (e.noSource > 0) metrics[`image_nosource:${src}`] = e.noSource;
         const prev = baseline.metrics?.[`image_rate:${src}`];
         if (prev != null && prev >= 0.5 && now < prev * 0.5)
           dropped.push(`${src}: 画像のある率 ${Math.round(prev * 100)}%→${Math.round(now * 100)}%（${e.withImage}/${e.n}件）`);

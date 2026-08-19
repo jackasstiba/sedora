@@ -1,5 +1,6 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay } from "./util";
+import { readPageText, verifyStoreUrls } from "./verifyStoreUrl";
 import { decodeHtmlEntities, stripTags } from "./aggregatorUtil";
 import { lastDeadline, preferredStoreUrl, summarizeStores } from "../lib/stores";
 import { todayJst } from "../lib/date";
@@ -271,7 +272,11 @@ export function buildCardChusenItems(entries: Entry[]): ScrapedItem[] {
   return items;
 }
 
+
 export async function scrapeCardChusen(): Promise<ScrapedItem[]> {
   const html = await fetchHtml(HOME);
-  return buildCardChusenItems(parseCardChusen(html));
+  const items = buildCardChusenItems(parseCardChusen(html));
+  const r = await verifyStoreUrls("card_chusen", items, readPageText);
+  console.log(`[card_chusen] 画面に出すURLの裏取り: ${r.checked}件を開いて ${r.swapped}件を差し替え`);
+  return items;
 }

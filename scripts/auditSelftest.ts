@@ -102,6 +102,11 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { baselineWritable } from "./factsBaseline";
+import { parseYen } from "../src/lib/margin";
+import { chooseVerifiedUrl, isUnreadableUrl, orderedStoreUrls } from "../src/scrapers/verifyStoreUrl";
+import { canJudgeIdentity, identityMatchCount, pageShowsProduct } from "../src/lib/identity";
+import { cannotSourceImage } from "../src/scrapers/imagePick";
+import { normalizeForSearch } from "../src/lib/itemFilter";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
@@ -2363,6 +2368,191 @@ const cases: Case[] = [
     want: "ポケモン",
   },
   { name: "タカラトミー: トミカは玩具ジャンル", fn: () => takaraTomyGenre("トミカ ギフトセット"), want: "玩具" },
+
+  // ── 画像を取りようがないリンク先（2026-08-19）──────────────────────
+  // 実測: nyuka_now の画像付与率が 95%→61% に落ちて「壊れた」ように見えたが、
+  // 画像なし30件のうち **28件がAmazonへのリンク**＝方針として採らないと決めている先だった。
+  // 率の母数に入れたままだと、次に見た人（や自分）が方針を覆して取りに行こうとする。
+  {
+    name: "画像: Amazonの商品ページからは取らない（借りてよい根拠が無い）",
+    fn: () => cannotSourceImage("https://www.amazon.co.jp/dp/B0H7VPGMPJ"),
+    want: true,
+  },
+  {
+    name: "画像: 応募フォームには商品画像が無い",
+    fn: () => cannotSourceImage("https://docs.google.com/forms/d/e/abc/viewform"),
+    want: true,
+  },
+  {
+    // 鳴らない側。一次ストアは普通に取れるので母数から外さない。
+    name: "画像: 一次ストアの商品ページは取れる側",
+    fn: () => cannotSourceImage("https://takaratomymall.jp/shop/g/g4904810066729/"),
+    want: false,
+  },
+  {
+    // amazon を含むだけの別ホストを巻き込まない（ホストで解く）。
+    name: "画像: ホスト名で判定する（amazonを含む別ドメインを巻き込まない）",
+    fn: () => cannotSourceImage("https://not-amazon.co.jp.example.com/item/1"),
+    want: false,
+  },
+  { name: "画像: 壊れたURLは判定しない", fn: () => cannotSourceImage("not a url"), want: false },
+
+  // ── 画面に出すURLの裏取り（2026-08-19）──────────────────────────
+  // 実測 #92479: 「ポケモンカードゲーム MEGA 30th CELEBRATION プレミアムデッキセット」の
+  // item.url が**ヤマダデジタル会員アプリの説明ページ**（本文476字・商品名なし）だった。
+  // preferredStoreUrl は店舗ドメインを最優先するので、汎用ページでも1位になってしまう。
+  {
+    name: "URL裏取り: 載っていると確かめたページを最優先",
+    fn: () =>
+      chooseVerifiedUrl([
+        { url: "https://yamada.example/kaiin", verdict: "mismatch" },
+        { url: "https://aeon.example/lottery", verdict: "ok" },
+        { url: "https://x.com/a/status/1", verdict: "unknown" },
+      ]),
+    want: "https://aeon.example/lottery",
+  },
+  {
+    // **分からないことを、外れの根拠にしない。** 開けないX告知は、商品が載っていないと
+    // 分かった店舗ページより優先する。
+    name: "URL裏取り: 確かめられないURLは、載っていないと分かったURLより優先",
+    fn: () =>
+      chooseVerifiedUrl([
+        { url: "https://yamada.example/kaiin", verdict: "mismatch" },
+        { url: "https://x.com/a/status/1", verdict: "unknown" },
+      ]),
+    want: "https://x.com/a/status/1",
+  },
+  {
+    name: "URL裏取り: 全部外れなら元の順の先頭に留める（URLを空にしない）",
+    fn: () =>
+      chooseVerifiedUrl([
+        { url: "https://a.example/x", verdict: "mismatch" },
+        { url: "https://b.example/y", verdict: "mismatch" },
+      ]),
+    want: "https://a.example/x",
+  },
+  { name: "URL裏取り: 候補が無ければ null", fn: () => chooseVerifiedUrl([]), want: null },
+  {
+    // 実測: 「ポケモンカード デッキビルドBOX 黒炎の支配者」の候補で、ポケカ全般の告知ページは
+    // 「ポケモンカード」1語しか当たらない。2値で選ぶと弱い一致が1位になるので、数の多い方を採る。
+    name: "URL裏取り: 載っている候補が複数なら、識別語が多く当たった方を採る",
+    fn: () =>
+      chooseVerifiedUrl([
+        { url: "https://weak.example/news", verdict: "ok", score: 1 },
+        { url: "https://strong.example/item", verdict: "ok", score: 3 },
+      ]),
+    want: "https://strong.example/item",
+  },
+  {
+    name: "URL裏取り: 同点なら先に見た方（＝店舗ドメイン優先の順）を保つ",
+    fn: () =>
+      chooseVerifiedUrl([
+        { url: "https://a.example/x", verdict: "ok", score: 2 },
+        { url: "https://b.example/y", verdict: "ok", score: 2 },
+      ]),
+    want: "https://a.example/x",
+  },
+  {
+    name: "識別語: 当たった数を数える",
+    fn: () =>
+      identityMatchCount(
+        normalizeForSearch("30th CELEBRATION プレミアムデッキセット 抽選"),
+        "ポケモンカードゲーム MEGA 30th CELEBRATION プレミアムデッキセット エーフィ"
+      ),
+    want: 3,
+  },
+  {
+    // 開いても中身が分からない先は取りに行かない（JSで描くフォーム・ログイン必須のX）。
+    name: "URL裏取り: Googleフォームは読めないURL",
+    fn: () => isUnreadableUrl("https://docs.google.com/forms/d/e/abc/viewform"),
+    want: true,
+  },
+  { name: "URL裏取り: X告知は読めないURL", fn: () => isUnreadableUrl("https://x.com/foo/status/1"), want: true },
+  {
+    name: "URL裏取り: 店舗ドメインは読めるURL",
+    fn: () => isUnreadableUrl("https://www.yamada-denki.jp/service/pointservice/digital-kaiin.html"),
+    want: false,
+  },
+  {
+    // 並び順は preferredStoreUrl と同じ＝店舗ドメイン＞フォーム＞X告知。
+    name: "URL裏取り: 候補は店舗ドメイン＞フォーム＞X告知の順に見る",
+    fn: () =>
+      orderedStoreUrls([
+        { url: "https://x.com/a/status/1" },
+        { url: "https://docs.google.com/forms/d/e/a/viewform" },
+        { url: "https://shop.example/item/1" },
+      ]).join(","),
+    want: "https://shop.example/item/1,https://docs.google.com/forms/d/e/a/viewform,https://x.com/a/status/1",
+  },
+  // ── 識別語（取り込み側と検査側で同じ物差しを使う） ──
+  {
+    // ヤマダの会員説明ページには商品名が1語も無い＝載っていない。
+    name: "識別語: 商品名の語が1つも無いページは「載っていない」",
+    fn: () =>
+      pageShowsProduct(
+        normalizeForSearch("ヤマダデジタル会員アプリ ポイントサービスのご案内"),
+        "ポケモンカードゲーム MEGA 30th CELEBRATION プレミアムデッキセット エーフィ"
+      ),
+    want: false,
+  },
+  {
+    name: "識別語: 商品名の語が出ていれば「載っている」",
+    fn: () =>
+      pageShowsProduct(
+        normalizeForSearch("30th CELEBRATION プレミアムデッキセット 抽選販売のお知らせ"),
+        "ポケモンカードゲーム MEGA 30th CELEBRATION プレミアムデッキセット エーフィ"
+      ),
+    want: true,
+  },
+  {
+    // 作品名は日英・カナで割れる。エイリアス表を通すので正しいリンクを外さない。
+    name: "識別語: 作品名の表記ゆれ（ワンピースカードゲーム）でも当てる",
+    fn: () =>
+      pageShowsProduct(normalizeForSearch("ワンピースカードゲーム 予約受付"), "ONE PIECE カードゲーム 新たなる皇帝"),
+    want: true,
+  },
+  {
+    // 実測 #91634: こちらの掲載名は「ジェラートピケ」、Amazon の商品名は「ジェラート ピケ」。
+    // 同じ商品なのに「リンク先に商品が見当たらない」と誤報していた（＝一次情報を嘘だと言う側の誤り）。
+    name: "識別語: 空白の入り方が違っても同じ商品と読む",
+    fn: () =>
+      pageShowsProduct(
+        normalizeForSearch("[ジェラート ピケ] 【ドラゴンクエスト】ポーチ PWGB264609"),
+        "ジェラートピケ・アイテム各種"
+      ),
+    want: true,
+  },
+  {
+    // 識別語が1語しか無い名前は、一致しなくても「載っていない」と言い切れない。
+    name: "識別語: 1語しか無い商品名は判定しない",
+    fn: () => canJudgeIdentity("amiibo"),
+    want: false,
+  },
+
+  // ── 価格の読み取り（2026-08-19）──────────────────────────────
+  // 実測: `/\d{2,7}/` で切っていたので、8桁以上の価格が**途中で切れて別の数**になっていた。
+  // `audit:links` が「掲載価格 16,000,000円 が一次情報に無い」と誤報した原因＝
+  // 手元が 1,600,000 になっていて、収集元の 16,000,000 と一致しなかった（正しい価格を嘘だと言った）。
+  {
+    name: "価格: 8桁の価格を途中で切らない（16,000,000円）",
+    fn: () => parseYen("16,000,000円"),
+    want: 16000000,
+  },
+  {
+    // 13桁のJANは価格ではない。以前は先頭7桁を拾って 4,904,810円 という存在しない価格になった。
+    name: "価格: 13桁のJANは価格として読まない",
+    fn: () => parseYen("4904810066729"),
+    want: null,
+  },
+  { name: "価格: 税込表記から読む", fn: () => parseYen("2,970円(税込)"), want: 2970 },
+  { name: "価格: ¥表記から読む", fn: () => parseYen("¥18,700"), want: 18700 },
+  {
+    // 「1BOX(20パック)¥3,960」＝紛れの中から最大値を採る（元からの仕様）。
+    name: "価格: 紛れがあっても最大の数を採る",
+    fn: () => parseYen("1BOX(20パック)¥3,960"),
+    want: 3960,
+  },
+  { name: "価格: 数字が無ければ null", fn: () => parseYen("価格未定"), want: null },
 
   // ── 基準に書いてよい回か（2026-08-19）──────────────────────────
   // 実測: 同じ日に全件突合を2回回したら、1回目は判定不能24/突合844、

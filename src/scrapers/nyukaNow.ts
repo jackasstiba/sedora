@@ -1,6 +1,8 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, resolveMonthDay, sleep } from "./util";
 import { crawlPages } from "./crawl";
+import { chooseVerifiedUrl, isUnreadableUrl, orderedStoreUrls, readPageText, verifyStoreUrls, type UrlVerdict } from "./verifyStoreUrl";
+import { canJudgeIdentity, identityMatchCount, identityTokens } from "../lib/identity";
 import { classifyAggregatorGenre, cleanStoreUrl, NOISE_LINK, stripTags } from "./aggregatorUtil";
 import { summarizeStores } from "../lib/stores";
 // 「日本時間の今日」は src/lib/date.ts の todayJst() だけが持つ。
@@ -376,6 +378,44 @@ export function parseRestockStores(html: string): RestockStore[] {
   return out;
 }
 
+
+/**
+ * 受付終了の行のURLを「その商品が載っていると確かめたページ」にする。
+ *
+ * 受付終了の行は stores を埋めない（受付中と誤読させないため）ので、共通の
+ * verifyStoreUrls からは触れない。候補は「直近に実績のあった店のURL」。
+ * 終了済みでも、**その商品の告知ページ**なら何があったかは読める。店舗案内やトップは読めない。
+ */
+async function pickVerifiedEndedUrl(
+  title: string,
+  stores: EndedStore[],
+  fallback: string
+): Promise<string> {
+  if (!canJudgeIdentity(title)) return fallback;
+  const ordered = orderedStoreUrls(stores.map((s) => ({ url: s.url })));
+  if (ordered.length === 0) return fallback;
+  const verdicts: { url: string; verdict: UrlVerdict; score: number }[] = [];
+  const need = identityTokens(title).length;
+  for (const url of ordered.slice(0, 4)) {
+    if (isUnreadableUrl(url)) {
+      verdicts.push({ url, verdict: "unknown", score: 0 });
+      continue;
+    }
+    const text = await readPageText(url);
+    if (text === null) {
+      verdicts.push({ url, verdict: "unknown", score: 0 });
+      continue;
+    }
+    const score = identityMatchCount(text, title);
+    verdicts.push({ url, verdict: score > 0 ? "ok" : "mismatch", score });
+    if (score >= need) break;
+    await sleep(300);
+  }
+  const picked = chooseVerifiedUrl(verdicts) ?? fallback;
+  if (picked !== fallback) console.log(`[nyuka_now] 受付終了行のURLを差し替え: ${title.slice(0, 26)} → ${picked}`);
+  return picked;
+}
+
 export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
   // 抽選まとめ記事だけを対象にする（「アプリ更新のお願い」等の告知記事を除外）。
   const articles = (await collectArticles()).filter((a) => a.title.includes("抽選"));
@@ -398,8 +438,15 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
       // 受付中が無くても、直近に抽選実績があれば「受付終了（直近 M/D）」として載せる。
       const endedSec = extractEndedSection(html);
       if (endedSec) {
-        const row = buildRecentEndedItem(a.id, a.title, parseEndedStores(endedSec, today), today);
-        if (row) items.push(row);
+        const endedStores = parseEndedStores(endedSec, today);
+        const row = buildRecentEndedItem(a.id, a.title, endedStores, today);
+        if (row) {
+          // 受付終了の行は stores を埋めない設計なので、あとから verifyStoreUrls では直せない。
+          // ここで候補（実績のあった店のURL）を渡して裏取りする。
+          // 実測 #91597/#91598: url が **HobbyZone の店舗案内ページ**を指していた。
+          row.url = await pickVerifiedEndedUrl(row.title, endedStores, row.url);
+          items.push(row);
+        }
       }
       continue;
     }
@@ -505,6 +552,12 @@ export async function scrapeNyukaNow(): Promise<ScrapedItem[]> {
       stores: JSON.stringify(storeObjs),
     });
   }
+
+  // 画面に出すURLは「その商品が載っていると確かめたページ」にする。
+  // 実測 #91597/#91598: 受付終了の行の url が **HobbyZone の店舗案内ページ**を指していた
+  // （応募も購入もできない）。card_chusen と同じ物差し（verifyStoreUrl）を通す。
+  const v = await verifyStoreUrls("nyuka_now", items, readPageText);
+  console.log(`[nyuka_now] 画面に出すURLの裏取り: ${v.checked}件を開いて ${v.swapped}件を差し替え`);
 
   return items;
 }

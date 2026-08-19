@@ -79,6 +79,28 @@ export function isUnlicensedImageHost(url: string): boolean {
   return /(^|\.|\/\/)(m\.)?media-amazon\.com|images-amazon\.com|amazon\.co\.jp\/images/i.test(url);
 }
 
+/**
+ * **そのリンク先からは画像を取りようがない**か（＝画像が無いのは不具合ではない）。
+ *
+ * 2026-08-19 実測: nyuka_now の画像付与率が 95%→61% に落ちて「壊れた」ように見えたが、
+ * 画像なし30件のうち **28件がAmazonへのリンク**だった。Amazonの商品画像は
+ * isUnlicensedImageHost の理由で**採らないと決めている**ので、これは方針どおりの数字。
+ * 率をそのまま出すと、次に見た人（や自分）が方針を覆して取りに行こうとする。
+ * **取れないのが正常な行は、率の母数から外して別に数える。**
+ */
+export function cannotSourceImage(pageUrl: string): boolean {
+  let h = "";
+  try {
+    h = new URL(pageUrl).hostname.toLowerCase();
+  } catch {
+    return false;
+  }
+  // Amazon の商品ページ＝画像はあるが借りてよい根拠が無い（isUnlicensedImageHost と同じ理由）。
+  if (/(^|\.)amazon\.co\.jp$/.test(h)) return true;
+  // 応募フォーム・アプリストア＝商品画像を置いていないと分かっているページ。
+  return h === "docs.google.com" || h === "forms.gle" || h === "apps.apple.com" || h === "play.google.com";
+}
+
 /** 画像として使える拡張子か（トラッキング用の1x1 gif や広告配信URLを弾く）。 */
 const IMAGE_EXT_RE = /\.(?:jpe?g|png|webp|avif|gif)(?:[?#]|$)/i;
 

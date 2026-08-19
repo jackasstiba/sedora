@@ -5,10 +5,19 @@
 /**
  * "¥18,700" / "2,970円(税込)" / "200円（税込）" 等から定価(円・整数)を取り出す。
  * 価格文字列中で最大の数値を採用（"1BOX(20パック)¥3,960" のような紛れに強い）。
+ *
+ * 🚨 桁は**数字の連なり全体**で見る（2026-08-19 実測）。以前は `/\d{2,7}/g` だったので、
+ * 長い数字を**途中で切って別の数**にしていた:
+ *  - `16,000,000円`（BE@RBRICK fragment K24・純金）→ `16000000` の先頭7桁だけ拾って
+ *    **1,600,000円**。`audit:links` が「掲載価格が一次情報に無い」と誤報していた
+ *    （収集元のページには 16,000,000 と書いてある＝**正しい価格を嘘だと言っていた**）。
+ *  - JAN `4904810066729`（13桁）→ **4,904,810円**という存在しない価格になる。
+ * 前後を数字で挟まれていない連なりだけを見るので、13桁のJANはどの候補にもならず、
+ * 8〜9桁の高額商品は正しく1つの数として読める。
  */
 export function parseYen(price: string | null | undefined): number | null {
   if (!price) return null;
-  const nums = price.replace(/[，,]/g, "").match(/\d{2,7}/g);
+  const nums = price.replace(/[，,]/g, "").match(/(?<!\d)\d{2,9}(?!\d)/g);
   if (!nums) return null;
   const max = Math.max(...nums.map(Number));
   return Number.isFinite(max) && max > 0 ? max : null;

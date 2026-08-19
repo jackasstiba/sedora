@@ -24,6 +24,7 @@ import { baselineWritable } from "./factsBaseline";
 import { cleanListTitle } from "../src/lib/title";
 import { normalizeForSearch } from "../src/lib/itemFilter";
 import { franchiseAliases } from "../src/lib/franchise";
+import { identityTokens, pageShowsProduct } from "../src/lib/identity";
 import { parseYen } from "../src/lib/margin";
 
 // 本文の代わりにログイン壁・同意画面を返すホスト。文字数は十分あるので「本文が取れた」と
@@ -77,19 +78,7 @@ function saveFactsBaseline(next: FactsBaseline) {
   console.log(`\nbaseline(facts) を更新: ${BASELINE_PATH}`);
 }
 
-// 商品名に頻出する一般語。識別語から外さないと「フィギュア」だけで一致してしまう。
-const GENERIC =
-  /^(フィギュア|ぬいぐるみ|プラモデル|カードゲーム|ブースターパック|拡張パック|完成品|限定|特典|予約|発売|再販|セット|ver|box|新作|グッズ|コラボ|オンライン|一番くじ|抽選|販売|アクリルスタンド|キーホルダー|ポップアップストア)$/i;
-
-function identityTokens(title: string): string[] {
-  return title
-    .split(/[\s　【】『』「」（）()[\]・/／\-–—~〜,、。!！?？:：＆&×✕]+/)
-    .map((t) => t.trim())
-    .filter((t) => t.length >= 3 && !GENERIC.test(t))
-    .map(normalizeForSearch)
-    .filter((t, i, a) => a.indexOf(t) === i)
-    .slice(0, 6);
-}
+// 識別語の作り方と一致判定は src/lib/identity.ts（取り込み側 cardChusen と同じ物差しを使う）。
 
 /** ヘッダ → HTML先頭の meta charset の順に見て復号する（scrapers/util.ts と同じ手順）。 */
 function decodeBody(buf: Buffer, contentType: string | null): string {
@@ -237,7 +226,7 @@ async function main() {
       //     一次情報は「ワンピースカードゲーム」＝正しいリンクなのに要確認になっていた）。
       //     既にある作品エイリアス表を同一性の判定にも通す。
       const aliases = franchiseAliases(title).map(normalizeForSearch);
-      const matched = toks.some((k) => text.includes(k)) || aliases.some((a) => text.includes(a));
+      const matched = pageShowsProduct(text, title);
       // 本文（<title> を除く）にも商品名が出ているか。価格の判定はこれが真のときだけ行う。
       const matchedInBody = toks.some((k) => body.includes(k)) || aliases.some((a) => body.includes(a));
       if (toks.length >= 2 && !matched) {
