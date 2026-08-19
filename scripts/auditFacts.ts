@@ -289,17 +289,19 @@ async function main() {
           dateTotal++;
           // 1つの行が複数の応募先を束ねている場合（card_chusen は最大17店・締切がばらける）、
           // 画面の日付は「全店が締め切る日」で、リンク先は**その中の1店**。店の締切と
-          // 食い違って当然なので、この行が持つ締切のどれかに当たれば一致とみなす。
+          // 食い違って当然なので、**この行が画面に出しているどれかの日付**に当たれば一致とみなす。
+          // 締切だけでなく**受付開始**も入れる（実測 2026-08-20: #92509 のリンク先は
+          // その店の応募フォームで、載っているのは開始日 2026/08/21 のほうだった＝誤報）。
           const candidates = [new Date(r.eventDate)];
           for (const s of parseStoresJson(r.stores) ?? [])
-            if (s.kind === "締切" && s.at) candidates.push(new Date(`${s.at}T00:00:00.000Z`));
+            if (s.at) candidates.push(new Date(`${s.at}T00:00:00.000Z`));
           if (candidates.some((c) => datesInclude(pageDates, c))) dateHit++;
           else
             findings.push({
               kind: "日付が一次情報に見当たらない",
               detail:
                 `[${source} #${r.id}] 掲載 ${new Date(r.eventDate).toISOString().slice(0, 10)}` +
-                `${candidates.length > 1 ? `（応募先の締切 ${candidates.length - 1}件を含めても不一致）` : ""}` +
+                `${candidates.length > 1 ? `（応募先の日付 ${candidates.length - 1}件を含めても不一致）` : ""}` +
                 ` ↔ 一次情報の日付 ${[...new Set(pageDates.map((p) => p.raw))].slice(0, 6).join("・")}` +
                 ` ${title.slice(0, 30)} → ${r.url}`,
             });
