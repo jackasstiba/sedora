@@ -100,7 +100,7 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
-import { parseTakaraTomyRelease, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
+import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
@@ -2362,6 +2362,73 @@ const cases: Case[] = [
     want: "ポケモン",
   },
   { name: "タカラトミー: トミカは玩具ジャンル", fn: () => takaraTomyGenre("トミカ ギフトセット"), want: "玩具" },
+
+  // ── タカラトミー: 商品ページ側の「終了」判定（2026-08-19）────────────────
+  // 実測で**3回とも嘘をつかれた**型を、鳴らない側として固定する。
+  // どれも「画面上は正常」なので、外した瞬間に静かに誤検知が戻る。
+  {
+    // ①終了の文言はコメントで先に書いてある。期間が終わったらコメントを外す作り。
+    // 実測: 受付中の g4904810066729（予約期間 8/5〜9/9）がこれで終了と数えられた。
+    name: "タカラトミー: コメントで先書きされた終了文は根拠にしない",
+    fn: () =>
+      takaraTomyEndedEvidence(
+        '<div class="note_"><h2>予約期間:2026年8月5日(水)00:00 ～ 2026年9月9日(水)23:59</h2>' +
+          "<!--<h2>予約期間は終了しました。たくさんのご注文ありがとうございました。</h2>-->" +
+          "</div><button>予約する</button>"
+      ),
+    want: null,
+  },
+  {
+    // ②「※予約期間終了後の販売につきましては…」は受付中のページにも出る定型文。
+    // 実測: ブロッキーズ9件（予約期間 8/1〜8/30＝受付中）がこれで巻き込まれた。
+    name: "タカラトミー: 「予約期間終了後の販売は未定」の定型文は根拠にしない",
+    fn: () =>
+      takaraTomyEndedEvidence(
+        "<p>※予約期間終了後の販売につきましては、現在のところ未定です</p><button>予約する</button>"
+      ),
+    want: null,
+  },
+  {
+    // ③同じページに別商品が並ぶ。隣の商品の状態を自分の状態として読まない（#75430 と同じ型）。
+    name: "タカラトミー: カルーセルの別商品の「予約期間終了」は根拠にしない",
+    fn: () =>
+      takaraTomyEndedEvidence(
+        "<button>予約する</button>" +
+          '<div class="goods_carousel__checkBox"><p class="stock_ line1_">予約期間終了</p></div>'
+      ),
+    want: null,
+  },
+  {
+    name: "タカラトミー: 受付中のページは終了と言わない",
+    fn: () => takaraTomyEndedEvidence('<button class="tt_button4-1">予約する</button>'),
+    want: null,
+  },
+  {
+    // 鳴る側①: 自分の申込ボタンが disabled。実測 27件すべてがこの形だった。
+    name: "タカラトミー: 自分のボタンが disabled なら終了",
+    fn: () =>
+      !!takaraTomyEndedEvidence(
+        '<button class="tt_button4-1 tt_reservation" disabled>予約期間終了</button>'
+      ),
+    want: true,
+  },
+  {
+    // 鳴る側②: 在庫欄。
+    name: "タカラトミー: 在庫欄が「予約期間終了」なら終了",
+    fn: () =>
+      !!takaraTomyEndedEvidence('<td id="spec_stock_msg"> 予約期間終了<br>※受注期間終了後の販売…</td>'),
+    want: true,
+  },
+  {
+    // 鳴る側③: コメントを外した完了文（①と同じ文だが、コメントの外に出ている）。
+    name: "タカラトミー: コメントの外に出た完了文なら終了",
+    fn: () =>
+      !!takaraTomyEndedEvidence(
+        '<div class="note_"><h2><del>予約期間:2026年8月5日 ～ 2026年8月18日</del></h2>' +
+          "<h2>予約期間は終了しました。たくさんのご注文ありがとうございました。</h2></div>"
+      ),
+    want: true,
+  },
 
   // BILLY'S LAUNCH
   {

@@ -8,6 +8,7 @@ import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
 import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { cleanupPokemonGoodsWindow } from "./cleanupRecentWindow";
+import { cleanupTakaraTomyEnded } from "./cleanupTakaraTomyEnded";
 import { runImageBackfill } from "./backfillImages";
 import { runDeadImagePrune } from "./pruneDeadImages";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
@@ -162,6 +163,13 @@ async function main() {
     // cleanupRecentWindow.ts（巡回を回さずに単体で呼べるように名前を付けて外に出してある）。
     // ここは `if (error) continue` の後＝**巡回が成功した回だけ**通る。
     if (source === "pokemon_goods") await cleanupPokemonGoodsWindow(prisma);
+
+    // タカラトミーモールは「予約期間終了」のカードを読み飛ばす＝その行は更新も削除もされずDBに残る。
+    // 日付を持つので RECONCILE_UNDATED_SOURCES にも当たらない。**リンク先を開いて、その商品自身が
+    // 終了と言っている場合だけ**消す（一覧から消えただけの、まだ有効な予約を巻き込まないため）。
+    if (source === "takaratomy_mall") {
+      await cleanupTakaraTomyEnded(prisma, items.map((i) => i.sourceId));
+    }
 
     console.log(`[${source}] ${items.length}件処理`);
   }

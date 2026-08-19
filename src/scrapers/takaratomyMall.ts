@@ -129,6 +129,47 @@ export function takaraTomyUnavailable(action: string | null): boolean {
   return /期間終了|在庫なし|入荷案内|受付終了|販売終了/.test(action);
 }
 
+/**
+ * 商品ページ側だけを見て「その商品自身がもう申し込めないと言っているか」（純関数・selftest対象）。
+ *
+ * 🚨 なぜ素のテキスト検索ではいけないか（2026-08-19・実測で3回とも嘘をつかれた）:
+ *  ① **終了の文言をコメントで先に書いてある**。期間が終わったらコメントを外す作りなので、
+ *     受付中の商品にも `<!--<h2>予約期間は終了しました。…</h2>-->` が文字列として存在する。
+ *  ② `※予約期間終了後の販売につきましては、現在のところ未定です` は**受付中のページにも出る定型文**。
+ *     短い「予約期間終了」で拾うと、受付中の9件（ブロッキーズ・予約期間 8/1〜8/30）を終了と数える。
+ *  ③ `goods_carousel` に**別商品**の状態が並ぶ（ガオーマシンのページにガオファーの「予約期間終了」）。
+ *     ページ全体を1つの状態として読むと隣の商品の状態を自分のものとして拾う（#75430 の誤報と同じ型）。
+ *
+ * 根拠にしてよいのは、その商品**自身**の3か所だけ:
+ *   (a) 自分の申込ボタンが `disabled` で「予約期間終了/販売期間終了」
+ *   (b) 在庫欄 `spec_stock_msg` が「…期間終了」
+ *   (c) コメントを外した状態で残る完了文「予約期間は終了しました」（定型文とは別の文）
+ */
+export function takaraTomyVisibleHtml(html: string): string {
+  return html
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<div[^>]*class="[^"]*goods_carousel[^"]*"[\s\S]*?<\/div>/gi, " ");
+}
+
+/** 終了なら根拠の文字列、そうでなければ null。null は「終了ではない」ではなく「終了と言い切れない」。 */
+export function takaraTomyEndedEvidence(html: string): string | null {
+  const h = takaraTomyVisibleHtml(html);
+  const btn = h.match(
+    /<button[^>]*\bdisabled\b[^>]*>\s*(予約期間終了|販売期間終了|受付終了|受付期間終了)\s*<\/button>/
+  );
+  if (btn) return `ボタン(disabled): ${btn[1]}`;
+  const stock = h.match(/id="spec_stock_msg"[^>]*>([\s\S]{0,80})/);
+  if (stock && /(予約期間終了|販売期間終了|受付終了)/.test(stock[1].replace(/<[^>]+>/g, " "))) {
+    return "在庫欄: 期間終了";
+  }
+  if (/(予約期間は終了しました|販売期間は終了しました)/.test(h.replace(/<[^>]+>/g, " "))) {
+    return "完了文: 期間は終了しました";
+  }
+  return null;
+}
+
 /** ボタン文言とラベルから、サイトの eventType 語彙に落とす（純関数・selftest対象）。 */
 export function takaraTomyEventType(card: TakaraTomyCard): string {
   // 「予約期間終了」を『予約』と読まないため、終了系はここでも先に外す。

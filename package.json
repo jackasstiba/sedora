@@ -25,6 +25,7 @@
     "images:prune": "node --env-file-if-exists=.env --import tsx scripts/pruneDeadImages.ts",
     "scrape:kuji": "node --env-file-if-exists=.env --import tsx scripts/scrapeKuji.ts",
     "scrape:kuji:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapeKujiPrices.ts",
+    "cleanup:takaratomy": "node --env-file-if-exists=.env --import tsx scripts/runCleanupTakaraTomy.ts",
     "migrate:prizes": "node --env-file-if-exists=.env --import tsx scripts/migratePrizes.ts",
     "migrate:stores": "node --env-file-if-exists=.env --import tsx scripts/migrateStores.ts",
     "ingest:x": "node --env-file-if-exists=.env --import tsx scripts/ingestXWatch.ts",
