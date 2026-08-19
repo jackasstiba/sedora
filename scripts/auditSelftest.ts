@@ -101,6 +101,7 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
+import { baselineWritable } from "./factsBaseline";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
@@ -2362,6 +2363,38 @@ const cases: Case[] = [
     want: "ポケモン",
   },
   { name: "タカラトミー: トミカは玩具ジャンル", fn: () => takaraTomyGenre("トミカ ギフトセット"), want: "玩具" },
+
+  // ── 基準に書いてよい回か（2026-08-19）──────────────────────────
+  // 実測: 同じ日に全件突合を2回回したら、1回目は判定不能24/突合844、
+  // 2回目は**判定不能198(23%)/突合670**（こちらから叩きすぎて収集元が絞った）。
+  // 2回目の要確認は15件＝1件少ないが、**直ったのではなく読めなかった**だけ。
+  // 比較側には「突合できた件数が半減」の歯止めがあるのに、**書き込み側には無かった**。
+  {
+    name: "基準: 判定不能が少ない回は書いてよい（実測1回目 24/868）",
+    fn: () => baselineWritable(844, 24).ok,
+    want: true,
+  },
+  {
+    name: "基準: 判定不能が23%の痩せた回は書かない（実測2回目 198/868）",
+    fn: () => baselineWritable(670, 198).ok,
+    want: false,
+  },
+  {
+    name: "基準: ちょうど20%は書いてよい（境目を閉じない）",
+    fn: () => baselineWritable(80, 20).ok,
+    want: true,
+  },
+  {
+    name: "基準: 1件も読めなかった回は書かない",
+    fn: () => baselineWritable(0, 50).ok,
+    want: false,
+  },
+  {
+    // 0件同士で NaN にしない（割り算の分母が0）。
+    name: "基準: 対象0件でも例外にしない",
+    fn: () => baselineWritable(0, 0).ok,
+    want: true,
+  },
 
   // ── タカラトミー: 商品ページ側の「終了」判定（2026-08-19）────────────────
   // 実測で**3回とも嘘をつかれた**型を、鳴らない側として固定する。

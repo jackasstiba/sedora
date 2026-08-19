@@ -256,5 +256,9 @@
   "facts": {
     "checked": 55,
     "findings": 1
+  },
+  "factsLinked": {
+    "checked": 844,
+    "findings": 16
   }
 }

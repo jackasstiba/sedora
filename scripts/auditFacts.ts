@@ -20,6 +20,7 @@ import * as cheerio from "cheerio";
 import { prisma } from "../src/lib/prisma";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { isOfficialUrl } from "../src/lib/outbound";
+import { baselineWritable } from "./factsBaseline";
 import { cleanListTitle } from "../src/lib/title";
 import { normalizeForSearch } from "../src/lib/itemFilter";
 import { franchiseAliases } from "../src/lib/franchise";
@@ -55,6 +56,7 @@ const LINKED_ALL = args.includes("--linked-all");
 // さらに指摘件数のラチェットも無く、要確認が 0→15 に増えても誰も止めない（WARN放置の再来）。
 // ラチェットの保管先は audit-baseline.json に揃える（監査の基準はこのファイル、という約束）。
 const BASELINE_PATH = path.join(process.cwd(), "audit-baseline.json");
+// 基準に書いてよい回かの判定は factsBaseline.ts（純関数・selftest対象）。
 type FactsBaseline = { checked: number; findings: number };
 // 抜き取りと全件では母数が桁違いなので、ラチェットの基準も別に持つ
 // （混ぜると「突合できた件数が半減」が毎回鳴る）。
@@ -325,7 +327,24 @@ async function main() {
       `\n（中身を1件ずつ確認した上で正当だと判断したときだけ \`npm run audit:facts -- --update-baseline\` で受け入れる）`
     );
   }
-  if (UPDATE_BASELINE) saveFactsBaseline({ checked, findings: findings.length });
+  // 痩せた回を基準にしない（2026-08-19 実測）。同じ日に2回全件を回したら、1回目は
+  // 判定不能24件/突合844件、2回目は**判定不能198件(23%)/突合670件**だった（こちらから
+  // 叩きすぎて収集元が絞り始めた）。2回目の要確認は15件＝1件少ないが、それは**直ったのではなく
+  // 読めなかった**だけ。この回を `--update-baseline` で受け入れると、**基準が痩せた側に固定され、
+  // 次に正常な回が来たときに「増えた」と鳴る**。しかも基準そのものは静かに緩む。
+  //
+  // 比較側には「突合できた件数が半減」の歯止めが既にあるのに、**書き込み側には無かった**。
+  // 守りを1か所に入れて隣の同型を見落とす型（ミス33・34と同じ）。
+  const writable = baselineWritable(checked, unusable);
+  if (UPDATE_BASELINE && !writable.ok) {
+    console.log(
+      `\n【❌ERROR】本文を取れなかった割合が ${Math.round(writable.rate * 100)}%（${unusable}/${checked + unusable}）。` +
+        `\n この回は痩せているので baseline に書かない。時間を置いてから回し直すこと。`
+    );
+    process.exitCode = 1;
+  } else if (UPDATE_BASELINE) {
+    saveFactsBaseline({ checked, findings: findings.length });
+  }
 
   await prisma.$disconnect();
   if (problems.length) process.exitCode = 1;
