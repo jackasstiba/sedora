@@ -21,6 +21,7 @@
     "scrape:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapePrices.ts",
     "prices:recheck": "node --env-file-if-exists=.env --import tsx scripts/recheckPrices.ts",
     "scrape:images": "node --env-file-if-exists=.env --import tsx scripts/backfillImages.ts",
+    "images:prune": "node --env-file-if-exists=.env --import tsx scripts/pruneDeadImages.ts",
     "scrape:kuji": "node --env-file-if-exists=.env --import tsx scripts/scrapeKuji.ts",
     "scrape:kuji:prices": "node --env-file-if-exists=.env --import tsx scripts/scrapeKujiPrices.ts",
     "migrate:prizes": "node --env-file-if-exists=.env --import tsx scripts/migratePrizes.ts",

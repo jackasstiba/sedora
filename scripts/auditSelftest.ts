@@ -43,9 +43,12 @@ import {
   pageExcludesPast,
 } from "../src/lib/pageLoss";
 import { cleanTitle, resolveMonthDay } from "../src/scrapers/util";
+import { cleanListTitle, cutsMidWord } from "../src/lib/title";
 import { computeMargin, isPerDrawFee, isSuspectPackPrice } from "../src/lib/margin";
 import { dedupeItems, dedupeSameSourceSameName, eventDateHeading, liveStoreSummary, matchesQuery, productUrlKey, withLiveStoreDeadline } from "../src/lib/itemFilter";
 import { countWatchlist, WATCHLIST } from "../src/lib/watchlist";
+import { ROLLOVER_CRON_PATH, cronJstHour, rolloverProblem } from "../src/lib/rollover";
+import { imageVerdict } from "../src/lib/deadImage";
 import { buildPost, findForbidden, type DraftRow } from "../src/lib/xDraftText";
 
 /** テスト内の改行。TSの "
@@ -79,7 +82,7 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEventType, takaraTomyGenre, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
-import { parseBillysLaunch } from "../src/scrapers/billys";
+import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
@@ -89,7 +92,7 @@ import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
 import { cleanListTitle, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, isUnlicensedImageHost, isUsableImageCandidate, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import {
   AA_NORMAL,
   contrastHex,
@@ -251,6 +254,17 @@ function affiliateCallersOutsideRenderLayer(): string[] {
  * 収集元が割れる状態（2026-08-18 実測: 表示中1,834枚のうち784枚が収集元ドメイン）に戻るが、
  * **画面は今と1ピクセルも変わらない**ので目視では絶対に気付けない。書き方を固定する。
  */
+/** `src={...}` の中身が「元の画像URLをそのまま渡している」形か。
+ *  実データを見ずに鳴る側／鳴らない側を固定できるよう、判定だけを関数にしてある。 */
+function isDirectImageSrcExpr(expr: string): boolean {
+  return /imageUrl|\bp\.image\b/.test(expr) && !/proxiedImageUrl|item\.image\b/.test(expr);
+}
+
+/** CardItem 型の本文が、収集元が割れる列（url / imageUrl）を持っているか。 */
+function cardItemTypeHasRawUrl(typeSrc: string): boolean {
+  return /\burl\s*:|\bimageUrl\s*:/.test(typeSrc);
+}
+
 function directImageUrlUsages(): string[] {
   const hits: string[] = [];
   const walk = (dir: string) => {
@@ -262,8 +276,7 @@ function directImageUrlUsages(): string[] {
         // src={...imageUrl...} / src={p.image} のような「生のURLをそのまま渡す」書き方。
         for (const m of src.matchAll(/src=\{([^}]*)\}/g)) {
           const expr = m[1];
-          if (/imageUrl|p\.image/.test(expr) && !/proxiedImageUrl|item\.image/.test(expr))
-            hits.push(`${p}: src={${expr.trim().slice(0, 40)}}`);
+          if (isDirectImageSrcExpr(expr)) hits.push(`${p}: src={${expr.trim().slice(0, 40)}}`);
         }
       }
     }
@@ -271,6 +284,41 @@ function directImageUrlUsages(): string[] {
   walk("src/app");
   walk("src/components");
   return hits;
+}
+
+/**
+ * **全文検索から外れる書き方になっているソースが無いか。**
+ *
+ * 実測 2026-08-19: `scripts/audit.ts`（この企画で最大の検査ファイル）が
+ * grep / ripgrep から「バイナリ」と判定され、**中身が1行も引っかからない**状態だった。
+ * 原因は文字化け検出の正規表現に**生の制御文字**（NUL 等）をそのまま書いていたこと。
+ * 動作は正しいので誰も気付かないが、「検索して数える」作業が静かに空振りする
+ * （＝この企画がいちばん頼りにしている調べ方が壊れる）。
+ * 併せて BOM も見る（BOM付きは差分・連結・シェルの扱いで事故りやすい）。
+ *
+ * 制御文字を扱いたいときは `\u0000` のようなエスケープで書けばよい（意味は同じ）。
+ */
+function unsearchableSourceFiles(): string[] {
+  const bad: string[] = [];
+  const walk = (dir: string) => {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = `${dir}/${e.name}`;
+      if (e.isDirectory()) {
+        if (e.name === "generated" || e.name === "node_modules") continue;
+        walk(p);
+      } else if (/\.(?:ts|tsx|css|json|md)$/.test(e.name)) {
+        const buf = readFileSync(p);
+        if (buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) bad.push(`${p}: BOM付き`);
+        const ctrl = [...buf].filter(
+          (b) => b < 0x09 || b === 0x0b || b === 0x0c || (b >= 0x0e && b <= 0x1f)
+        );
+        if (ctrl.length) bad.push(`${p}: 生の制御文字が${ctrl.length}個（grep がバイナリ扱いする）`);
+      }
+    }
+  };
+  walk("src");
+  walk("scripts");
+  return bad;
 }
 
 type Case = { name: string; fn: () => unknown; want: unknown };
@@ -801,10 +849,20 @@ const cases: Case[] = [
     fn: () => {
       const src = readFileSync("src/lib/cardItem.ts", "utf8");
       const type = src.slice(src.indexOf("export type CardItem"), src.indexOf("export function toCardItem"));
-      return /url\s*:|imageUrl\s*:/.test(type);
+      return cardItemTypeHasRawUrl(type);
     },
     want: false,
   },
+  // ↑の2つは「本物のファイルを見て0件」なので、**検査が壊れていても同じ結果になる**。
+  // 実測 2026-08-19: この2つの単語境界が**生のバックスペース文字**になっていて、
+  // CardItem 側は何を書いても一致しない＝**永久に鳴らない検査**だった（画面は正常なまま）。
+  // 鳴る側を合成データで固定して、空振りしていないことを示す。
+  { name: "検査が生きている: CardItem に url を足したら鳴る", fn: () => cardItemTypeHasRawUrl("  id: number;\n  url: string;"), want: true },
+  { name: "検査が生きている: CardItem の imageUrl も鳴る", fn: () => cardItemTypeHasRawUrl("  imageUrl: string | null;"), want: true },
+  { name: "検査が生きている: 似た名前（sourceUrlKey）では鳴らない", fn: () => cardItemTypeHasRawUrl("  sourceUrlKey: string;"), want: false },
+  { name: "検査が生きている: 生の imageUrl を src に渡したら鳴る", fn: () => isDirectImageSrcExpr("item.imageUrl ?? undefined"), want: true },
+  { name: "検査が生きている: 各賞の p.image を直に渡したら鳴る", fn: () => isDirectImageSrcExpr("p.image"), want: true },
+  { name: "検査が生きている: プロキシ経由なら鳴らない", fn: () => isDirectImageSrcExpr("item.image"), want: false },
   { name: "IDの形（4ブロック）を認める", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l.3m4n5o6p"), want: true },
   { name: "IDの形（3ブロック）は認めない", fn: () => isRakutenAffiliateId("1a2b3c4d.5e6f7g8h.9i0j1k2l"), want: false },
   // 以下2件は「楽天のリンク作成ツールが実際に吐いたリンク」から写した形（2026-08-18実測）。
@@ -2071,6 +2129,27 @@ const cases: Case[] = [
     want: false,
   },
 
+  {
+    // 実測 2026-08-19（audit title_pipe_residue が ERROR）: 収集元のブランド欄が
+    // `CONVERSE | PURPLE THINGS`（コラボ）で、区切り記号がそのままタイトルに残っていた。
+    name: "BILLY'S: コラボの「A | B」は「A × B」にする（記号を残さない・消さない）",
+    fn: () =>
+      parseBillysLaunch(
+        `<ul class="c-launchlist__list"><li><div class="c-itembox__cat">CONVERSE | PURPLE THINGS</div><div class="c-itembox__goodsname">ALL STAR LGCY SU HI</div><div class="c-price__default">¥20,900</div><div class="c-launchlist__date"><span>8/25</span></div></li></ul>`
+      )[0]?.brand,
+    want: "CONVERSE × PURPLE THINGS",
+  },
+  {
+    name: "BILLY'S: 単独ブランドは触らない",
+    fn: () => normalizeBillysBrand("SALOMON"),
+    want: "SALOMON",
+  },
+  {
+    name: "BILLY'S: 全角パイプ・前後の空白ゆれも同じ形にする",
+    fn: () => normalizeBillysBrand("  asics｜KIKO KOSTADINOV  "),
+    want: "asics × KIKO KOSTADINOV",
+  },
+
   // ちいかわマーケット: コレクション名＝日付＋種別
   { name: "ちいかわ: 20260807 は発売", fn: () => parseChiikawaCollection("20260807")?.kind, want: "発売" },
   { name: "ちいかわ: pre20260724 は予約", fn: () => parseChiikawaCollection("pre20260724")?.kind, want: "予約" },
@@ -2705,6 +2784,129 @@ const cases: Case[] = [
         (h) => h.word === "ニューバランス"
       )?.hits,
     want: 1,
+  },
+
+  // ── リポジトリの衛生（検索が空振りしない） ──────────────────
+  {
+    name: "ソースが全文検索から外れる書き方になっていない（BOM・生の制御文字）",
+    fn: () => unsearchableSourceFiles().join(" / "),
+    want: "",
+  },
+  {
+    // 改行コードの取り決めが無いと、Windowsの書き戻し1回で**ファイル全体が差分**になり、
+    // 実際の変更が読めなくなる（実測 2026-08-18: audit.ts が LF→CRLF になり 3,933行の差分）。
+    name: "改行コードの取り決め（.gitattributes）がある",
+    fn: () => {
+      if (!existsSync(".gitattributes")) return ".gitattributes が無い";
+      const t = readFileSync(".gitattributes", "utf8");
+      return /eol=lf/.test(t) ? "" : ".gitattributes に eol=lf が無い";
+    },
+    want: "",
+  },
+
+  // ── 整形が語の途中で切っていないか ────────────────────────
+  {
+    name: "整形: 「…締切ですが」を「…締切で」で切った残りは商品名にしない",
+    fn: () =>
+      cleanListTitle(
+        "channeltono",
+        "9月27日締切ですがキアサージ と雲仙 早くも完売！Gift アズールレーン ぬいぐるみシリーズ チャパエフがあみあみで予約開始まだあり！"
+      ),
+    want: "Gift アズールレーン ぬいぐるみシリーズ チャパエフ",
+  },
+  {
+    name: "整形: 店ごとの締切告知（◯日まで）は商品名にしない",
+    fn: () =>
+      cleanListTitle(
+        "channeltono",
+        "あみあみとプレバンは8月4日まで！トレカプラザ55は11日まで！ONE PIECEカードゲーム ブースターパック 世界最強の戦士[OP-17] 24パック入りBOXが抽選受付開始"
+      ),
+    want: "ONE PIECEカードゲーム ブースターパック 世界最強の戦士[OP-17] 24パック入りBOX",
+  },
+  {
+    name: "整形: ひらがなで始まる商品名は巻き込まない（前がひらがなでない）",
+    fn: () => cutsMidWord("【予約開始】ちいかわ ぬいぐるみ", "ちいかわ ぬいぐるみ"),
+    want: false,
+  },
+  {
+    name: "整形: 助動詞の途中で切ったら鳴る",
+    fn: () => cutsMidWord("9月27日締切ですがキアサージ と雲仙", "すがキアサージ と雲仙"),
+    want: true,
+  },
+  {
+    name: "整形: カタカナで始まるなら境目として正しい",
+    fn: () => cutsMidWord("楽天ファッションでドラゴンクエスト コラボ", "ドラゴンクエスト コラボ"),
+    want: false,
+  },
+  {
+    name: "整形: 「いつまでも」を締切告知と読まない",
+    fn: () => cleanListTitle("channeltono", "一番くじ 僕のヒーローアカデミア -いつまでも手を差し伸べ続ける物語-"),
+    want: "一番くじ 僕のヒーローアカデミア -いつまでも手を差し伸べ続ける物語-",
+  },
+
+  // ── 死んだ画像（空白タイルにしない） ──────────────────────
+  // 「消してよい失敗」と「消してはいけない失敗」の境目を合成データで固定する。
+  // 消したら二度と戻らないので、ここを緩めると一時障害の日に画像が大量に消える。
+  { name: "画像: 404 は消してよい", fn: () => imageVerdict({ status: 404, contentType: null, bytes: null }), want: "dead" },
+  { name: "画像: 403（ホットリンク拒否）も、このサーバからは永久に取れないので消す", fn: () => imageVerdict({ status: 403, contentType: "text/html", bytes: null }), want: "dead" },
+  { name: "画像: 200でもHTMLが返るなら画像は既に無い", fn: () => imageVerdict({ status: 200, contentType: "text/html; charset=utf-8", bytes: 1200 }), want: "dead" },
+  { name: "画像: 200で0バイトは消す", fn: () => imageVerdict({ status: 200, contentType: "image/jpeg", bytes: 0 }), want: "dead" },
+  { name: "画像: 500 は相手の一時障害なので消さない", fn: () => imageVerdict({ status: 500, contentType: null, bytes: null }), want: "unknown" },
+  { name: "画像: 接続できない（時間切れ等）も消さない", fn: () => imageVerdict({ status: null, contentType: null, bytes: null }), want: "unknown" },
+  { name: "画像: 正常な画像はそのまま", fn: () => imageVerdict({ status: 200, contentType: "image/webp", bytes: 40_000 }), want: "ok" },
+  {
+    // 画像プロキシと掃除が**同じ関数**を見ていること。片方だけ緩めると
+    // 「空白は出るのにDBからは消えない」状態に戻る。
+    name: "画像: プロキシも掃除と同じ判定関数を使っている",
+    fn: () => {
+      const route = readFileSync("src/app/i/[id]/route.ts", "utf8");
+      const prune = readFileSync("scripts/pruneDeadImages.ts", "utf8");
+      return /imageVerdict\(/.test(route) && /imageVerdict\(/.test(prune);
+    },
+    want: true,
+  },
+
+  // ── 日付ロールオーバー（前日の「あと◯日」を配らない仕掛け） ──────────
+  // 本物は本番の cron でしか動かないので、**入れた当日は一度も確かめられない**。
+  // 鳴る側と鳴らない側を合成データで固定して、判定そのものを先に確かめる。
+  {
+    name: "ロールオーバー: 一度も動いていない → 警告だけ（デプロイ直後に必ず通る状態なのでERRORにしない）",
+    fn: () => rolloverProblem(null, new Date("2026-08-19T00:00:00Z"))?.level,
+    want: "warn",
+  },
+  {
+    name: "ロールオーバー: 25時間前なら鳴らない（発火時刻のゆれで鳴らせない）",
+    fn: () =>
+      rolloverProblem(new Date("2026-08-18T00:00:00Z"), new Date("2026-08-19T01:00:00Z")),
+    want: null,
+  },
+  {
+    name: "ロールオーバー: 27時間止まったらERROR",
+    fn: () =>
+      rolloverProblem(new Date("2026-08-18T00:00:00Z"), new Date("2026-08-19T03:00:00Z"))?.level,
+    want: "error",
+  },
+  { name: "cron: 15:01 UTC は日本時間 0時台", fn: () => cronJstHour("1 15 * * *"), want: 0 },
+  { name: "cron: 0:01 UTC は日本時間 9時台（暦の変わり目ではない）", fn: () => cronJstHour("1 0 * * *"), want: 9 },
+  { name: "cron: 毎日でない指定は対象外", fn: () => cronJstHour("1 15 * * 1"), want: null },
+  {
+    // 設定・実ファイル・定数の3つが揃って初めて動く。1つ欠けても画面は正常なままなので、
+    // ここで突き合わせる（cronが存在しないのに「対策済み」と書いてある状態を作らない）。
+    name: "ロールオーバー: vercel.json の cron が実在するルートを日本時間0時台に叩く",
+    fn: () => {
+      const conf = JSON.parse(readFileSync("vercel.json", "utf8")) as {
+        crons?: { path: string; schedule: string }[];
+      };
+      const cron = conf.crons?.find((c) => c.path === ROLLOVER_CRON_PATH);
+      if (!cron) return "vercel.json に cron が無い";
+      if (cronJstHour(cron.schedule) !== 0) return `発火が日本時間0時台でない: ${cron.schedule}`;
+      const route = `src/app${ROLLOVER_CRON_PATH}/route.ts`;
+      if (!existsSync(route)) return `ルートの実ファイルが無い: ${route}`;
+      if (!readFileSync(route, "utf8").includes("revalidatePath"))
+        return "ルートがキャッシュを捨てていない（revalidatePath が無い）";
+      return "";
+    },
+    want: "",
   },
 ];
 

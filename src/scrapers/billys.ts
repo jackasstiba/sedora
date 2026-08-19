@@ -31,13 +31,30 @@ export type BillysLaunch = {
   imageUrl: string | null;
 };
 
+/**
+ * ブランド欄の区切りをコラボ表記に直す。
+ *
+ * 収集元はコラボを **「A | B」** と書く（実測 2026-08-18: `CONVERSE | PURPLE THINGS`）。
+ * これをそのまま商品名に繋ぐと `CONVERSE | PURPLE THINGS ALL STAR LGCY SU HI` になり、
+ * **収集元の区切り記号がタイトルに残った状態**（audit `title_pipe_residue` が ERROR で捕まえる型）
+ * と見分けがつかない。かといって記号を**消すと**「CONVERSE PURPLE THINGS」という
+ * 1つのブランド名に読める＝存在しないブランドを名乗ることになる。
+ * 意味はコラボなので「×」に替える（日本語圏でコラボを表す記号）。
+ */
+export function normalizeBillysBrand(brand: string): string {
+  return brand
+    .replace(/\s*[|｜]\s*/g, " × ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** LAUNCH一覧から発売予定を取り出す（純関数・selftest対象）。 */
 export function parseBillysLaunch(html: string): BillysLaunch[] {
   const $ = cheerio.load(html);
   const rows: BillysLaunch[] = [];
   $(".c-launchlist__list > li").each((_, el) => {
     const li = $(el);
-    const brand = li.find(".c-itembox__cat").first().text().replace(/\s+/g, " ").trim();
+    const brand = normalizeBillysBrand(li.find(".c-itembox__cat").first().text());
     const name = li.find(".c-itembox__goodsname").first().text().replace(/\s+/g, " ").trim();
     if (!name) return;
 

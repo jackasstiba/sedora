@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { parsePrizesJson } from "@/lib/prizes";
+import { imageVerdict } from "@/lib/deadImage";
 
 /**
  * 商品画像を自分のドメインから配る（`/i/<商品ID>?v=<版>`、各賞は `?p=<番号>&v=<版>`）。
@@ -63,7 +64,10 @@ export async function GET(request: Request, ctx: RouteContext<"/i/[id]">) {
     });
     const type = res.headers.get("content-type") ?? "";
     // 画像以外（403のHTML・ログインページ等）を画像として配らない。
-    if (!res.ok || !type.startsWith("image/")) return fallback();
+    // 判定は src/lib/deadImage.ts の1つだけ＝**掃除（images:prune）と同じ物差し**にする。
+    // ここだけ緩めると「空白は出るのにDBからは消えない」状態が戻る。
+    if (imageVerdict({ status: res.status, contentType: type, bytes: null }) !== "ok")
+      return fallback();
     const buf = await res.arrayBuffer();
     if (buf.byteLength === 0 || buf.byteLength > MAX_BYTES) return fallback();
 

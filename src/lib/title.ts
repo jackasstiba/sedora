@@ -294,6 +294,11 @@ function isCommentSeg(seg: string): boolean {
       .trim();
     if (!/[A-Za-z]{3,}|[ァ-ヶー・]{4,}|[【『「]/.test(rest)) return true;
   }
+  // 「◯日まで」で終わる節＝店ごとの締切告知。商品名ではない。
+  // 実測 2026-08-19（channeltono #22598）: 「トレカプラザ55は11日まで！ONE PIECEカードゲーム…」が
+  // そのまま表示名になっていた。しかもその11日は既に過ぎていて、**古い告知を商品名として出していた**。
+  // 店名を含むので上の「日付だけの断片」判定を通り抜ける（カタカナが残るため）。
+  if (/(?:^|[はも])\s*[０-９0-9]{1,2}\s*(?:月\s*[０-９0-9]{1,2})?\s*日\s*まで$/.test(core)) return true;
   if (ALWAYS_COMMENT.test(core)) return true;
   if (STRONG_COMMENT_END.test(core)) return true;
   if (PROMO_NOISE.test(core)) return true;
@@ -358,13 +363,45 @@ export function __debugSegments(title: string) {
 }
 
 /** 節に割り、コメント節を捨て、残った隣接ブロックのうち最長を返す（無ければ null）。 */
+/** ひらがな1文字。 */
+const HIRAGANA_CHAR = /[ぁ-ゖ]/;
+
+/**
+ * 「前置きを削った結果、語の**途中**から始まっていないか」。
+ *
+ * 実測 2026-08-19（本番・channeltono #90439）:
+ *   原文  「9月27日締切ですがキアサージ と雲仙 早くも完売！Gift アズールレーン …」
+ *   表示  「すがキアサージ と雲仙 早くも！Gift アズールレーン …」
+ * 「9月27日締切で」を前置きとして削ったが、実際の文は「…締切ですが」で、
+ * **助動詞の途中**で切れていた。残った「すが」は日本語として壊れている。
+ *
+ * 見分け方に語彙は要らない: **削った直前がひらがな**で、**残りの先頭もひらがな**なら、
+ * それは語の途中で切ったということ（「…で|す が…」）。カタカナ・英字・記号で
+ * 始まるなら、前置きと商品名の境目として正しい（「…で|ドラゴンクエスト…」）。
+ * 「ちいかわ」のようにひらがなで始まる商品名は、**前がひらがなでない**ので巻き込まない。
+ */
+export function cutsMidWord(original: string, trimmed: string): boolean {
+  const head = trimmed.trim().slice(0, 12);
+  if (head.length < 2) return false;
+  const i = original.indexOf(head);
+  if (i <= 0) return false;
+  return HIRAGANA_CHAR.test(original[i - 1]) && HIRAGANA_CHAR.test(head[0]);
+}
+
 function pickProductBlock(raw: string): string | null {
   const segs = splitSegments(raw);
   if (!segs.length) return null;
   const cleaned = segs.map((s) => ({ ...s, text: trimSegNoise(s.text) }));
   // 残すのは「商品名として通用する節」だけ。単に実況語が無いだけの断片（告知を削った残りの
   // 「店の早期」等）を残すと、商品名の前後にゴミが付いたまま表示される。
-  const keep = cleaned.map((s) => s.text.trim() !== "" && isProductSeg(s.text) && !isCommentSeg(s.text));
+  const keep = cleaned.map(
+    (s, i) =>
+      s.text.trim() !== "" &&
+      isProductSeg(s.text) &&
+      !isCommentSeg(s.text) &&
+      // 前置きを削った結果、語の途中から始まった節は「商品名の節」ではなく実況の残り。
+      !cutsMidWord(segs[i].text, s.text)
+  );
 
   // 隣接する keep 節をブロックにまとめ、商品節を含む最長ブロックを選ぶ。
   let best: { text: string; len: number } | null = null;

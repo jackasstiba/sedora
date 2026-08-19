@@ -9,6 +9,7 @@ import { backfillDisplayText } from "./backfillDisplayText";
 import { isGenericImageUrl } from "../src/scrapers/imagePick";
 import { cleanupPokemonGoodsWindow } from "./cleanupRecentWindow";
 import { runImageBackfill } from "./backfillImages";
+import { runDeadImagePrune } from "./pruneDeadImages";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 import { nowInstant } from "../src/lib/date";
 
@@ -180,6 +181,13 @@ async function main() {
   // だけ回した結果、画像なしが 83→152件に増えた）。「更新したら画像も付く」を人の記憶に委ねない。
   console.log("\n== 画像の掃除＋後付け ==");
   await runImageBackfill();
+
+  // **もう画像を返さないURLを落とす。** 自ドメイン経由にしてから、取れない画像は
+  // 透明1×1として 200 で配られる＝ブラウザからは正常に見えて、カードには空白だけが出る
+  // （実測 2026-08-19: 表示中2,029枚のうち3枚が404）。実際に取りに行かないと分からないので、
+  // 更新の一部として回す。別コマンドに分けると「人が覚えている」に依存する（画像の後付けで一度踏んだ型）。
+  console.log("\n== 死んだ画像の掃除 ==");
+  await runDeadImagePrune();
 
   checkHealth(results);
 

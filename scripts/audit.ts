@@ -1,4 +1,4 @@
-﻿/**
+/**
  * データ品質の常設監査（`npm run audit`）。
  *
  * 目的: 「人間なら一瞬で気付く表記/数字/日付の粗」を、その都度目視で探すのではなく、
@@ -31,7 +31,7 @@ import {
   monthPrecisionFromTitle,
   todayJst,
 } from "../src/lib/date";
-import { cleanListTitle } from "../src/lib/title";
+import { cleanListTitle, cutsMidWord } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, overlapsRange, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
@@ -52,6 +52,7 @@ import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
 import { scanRepoClockViolations } from "./clockScan";
 import { CRAWL_RULE_WHY } from "../src/lib/crawlLint";
 import { scanRepoCrawlViolations } from "./crawlScan";
+import { ROLLOVER_EVENT, rolloverProblem } from "../src/lib/rollover";
 
 type Row = DisplayedPage["rows"][number];
 
@@ -88,13 +89,25 @@ function report(
   level: Level,
   items: string[],
   baseline: Baseline,
-  examined?: number
+  examined?: number,
+  opts?: {
+    /**
+     * ラチェット（前回より増えたら ERROR に昇格）を外す。**既定は外さない。**
+     *
+     * 外してよいのは「件数が暦だけで上下するのが正しい」検査だけ。
+     * 実測 2026-08-19: `source_empty_by_design`（0件が正常なソースの一覧）が
+     * 0→1件になっただけで ERROR になり、定例更新が止まる状態だった。
+     * 見出しに「ラチェット対象外」と書いてあったのに実装は対象に入っていた＝
+     * **文章では守れない**。故障は別の物差し（何日空いたか）で捕まえる。
+     */
+    ratchet?: false;
+  }
 ) {
   counts[key] = items.length;
   if (examined !== undefined) coverage[key] = examined;
   const base = baseline.checks?.[key] ?? null;
   if (!items.length) return;
-  const exceeded = base !== null && items.length > base;
+  const exceeded = opts?.ratchet !== false && base !== null && items.length > base;
   findings.push({ key, title, level: exceeded ? "error" : level, items, baseline: base });
 }
 
@@ -189,6 +202,20 @@ async function main() {
       .filter((r) => /[|｜]/.test(cleanListTitle(r.source, r.title)))
       .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title)}`);
     report("title_pipe_residue", "タイトルに収集元の区切り記号が残っている", "error", bad, baseline, shown.length);
+  }
+
+  // (1b) **整形が語の途中で切っていないか**（＝日本語として壊れた商品名を出していないか）。
+  //      実測 2026-08-19（channeltono #90439）: 原文「9月27日締切ですがキアサージ…」の
+  //      前置きを削るとき「…締切で」で切ったため、表示が「すがキアサージ と雲仙 早くも！…」に
+  //      なっていた。実況語は1つも残っていないので title_noise は鳴らず、パイプも無いので
+  //      title_pipe_residue も鳴らない＝**既存の検査を全部すり抜ける型**。
+  //      語彙ではなく「削った直前と残りの先頭が**どちらもひらがな**」で見る（定義は
+  //      src/lib/title.ts の cutsMidWord ひとつ。audit:selftest が鳴る側／鳴らない側を固定する）。
+  {
+    const bad = shown
+      .filter((r) => cutsMidWord(r.title, cleanListTitle(r.source, r.title)))
+      .map((r) => `[${r.source} #${r.id}] ${r.title.slice(0, 34)} → ${cleanListTitle(r.source, r.title)}`);
+    report("title_cut_midword", "表示名が語の途中から始まっている（整形が切りすぎ）", "error", bad, baseline, shown.length);
   }
 
   // (1b) 商品名が特定できない投稿（ニュース/速報の実況記事）。掲載自体を見直す対象。
@@ -547,7 +574,7 @@ async function main() {
       if (r.highlights) fields.push(["要約", r.highlights]);
       for (const [where, v] of fields) {
         if (invisibleRe.test(v)) invisible.push(`[${r.source} #${r.id}] ${where}に不可視文字: ${JSON.stringify(v.slice(0, 40))}`);
-        if (/�|[ --]/.test(v))
+        if (/\uFFFD|[\u0000-\u0008\u000B\u000C\u000E-\u001F]/.test(v))
           broken.push(`[${r.source} #${r.id}] ${where}に文字化け/制御文字: ${JSON.stringify(v.slice(0, 40))}`);
         if (/^[\s　]|[\s　]$|　{3,}/.test(v)) spacing.push(`[${r.source} #${r.id}] ${where}の空白が異常: ${JSON.stringify(v.slice(0, 40))}`);
       }
@@ -1144,11 +1171,14 @@ async function main() {
     {
       const shownBySrc = new Map<string, number>();
       for (const r of shown) shownBySrc.set(r.source, (shownBySrc.get(r.source) ?? 0) + 1);
-      const dbBySrc = new Map<string, { n: number; upcoming: number }>();
+      const dbBySrc = new Map<string, { n: number; upcoming: number; newestMs: number | null }>();
       for (const r of all) {
-        const e = dbBySrc.get(r.source) ?? { n: 0, upcoming: 0 };
+        const e = dbBySrc.get(r.source) ?? { n: 0, upcoming: 0, newestMs: null };
         e.n++;
         if (!r.eventDate || r.eventDate >= today) e.upcoming++;
+        // 「最後に載せられる予定日」＝この日を過ぎてから何日、何も出ていないかを測る物差し。
+        const ms = r.eventDate ? r.eventDate.getTime() : null;
+        if (ms !== null && (e.newestMs === null || ms > e.newestMs)) e.newestMs = ms;
         dbBySrc.set(r.source, e);
       }
       // **0件が正常な状態のソース**は、理由を書いて別枠にする（しきい値を緩めるのではなく
@@ -1159,6 +1189,9 @@ async function main() {
       // ⚠️ 残るリスク: このソースが本当に壊れても 0件のままなので、ここでは気付けない。
       // 気付ける経路は巡回時の健全性チェック（scrape 側）だけなので、0件が何日も続いたら
       // 収集元を実際に開いて確かめること。
+      // 「0件が正常」を名乗れる上限。これを超えたら設計ではなく故障として扱う。
+      // 窓ちょうど(7日)にすると、更新が数日空いただけで鳴る＝暦で鳴る検査になるので2週間取る。
+      const EMPTY_BY_DESIGN_GRACE_DAYS = 14;
       const MAY_BE_EMPTY: Record<string, string> = {
         mita_draw: "抽選は数日単位で開いては閉じる。受付中の抽選が無い日は0件が正しい",
         // ハツコレは手動更新なので、1週間更新しない期間が普通に起こる。窓の短いカレンダーは
@@ -1167,14 +1200,31 @@ async function main() {
       };
       const zero: string[] = [];
       const zeroByDesign: string[] = [];
+      const emptyTooLong: string[] = [];
       for (const [src, e] of dbBySrc) {
         if ((shownBySrc.get(src) ?? 0) > 0) continue;
         const line =
           e.upcoming === 0
             ? `${src}: 表示0件 — DB${e.n}件が**すべて過去日**（収集元から「これから」を取れていない＝入口が違う）`
             : `${src}: 表示0件 — DB${e.n}件のうち${e.upcoming}件は日付条件を満たすのに、掲載基準か重複解消で全部落ちている`;
-        if (MAY_BE_EMPTY[src]) zeroByDesign.push(`${line}（${MAY_BE_EMPTY[src]}）`);
-        else zero.push(line);
+        if (!MAY_BE_EMPTY[src]) {
+          zero.push(line);
+          continue;
+        }
+        // **「0件が正常」と「壊れて0件」は、日数でしか見分けられない。**
+        // 受付が開いては閉じるソースでも、最後の予定日から2週間なにも出ないなら
+        // 開いていないのではなく取れていない。ここだけは ERROR にする。
+        const idleDays =
+          e.newestMs === null ? null : Math.floor((today.getTime() - e.newestMs) / 86_400_000);
+        if (idleDays !== null && idleDays > EMPTY_BY_DESIGN_GRACE_DAYS) {
+          emptyTooLong.push(
+            `${src}: ${idleDays}日ぶん何も出ていない（0件が正常なソースだが、${EMPTY_BY_DESIGN_GRACE_DAYS}日を超えたら故障を疑う）— ${MAY_BE_EMPTY[src]}`
+          );
+        } else {
+          zeroByDesign.push(
+            `${line}（${MAY_BE_EMPTY[src]}${idleDays === null ? "" : `／最後の予定日から${idleDays}日`}）`
+          );
+        }
       }
       // **「載っていて当然の層」が丸ごと0件になっていないか**（観点Dの残り半分）。
       //
@@ -1221,6 +1271,15 @@ async function main() {
         "0件になるのが正常なソース（理由つき・ラチェット対象外）",
         "warn",
         zeroByDesign,
+        baseline,
+        dbBySrc.size,
+        { ratchet: false }
+      );
+      report(
+        "source_empty_too_long",
+        `0件が正常なソースが${EMPTY_BY_DESIGN_GRACE_DAYS}日を超えて何も出していない（設計ではなく故障）`,
+        "error",
+        emptyTooLong,
         baseline,
         dbBySrc.size
       );
@@ -1804,6 +1863,31 @@ async function main() {
     report("runner_bat_not_ascii", "定例更新の bat が壊れる書き方になっている", "error", bad, baseline, 1);
   }
   {
+    // (17a) **日付が変わったのに、配信済みHTMLが作り直されていないか。**
+    //
+    // 実測 2026-08-19（本番・audit:page が 4件/2925バッジ で検出）: 一覧ページは ISR なので
+    // 「あと◯日」がHTMLに焼き付く。ISRは*アクセスが来たとき*にしか作り直さないので、夜のうちに
+    // 誰も来なければ前日の版が残り、朝いちばんの訪問者だけが「あと5日」（正しくは あと4日）を見る。
+    // 20分後に取り直したら直っていた＝**本番を1回測って0件でも直った証拠にならない型**。
+    //
+    // 直しは日付ロールオーバー（src/app/api/cron/rollover/route.ts・毎日0時台JST）。
+    // cron は**静かに止まる**ので、動いた足跡（Event）が途切れていないかをここで見る。
+    // 判定は src/lib/rollover.ts の純関数で、audit:selftest が合成データで鳴る側／鳴らない側を固定する。
+    const last = await prisma.event.findFirst({
+      where: { name: ROLLOVER_EVENT },
+      orderBy: { createdAt: "desc" },
+    });
+    const problem = rolloverProblem(last?.createdAt ?? null, nowInstant());
+    report(
+      "cache_rollover_stalled",
+      "日付が変わってもページが作り直されていない（前日のカウントダウンが配られる）",
+      problem?.level ?? "error",
+      problem ? [problem.message] : [],
+      baseline,
+      1
+    );
+  }
+  {
     // **この監査スクリプト自身の書き方**を検査する。report() は渡された配列の長さを
     // そのまま件数＝ラチェットの基準にするので、呼び出し側で `.slice(0, N)` して
     // 「例だけ」を渡すと、件数が N に張り付いて**増加を永久に検出できなくなる**
@@ -1832,6 +1916,20 @@ async function main() {
       ? []
       : ["scripts/scrape.ts が画像の後付け（runImageBackfill）を呼んでいない。更新のたびに画像なしの新着が公開される"];
     report("scrape_skips_images", "更新の経路から画像の後付けが外れている", "error", bad, baseline, 1);
+  }
+  {
+    // **死んだ画像の掃除が更新の経路から外れていないか**（scrape_skips_images と同じ型の穴）。
+    // 実測 2026-08-19: 自ドメイン経由にしてから、取れない画像は透明1×1として 200 で配られる。
+    // ブラウザからは正常な画像に見えるので、外したら**誰も気付かないまま空白が並ぶ**。
+    const src = fs
+      .readFileSync(path.join(process.cwd(), "scripts", "scrape.ts"), "utf8")
+      .split("\n")
+      .filter((l) => !/^\s*(\/\/|\*|\/\*)/.test(l))
+      .join("\n");
+    const bad = /^\s*await\s+runDeadImagePrune\s*\(/m.test(src)
+      ? []
+      : ["scripts/scrape.ts が死んだ画像の掃除（runDeadImagePrune）を呼んでいない。取得できない画像が空白のまま並ぶ"];
+    report("scrape_skips_image_prune", "更新の経路から死んだ画像の掃除が外れている", "error", bad, baseline, 1);
   }
   {
     // (17b) **「今日」を読む行が src/lib/date.ts の外に無いか**（＝日付事故の再発防止の本体）。
