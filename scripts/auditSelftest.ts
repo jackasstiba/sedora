@@ -1718,6 +1718,16 @@ const cases: Case[] = [
     },
     want: "HGUC ザクI (旧ザク)|false|8/10;30MF 鉄禍ノ武闘家|true|8/29|price=1320",
   },
+  {
+    // 日付セルの文言を捨てない。リンク先が楽天検索＝一次情報との突合ができない唯一の
+    // 大口(122件)なので、文言が date_text_mismatch の網に入る唯一の突合相手になる。
+    name: "gunpla: 日付セルの文言をそのまま持ち帰る",
+    fn: () =>
+      parseGunplaCalendar(
+        '</head><table><tr><td><li><a href="#x1">HGUC ザクI </a></li></td><td width="10%">08/10(月)</td></tr></table>'
+      ).rows[0]?.dateText,
+    want: "08/10(月)",
+  },
   { name: "gunpla: 編集タグ除去", fn: () => cleanGunplaName("ENTRY GRADE ガンダム 【新発売】[8月追加]").name, want: "ENTRY GRADE ガンダム" },
 
   // ── card_chusen 店舗別トレカ抽選（2026-08-15新設） ──────────

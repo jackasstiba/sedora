@@ -21,10 +21,10 @@ const HOME = "https://harmonizers-jp.com/";
 const CALENDAR_URL_RE =
   /https:\/\/harmonizers-jp\.com\/gunpla-restock-daily-calender-(?:addition-|postponement-)?[a-z]+-\d{4}\//g;
 
-const ROW_RE = /<tr><td><li><a href="#([^"]+)">([\s\S]*?)<\/a><\/li><\/td><td[^>]*>(\d{1,2})\/(\d{1,2})[^<]*<\/td><\/tr>/g;
+const ROW_RE = /<tr><td><li><a href="#([^"]+)">([\s\S]*?)<\/a><\/li><\/td><td[^>]*>((\d{1,2})\/(\d{1,2})[^<]*)<\/td><\/tr>/g;
 const PRICE_RE = /<td id="([^"]+)">[^<]*<\/td><td[^>]*>(\d{3,6})<\/td>/g;
 
-export type GunplaRow = { id: string; name: string; isNew: boolean; month: number; day: number };
+export type GunplaRow = { id: string; name: string; isNew: boolean; month: number; day: number; dateText: string };
 
 /** 商品名から編集タグ（【新発売】[8月延期][8月追加]等）を落とす。 */
 export function cleanGunplaName(raw: string): { name: string; isNew: boolean } {
@@ -44,7 +44,10 @@ export function parseGunplaCalendar(html: string): { rows: GunplaRow[]; prices: 
   for (const m of body.matchAll(ROW_RE)) {
     const { name, isNew } = cleanGunplaName(m[2].replace(/<[^>]+>/g, " "));
     if (!name) continue;
-    rows.push({ id: m[1], name, isNew, month: Number(m[3]), day: Number(m[4]) });
+    // 日付セルの文言（"08/10(月)"）をそのまま持ち帰る。このソースはリンク先が楽天検索
+    // ＝一次情報との突合ができない唯一の大口(122件)で、文言を捨てると audit の
+    // date_text_mismatch の網にも入らず、日付が**どの網にも掛からない**（2026-08-20 実測）。
+    rows.push({ id: m[1], name, isNew, month: Number(m[4]), day: Number(m[5]), dateText: m[3].trim() });
   }
   const prices = new Map<string, number>();
   for (const m of body.matchAll(PRICE_RE)) prices.set(m[1], Number(m[2]));
@@ -81,7 +84,7 @@ export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
         subGenre: null,
         eventType: r.isNew ? "発売" : "再販",
         eventDate: date,
-        eventDateText: null,
+        eventDateText: r.dateText,
         price: yen ? `${yen.toLocaleString()}円` : null,
         // 収集元は非公開・記事内リンクはアフィリ＝商品名の楽天検索を導線にする。
         // **保存するのは素の検索URL。** アフィリ化は画面に出す瞬間だけ（outbound.ts の注意書き）。
