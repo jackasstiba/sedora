@@ -53,27 +53,15 @@ function classifyTorecasokuGenre(title: string): string {
   return "その他";
 }
 
-export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
+/** 月別ページ1枚から商品行を取り出す（純関数・selftest対象）。 */
+export function parseTorecasokuList(html: string, seen: Set<string> = new Set()): ScrapedItem[] {
   const items: ScrapedItem[] = [];
-  const seen = new Set<string>();
+  const $ = cheerio.load(html);
 
-  let emptyStreak = 0;
-  for (let mi = 0; mi < MAX_MONTHS && emptyStreak < STOP_AFTER_EMPTY; mi++) {
-    const ym = monthParam(mi);
-    const monthStart = items.length;
-    let html: string;
-    try {
-      html = await fetchHtml(`${BASE}?date=${ym}&disp=1`);
-    } catch {
-      emptyStreak++;
-      continue;
-    }
-    const $ = cheerio.load(html);
-
-    // 日付ヘッダと商品が同列に並ぶ本体リストだけを対象にする（releasedate-section を含む ul）。
-    $("ul.goods_list")
-      .filter((_, ul) => $(ul).children("li.releasedate-section").length > 0)
-      .each((_, ul) => {
+  // 日付ヘッダと商品が同列に並ぶ本体リストだけを対象にする（releasedate-section を含む ul）。
+  $("ul.goods_list")
+    .filter((_, ul) => $(ul).children("li.releasedate-section").length > 0)
+    .each((_, ul) => {
         let currentDate: Date | null = null;
         let currentDateText: string | null = null;
 
@@ -91,7 +79,10 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
               //     文言を保存しておけば audit の date_text_mismatch が毎回突き合わせる。
               //  ② 収集元は「8月1日（土）頃発売」と**頃**を付けている。こちらが「発売日 8/1(土)」
               //     と言い切ると、収集元より強い約束をすることになる。
-              currentDateText = $li.text().replace(/\s+/g, " ").trim() || null;
+              // ⚠️ 「未定」セクションの見出しは日付ではなく**開閉ボタンの文言**（「▼ 未定 商品を表示 ▼」）。
+              // これを保存すると日付欄にそのまま出る（実測 2026-08-20: 観点Aの突合で発覚、表示中61件）。
+              // 日付が読めた見出しの文言だけを保存する。
+              currentDateText = currentDate ? $li.text().replace(/\s+/g, " ").trim() || null : null;
               return;
             }
             if (!$li.hasClass("goods_info")) return;
@@ -138,7 +129,27 @@ export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
               imageUrl,
             });
           });
-      });
+    });
+
+  return items;
+}
+
+export async function scrapeTorecasoku(): Promise<ScrapedItem[]> {
+  const items: ScrapedItem[] = [];
+  const seen = new Set<string>();
+
+  let emptyStreak = 0;
+  for (let mi = 0; mi < MAX_MONTHS && emptyStreak < STOP_AFTER_EMPTY; mi++) {
+    const ym = monthParam(mi);
+    const monthStart = items.length;
+    let html: string;
+    try {
+      html = await fetchHtml(`${BASE}?date=${ym}&disp=1`);
+    } catch {
+      emptyStreak++;
+      continue;
+    }
+    items.push(...parseTorecasokuList(html, seen));
 
     // 同一商品の複数月重複は dedup 済みなので、「この月で新規に増えたか」で空月を判定する。
     emptyStreak = items.length > monthStart ? 0 : emptyStreak + 1;

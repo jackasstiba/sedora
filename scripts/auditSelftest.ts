@@ -96,6 +96,7 @@ import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepie
 import { parseCardChusen, parseDue, productKey, splitSaleConditions } from "../src/scrapers/cardChusen";
 import { buildSaleUnits, groupSaleUnits, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
+import { parseTorecasokuList } from "../src/scrapers/torecasoku";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { findCrawlViolations, isCrawlLinted } from "../src/lib/crawlLint";
@@ -1723,6 +1724,29 @@ const cases: Case[] = [
       return rows.map((r) => `${r.name}|${r.isNew}|${r.month}/${r.day}`).join(";") + `|price=${prices.get("2608001")}`;
     },
     want: "HGUC ザクI (旧ザク)|false|8/10;30MF 鉄禍ノ武闘家|true|8/29|price=1320",
+  },
+  {
+    // 「未定」セクションの見出しは開閉ボタンの文言。日付が読めた見出しだけ文言を保存する
+    // （実測 2026-08-20: 「▼ 未定 商品を表示 ▼」が61件の日付欄に出た）。
+    name: "torecasoku: 日付の無い見出しの文言は保存しない",
+    fn: () => {
+      const html =
+        '<ul class="goods_list"><li class="releasedate-section" data-release="99999999">▼ 未定 商品を表示 ▼</li>' +
+        '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/1">テスト商品パック</a></div></div></li></ul>';
+      return parseTorecasokuList(html).map((i) => `${i.eventDate}|${i.eventDateText}`).join(";");
+    },
+    want: "null|null",
+  },
+  {
+    name: "torecasoku: 日付が読めた見出しは文言も保存する",
+    fn: () => {
+      const html =
+        '<ul class="goods_list"><li class="releasedate-section" data-release="20260801">8月1日（土）頃発売</li>' +
+        '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/2">テスト商品パック</a></div></div></li></ul>';
+      const r = parseTorecasokuList(html)[0];
+      return `${r?.eventDate?.toISOString().slice(0, 10)}|${r?.eventDateText}`;
+    },
+    want: "2026-08-01|8月1日（土）頃発売",
   },
   {
     // 日付セルの文言を捨てない。リンク先が楽天検索＝一次情報との突合ができない唯一の
