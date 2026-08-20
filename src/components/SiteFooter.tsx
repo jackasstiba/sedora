@@ -16,9 +16,8 @@ export function SiteFooter({ locale = "ja" }: { locale?: Locale } = {}) {
               日本語版
             </Link>
             {" · "}
-            {/* 方針ページは現状日本語のみ。英語だと約束しない（(Japanese) と明記）。 */}
-            <Link href="/privacy" className="text-rose-600 hover:underline dark:text-rose-400">
-              Privacy policy & disclaimer (Japanese)
+            <Link href="/en/privacy" className="text-rose-600 hover:underline dark:text-rose-400">
+              Privacy policy & disclaimer
             </Link>
           </p>
           <p>

@@ -25,6 +25,7 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // 静的な方針ページ。中身はめったに変わらないが、載せておく方が「実体のあるサイト」として
     // 扱われる（広告審査でも見られる面）。
     { url: `${base}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    { url: `${base}/en/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
   ];
 
   for (const g of genres) {

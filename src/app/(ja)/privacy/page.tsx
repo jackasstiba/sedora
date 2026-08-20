@@ -27,7 +27,7 @@ const CONTACT_EMAIL = "";
 const X_HANDLE = "hatsukore_com";
 
 /** 最終改定日。文面を直したらここも直す（「いつ時点の約束か」が読み手には要る）。 */
-const UPDATED_AT = "2026年8月18日";
+const UPDATED_AT = "2026年8月20日";
 
 const DESCRIPTION =
   "ハツコレのプライバシーポリシー・免責事項。アクセス解析の扱い、アフィリエイトプログラムの利用、掲載情報の正確性についての方針を記載しています。";
@@ -35,7 +35,13 @@ const DESCRIPTION =
 export const metadata: Metadata = {
   title: "プライバシーポリシー・免責事項 | ハツコレ",
   description: DESCRIPTION,
-  alternates: SITE ? { canonical: `${SITE}/privacy` } : undefined,
+  alternates: SITE
+    ? {
+        canonical: `${SITE}/privacy`,
+        // 英語版（/en/privacy）と双方向＋自己参照（hreflangの仕様）。
+        languages: { ja: `${SITE}/privacy`, en: `${SITE}/en/privacy`, "x-default": `${SITE}/privacy` },
+      }
+    : undefined,
   openGraph: { title: "プライバシーポリシー・免責事項 | ハツコレ", description: DESCRIPTION, type: "website" },
 };
 
@@ -82,6 +88,12 @@ export default function PrivacyPage() {
           利用しています。この解析は<strong>Cookie を使用せず</strong>、閲覧されたページ・参照元・
           国・端末の種別といった統計情報のみを扱います。氏名・メールアドレス・電話番号など、
           個人を特定できる情報を当サイトが取得・保存することはありません。
+        </p>
+        <p>
+          また、サイトの改善のために、ページの閲覧・サイト内検索の検索語・ジャンル選択・
+          外部リンクのクリックといった操作イベントを当サイト自身でも記録しています。
+          これらの記録に Cookie は使用せず、IPアドレス・氏名など個人を特定できる情報や
+          閲覧者ごとの識別子は含まれません。
         </p>
         <p>
           当サイトは会員登録・ログイン・お問い合わせフォームを設けておらず、閲覧者から

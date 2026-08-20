@@ -26,8 +26,10 @@ export const dynamic = "force-dynamic";
 /** 直前の実行からこの時間以内なら何もしない（同じ日に何度叩かれても増幅しない＝踏み台対策）。 */
 const MIN_INTERVAL_MS = 12 * 60 * 60 * 1000;
 
-/** 作り直しを待たせないために温め直すページ（少数に絞る。残りは最初の訪問者が引き金になる）。 */
-const WARM_PATHS = ["/", "/lottery"];
+/** 作り直しを待たせないために温め直すページ（少数に絞る。残りは最初の訪問者が引き金になる）。
+ *  /en を含める: 日本時間0時＝米国の昼なので、英語版こそ purge 直後に訪問が来る
+ *  （[[Projects/sedori_radar_en]] 注意点§2「ISRの焼き付きは時差で悪化する」）。 */
+const WARM_PATHS = ["/", "/lottery", "/en"];
 
 function unauthorized(): Response {
   return new Response("unauthorized", { status: 401 });

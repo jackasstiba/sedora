@@ -221,7 +221,11 @@ function rakutenAffiliateCallers(): string[] {
  * 免責としてなら書いてよい一文。「転売を推奨しない」と言うには語そのものが要るので、
  * **この文字列に限って**下の走査から除く。増やすときは「語を出すこと自体が目的か」で判断する。
  */
-const ALLOWED_FORBIDDEN_PHRASES = ["投機や高額転売を推奨するものではありません"];
+const ALLOWED_FORBIDDEN_PHRASES = [
+  "投機や高額転売を推奨するものではありません",
+  // 英語版プライバシーポリシーの同じ免責（「推奨しない」と言うには resell の語そのものが要る）。
+  "does not encourage speculation or high-priced reselling",
+];
 
 /**
  * 表示層のソース1本から「画面に出る文字列に混ざった立ち位置違反の語」を返す（純関数）。
