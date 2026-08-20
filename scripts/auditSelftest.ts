@@ -30,6 +30,7 @@ import {
   plannedDateFromText,
 } from "../src/lib/date";
 import { countdownLabelEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
+import { isOnlineItem } from "../src/lib/channel";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
   lastDeadline,
@@ -3788,6 +3789,40 @@ const cases: Case[] = [
     name: "表示層スキャン: 英語ソースの 'resale' も拾う",
     fn: () => forbiddenInDisplayText('<p className="x">Great for resale!</p>').join(","),
     want: "resale",
+  },
+
+  // ── 入手経路タグ（/en の "Online (JP)"）: 裏取り済みの (収集元,ホスト) の組だけに出す ──
+  {
+    name: "入手経路: 裏取り済みの組（url側）は online",
+    fn: () => isOnlineItem({ source: "takaratomy_mall", url: "https://takaratomymall.jp/shop/g/g4904810079880/" }),
+    want: true,
+  },
+  {
+    name: "入手経路: officialUrl 側でも判定する（プレバン）",
+    fn: () => isOnlineItem({ source: "figisland_pb", url: null, officialUrl: "https://p-bandai.jp/item/item-1000182906/" }),
+    want: true,
+  },
+  {
+    name: "入手経路: 同じホストでも裏取りしていない収集元には出さない",
+    fn: () => isOnlineItem({ source: "collabo_cafe", url: "https://www.chiikawamarket.jp/products/x" }),
+    want: false,
+  },
+  {
+    name: "入手経路: 企業サイト（store でない medicomtoy.co.jp）には出さない",
+    fn: () => isOnlineItem({ source: "medicom_toy", url: "https://www.medicomtoy.co.jp/blog/?p=99999" }),
+    want: false,
+  },
+  {
+    name: "入手経路: www は吸収する（SNKRS）",
+    fn: () => isOnlineItem({ source: "nike_snkrs", url: "https://www.nike.com/jp/launch/t/air-max-95" }),
+    want: true,
+  },
+  {
+    name: "入手経路: 壊れたURL・URL無しは判定しない",
+    fn: () =>
+      isOnlineItem({ source: "takaratomy_mall", url: "not a url" }) ||
+      isOnlineItem({ source: "takaratomy_mall", url: null }),
+    want: false,
   },
 ];
 

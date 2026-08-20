@@ -3,6 +3,7 @@ import { countdown, displayEventType, eventDateLabel, eventDateLabelEn, isMonthP
 import { formatPriceDisplay } from "@/lib/margin";
 import { displaySubGenre } from "@/lib/title";
 import { countdownLabelEn, eventTypeLabel, genreLabel, type Locale } from "@/lib/i18n";
+import { ONLINE_TAG_EN } from "@/lib/channel";
 import { NoImage } from "./NoImage";
 import type { CardItem } from "@/lib/cardItem";
 
@@ -101,6 +102,12 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
             {/* 英語版はジャンルの英語ラベル（subGenre は自由記述の日本語なので出さない）。 */}
             {en ? genreLabel(item.genre, "en") : (displaySubGenre(item.subGenre) ?? item.genre)}
           </span>
+          {/* 入手経路タグ（英語版のみ・裏取り済みの行だけ）。意味の定義はトップの脚注に1回だけ書く。 */}
+          {en && item.online && (
+            <span className="rounded bg-emerald-100 px-1.5 py-0.5 font-medium text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300">
+              {ONLINE_TAG_EN}
+            </span>
+          )}
           {dateLabel && (
             <span className="font-semibold text-rose-600 dark:text-rose-400">{dateLabel}</span>
           )}

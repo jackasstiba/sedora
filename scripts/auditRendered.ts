@@ -21,6 +21,7 @@ import { loadDisplayedPages } from "../src/lib/pages";
 import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import { AD_DISCLOSURE, AD_DISCLOSURE_EN, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
+import { ONLINE_TAG_EN, isOnlineItem } from "../src/lib/channel";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -246,6 +247,8 @@ async function main() {
   // 隠すべき収集元ホスト（実データから導出）と、HTMLに出てしまった回数。
   const hiddenHosts = hiddenSourceHosts(pages.flatMap((p) => p.rows));
   let sourceLeaks = 0;
+  // /en の入手経路タグを何枚見たか（母数。0枚で終わったら判定側かセレクタが壊れている）。
+  let onlineTagsSeen = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -338,6 +341,24 @@ async function main() {
     if (p.rows.length > 0 && titles.length === 0)
       flag(p.name, "空ページ", `データは ${p.rows.length}件あるのにカードが0枚`);
 
+    // (7.5) 英語版の入手経路タグ: **描画されたタグの枚数 ＝ サーバー側判定の件数**。
+    //     タグは「裏取り済みの組」だけに出す約束なので、多くても少なくても嘘になる
+    //     （多い＝約束していない行に出ている／少ない＝表示が壊れて母数が消えている）。
+    //     脚注の説明文にも同じ文字列が出るので、span 要素の完全一致だけを数える。
+    if (p.name === "/en") {
+      const expectedShown = p.rows.slice(0, titles.length).filter((r) => isOnlineItem(r)).length;
+      const chips = $("span")
+        .filter((_, el) => $(el).text().trim() === ONLINE_TAG_EN)
+        .length;
+      onlineTagsSeen += chips;
+      if (chips !== expectedShown)
+        flag(
+          p.name,
+          "入手経路タグの食い違い",
+          `画面のタグ ${chips}枚 ≠ 判定 ${expectedShown}件（描画 ${titles.length} 枚中）`
+        );
+    }
+
     // (8) **画面に出ている日付そのものの整合**（曜日／本日・明日・あとN日）。
     //     人間が一目で気付く型（1画面の中で上下が食い違う）を、描画結果の文字列で見る。
     for (const msg of renderedDateProblems(text, today)) flag(p.name, "日付の食い違い（画面）", msg);
@@ -411,7 +432,8 @@ async function main() {
   // 実際に検査した物量を必ず出す。セレクタが壊れると0枚になり、静かに素通りするのを防ぐ。
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
-      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / 隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回）`
+      `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / ` +
+      `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚`
   );
   // 隠すべきホストが1つも作れていないなら、この検査は何も守っていない。
   if (checked > 0 && hiddenHosts.length === 0) {

@@ -73,6 +73,14 @@ export default async function HomeEn() {
           {/* 締切が商品のサイトなのでTZを常に明示（[[Projects/sedori_radar_en]] 注意点§2）。 */}
           {" · All dates are Japan time (JST)"}
         </p>
+        {/* 入手経路タグの定義。約束するのは「導線の性質」だけで、可用性・海外購入の可否は
+            約束しない（裏取りできないため）。無タグ＝未確認、を明示する。 */}
+        <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+          🛒 Online (JP) = ordered or entered on an official Japanese online store or draw
+          platform. Most of them ship within Japan only; overseas collectors commonly order
+          through proxy/forwarding services. Items without the tag are unverified — many are
+          in-store only.
+        </p>
       </header>
 
       <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} locale="en" />

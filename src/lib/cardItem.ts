@@ -1,5 +1,6 @@
 import { proxiedImageUrl } from "./imageProxy";
 import { isLotteryItem } from "./itemFilter";
+import { isOnlineItem } from "./channel";
 import { cleanListTitle } from "./title";
 
 /**
@@ -36,6 +37,9 @@ export type CardItem = {
   image: string | null;
   /** 抽選として扱うか。**収集元名を使う判定なのでサーバーで済ませる**（ブラウザには送らない）。 */
   lottery: boolean;
+  /** 入手経路が「日本の公式オンラインストア/オンライン抽選」と裏取りできた行（英語版のタグ用）。
+   *  判定は url/officialUrl を使うのでサーバーで済ませ、真偽値だけ渡す（lottery と同じ形）。 */
+  online: boolean;
   marketPrice?: number | null;
   marketPriceText?: string | null;
   highlights?: string | null;
@@ -54,6 +58,8 @@ export function toCardItem(row: {
   eventDateText: string | null;
   price: string | null;
   imageUrl: string | null;
+  url?: string | null;
+  officialUrl?: string | null;
   marketPrice?: number | null;
   marketPriceText?: string | null;
   highlights?: string | null;
@@ -72,6 +78,7 @@ export function toCardItem(row: {
     price: row.price,
     image: proxiedImageUrl(row.id, row.imageUrl),
     lottery: isLotteryItem(row),
+    online: isOnlineItem({ source: row.source, url: row.url ?? null, officialUrl: row.officialUrl ?? null }),
     marketPrice: row.marketPrice ?? null,
     marketPriceText: row.marketPriceText ?? null,
     highlights: row.highlights ?? null,
