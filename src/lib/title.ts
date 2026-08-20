@@ -507,12 +507,18 @@ function stripTrailingCommentary(title: string): string {
   return parts.join("　");
 }
 
+// 収集元がカテゴリ語をタイトル末尾に直結させる粗（実測 2026-08-21・トレカ速報の
+// MTG Secret Lair 行14件:「…Smaug's Spoils玩具」「…Fan Merch Bundle玩具」。収集元の
+// h1/title 自体がこの表記）。ASCII英数字の直後に密着した「玩具」だけを剥がす。
+// 「昭和レトロ玩具」のような日本語の商品名は仮名・漢字に続くので触らない。
+const GLUED_CATEGORY_TAIL = /(?<=[A-Za-z0-9])玩具$/;
+
 /** 一覧カード表示用にタイトルを整形（非破壊・失敗時は原文）。 */
 export function cleanListTitle(source: string, title: string): string {
   // まず全ソース共通で情報元由来の定型ラベル（snkrdunkの「｜…」）と、末尾の日付告知
   // （コラボ記事の「〜8月6日よりコラボ開催!」等）を剥がす。後者は eventDate/eventType
   // バッジと重複するノイズで、告知型でないタイトルには誤爆しないことを検証済み。
-  const base = stripDateNoticeTail(stripSourceLabel(title));
+  const base = stripDateNoticeTail(stripSourceLabel(title)).replace(GLUED_CATEGORY_TAIL, "");
   if (!CLEANABLE_SOURCES.has(source)) return base;
   const raw = base.trim();
 

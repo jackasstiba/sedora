@@ -3555,6 +3555,22 @@ const cases: Case[] = [
     want: "ONE PIECEカードゲーム ブースターパック 世界最強の戦士[OP-17] 24パック入りBOX",
   },
   {
+    // 収集元（トレカ速報）が英語商品名の末尾にカテゴリ語「玩具」を直結させる粗
+    // （実測 2026-08-21・MTG Secret Lair 行14件。収集元の h1/title 自体がこの表記）。
+    name: "整形: ASCII英数字に直結した末尾の「玩具」を剥がす",
+    fn: () =>
+      cleanListTitle(
+        "torecasoku",
+        "【MTG】Secret Lair A Marvelous Mathom Superdrop Secret Lair x [ELDERBERRY]: Smaug's Spoils玩具"
+      ),
+    want: "【MTG】Secret Lair A Marvelous Mathom Superdrop Secret Lair x [ELDERBERRY]: Smaug's Spoils",
+  },
+  {
+    name: "整形: 日本語の商品名が「玩具」で終わる形は触らない",
+    fn: () => cleanListTitle("torecasoku", "昭和レトロ玩具"),
+    want: "昭和レトロ玩具",
+  },
+  {
     name: "整形: ひらがなで始まる商品名は巻き込まない（前がひらがなでない）",
     fn: () => cutsMidWord("【予約開始】ちいかわ ぬいぐるみ", "ちいかわ ぬいぐるみ"),
     want: false,
