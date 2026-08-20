@@ -1742,6 +1742,46 @@ const cases: Case[] = [
     want: "null|null",
   },
   {
+    // 月別ページの「未定」セクションは、読者に見えている見出し（h1）の月を月精度で持たせる。
+    // 日は作らない（eventDate は null のまま）。観点A実測 2026-08-20（#68180: 収集元の
+    // 商品ページは「発売日 2026年11月未定」なのに、こちらは「日付未定」で出していた）。
+    name: "torecasoku: 未定セクションはページの月を月精度で持たせる",
+    fn: () => {
+      const html =
+        '<h1 class="entry-titlekiji">2026年11月1日 ～ 11月30日 発売一覧</h1>' +
+        '<ul class="goods_list"><li class="releasedate-section" data-release="20261132">▼ 未定 商品を表示 ▼</li>' +
+        '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/1">テスト商品パック</a></div></div></li></ul>';
+      return parseTorecasokuList(html).map((i) => `${i.eventDate}|${i.eventDateText}`).join(";");
+    },
+    want: "null|2026年11月発売予定",
+  },
+  {
+    // 鳴らない側①: 月は h1 の表示文言からだけ作る。h1 が月の形でなければ何も足さない
+    // （data-release 属性 "20261132" の月から作ってはいけない＝ミス38の規約）。
+    name: "torecasoku: h1が読めなければ未定セクションに月を足さない",
+    fn: () => {
+      const html =
+        "<h1>発売日カレンダー</h1>" +
+        '<ul class="goods_list"><li class="releasedate-section" data-release="20261132">▼ 未定 商品を表示 ▼</li>' +
+        '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/1">テスト商品パック</a></div></div></li></ul>';
+      return parseTorecasokuList(html).map((i) => `${i.eventDate}|${i.eventDateText}`).join(";");
+    },
+    want: "null|null",
+  },
+  {
+    // 鳴らない側②: 日付が読めた見出しの行は従来どおり（ページの月に置き換えない）。
+    name: "torecasoku: 日付が読めた見出しはh1があっても文言を保存する",
+    fn: () => {
+      const html =
+        '<h1 class="entry-titlekiji">2026年11月1日 ～ 11月30日 発売一覧</h1>' +
+        '<ul class="goods_list"><li class="releasedate-section" data-release="20261106">11月6日（金）頃発売</li>' +
+        '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/3">テスト商品パック</a></div></div></li></ul>';
+      const r = parseTorecasokuList(html)[0];
+      return `${r?.eventDate?.toISOString().slice(0, 10)}|${r?.eventDateText}`;
+    },
+    want: "2026-11-06|11月6日（金）頃発売",
+  },
+  {
     name: "torecasoku: 日付が読めた見出しは文言も保存する",
     fn: () => {
       const html =

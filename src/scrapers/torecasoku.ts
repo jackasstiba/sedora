@@ -58,6 +58,17 @@ export function parseTorecasokuList(html: string, seen: Set<string> = new Set())
   const items: ScrapedItem[] = [];
   const $ = cheerio.load(html);
 
+  // 月別ページの「未定」セクションの行に、**そのページの月**を月精度で持たせる。
+  //
+  // 観点A実測（2026-08-20・#68180）: 収集元の商品ページは「発売日 2026年11月未定」と月まで
+  // 言っているのに、こちらは日付ごと捨てて「日付未定」で出していた。月は読者に見えている
+  // 見出し「2026年11月1日 ～ 11月30日 発売一覧」から作る（data-release 属性の月
+  // "20261132" からは作らない＝日付は表示文言から作る規約・ミス38）。
+  // 日は作らない（eventDate は null のまま＝date_fabricated_precision と同じ約束）。
+  const h1 = $("h1").first().text().replace(/\s+/g, " ").trim();
+  const hm = h1.match(/(\d{4})年\s*(\d{1,2})月\s*\d{1,2}日\s*[～〜]/);
+  const pageMonthText = hm ? `${hm[1]}年${Number(hm[2])}月発売予定` : null;
+
   // 日付ヘッダと商品が同列に並ぶ本体リストだけを対象にする（releasedate-section を含む ul）。
   $("ul.goods_list")
     .filter((_, ul) => $(ul).children("li.releasedate-section").length > 0)
@@ -81,8 +92,10 @@ export function parseTorecasokuList(html: string, seen: Set<string> = new Set())
               //     と言い切ると、収集元より強い約束をすることになる。
               // ⚠️ 「未定」セクションの見出しは日付ではなく**開閉ボタンの文言**（「▼ 未定 商品を表示 ▼」）。
               // これを保存すると日付欄にそのまま出る（実測 2026-08-20: 観点Aの突合で発覚、表示中61件）。
-              // 日付が読めた見出しの文言だけを保存する。
-              currentDateText = currentDate ? $li.text().replace(/\s+/g, " ").trim() || null : null;
+              // 日付が読めた見出しは文言を保存し、未定セクションはページの月（月精度）を持たせる。
+              currentDateText = currentDate
+                ? $li.text().replace(/\s+/g, " ").trim() || null
+                : pageMonthText;
               return;
             }
             if (!$li.hasClass("goods_info")) return;
