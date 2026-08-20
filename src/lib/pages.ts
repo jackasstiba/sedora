@@ -28,7 +28,12 @@ export type DisplayedPage = { name: string; rows: Awaited<ReturnType<typeof getI
 /** 各ページが実際に描画する行を、ページ単位で返す。 */
 export async function loadDisplayedPages(): Promise<DisplayedPage[]> {
   const pages: DisplayedPage[] = [];
-  pages.push({ name: "/", rows: await getItems({}) });
+  const home = await getItems({});
+  pages.push({ name: "/", rows: home });
+  // 英語版トップ。データ・掲載スコープは "/" と**同一の取得結果**（表示層だけが英語）。
+  // ここに載せることで audit:page が /en も取得して検査する（広告表示・収集元リーク・
+  // 件数突合・日付突合の英語書式は auditRendered 側が両言語を読む）。
+  pages.push({ name: "/en", rows: home });
   // /premium（相場・プレ値ランキング）は 2026-08-10 に表示を取り下げた（getPremiumItems の
   // コメント参照）。ページが無い＝表示範囲にも無い。復活させるならここに1行戻す。
   pages.push({ name: "/lottery", rows: await getLotteryItems() });

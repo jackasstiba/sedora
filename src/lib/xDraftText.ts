@@ -82,11 +82,19 @@ export function buildPost(opts: {
   return { text: [head, "", ...body, "", tail].join("\n"), used };
 }
 
-/** 立ち位置に反する語（相場・利益を煽る語）。投稿前に機械で弾く。 */
+/** 立ち位置に反する語（相場・利益を煽る語）。投稿前と表示層スキャンで機械で弾く。
+ *  英語版（/en）を作ったので英語の同義語も見張る（立ち位置は言語に依らず同じ）。 */
 export const FORBIDDEN_WORDS = ["儲か", "プレ値", "転売", "せどり", "利益", "高騰", "相場"];
+/** 英語の禁止語。単語境界で見る（"profitable" も "reseller" も語幹で拾いたいので部分一致のまま、
+ *  ただし大文字小文字は吸収する）。 */
+export const FORBIDDEN_WORDS_EN = ["resell", "resale", "scalp", "profit", "flip for"];
 
 export function findForbidden(text: string): string[] {
-  return FORBIDDEN_WORDS.filter((w) => text.includes(w));
+  const lower = text.toLowerCase();
+  return [
+    ...FORBIDDEN_WORDS.filter((w) => text.includes(w)),
+    ...FORBIDDEN_WORDS_EN.filter((w) => lower.includes(w)),
+  ];
 }
 
 // ── 本文に書いた「数」が今のデータと合っているか ────────────────

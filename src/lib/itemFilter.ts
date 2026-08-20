@@ -964,6 +964,27 @@ const SEARCH_SYNONYMS: { alias: string; canon: string[] }[] = [
   { alias: "リーボック", canon: ["reebok"] },
   { alias: "ベイブレード", canon: ["beyblade"] },
   { alias: "ベアブリック", canon: ["be@rbrick", "bearbrick"] },
+  // ── 英語版（/en）向け: 英語の検索語 → タイトルに実際に現れる日本語表記 ─────────
+  // 展開は「一致を増やすだけ」（既存と同じ理由で安全・加算的）。作品の**公式英語名**だけを
+  // 置く（こちらで訳語を作らない＝[[Projects/sedori_radar_en]] 注意点§4）。
+  { alias: "pokemon", canon: ["ポケモン", "ポケモンカード"] },
+  { alias: "pokémon", canon: ["ポケモン", "ポケモンカード"] },
+  { alias: "one piece", canon: ["ワンピース"] },
+  { alias: "gundam", canon: ["ガンダム", "ガンプラ"] },
+  { alias: "gunpla", canon: ["ガンプラ"] },
+  { alias: "dragon ball", canon: ["ドラゴンボール"] },
+  { alias: "demon slayer", canon: ["鬼滅の刃", "鬼滅"] },
+  { alias: "jujutsu kaisen", canon: ["呪術廻戦"] },
+  { alias: "chainsaw man", canon: ["チェンソーマン"] },
+  { alias: "hololive", canon: ["ホロライブ"] },
+  { alias: "hatsune miku", canon: ["初音ミク"] },
+  { alias: "ichiban kuji", canon: ["一番くじ"] },
+  { alias: "my hero academia", canon: ["僕のヒーローアカデミア", "ヒロアカ"] },
+  { alias: "frieren", canon: ["葬送のフリーレン", "フリーレン"] },
+  { alias: "chiikawa", canon: ["ちいかわ"] },
+  { alias: "evangelion", canon: ["エヴァンゲリオン", "エヴァ"] },
+  { alias: "kirby", canon: ["カービィ", "星のカービィ"] },
+  { alias: "sanrio", canon: ["サンリオ"] },
 ];
 
 /**

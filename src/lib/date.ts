@@ -8,6 +8,9 @@
 // ゲッターで行う。これで実行環境のタイムゾーンに関係なく同じ日付になる。
 
 const DAYS = ["日", "月", "火", "水", "木", "金", "土"];
+// 英語版（/en）の表示・画面監査で使う。表記は audit:page の突合が読める形に固定する。
+const DAYS_EN = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 // ── 壁時計を読むのは、このファイルの中だけ ──────────────────────────────
 //
@@ -111,6 +114,25 @@ export function formatShort(d: Date | string): string {
   const y = x.getUTCFullYear();
   const md = `${x.getUTCMonth() + 1}/${x.getUTCDate()}(${DAYS[x.getUTCDay()]})`;
   return y === todayJst().getUTCFullYear() ? md : `${y}/${md}`;
+}
+
+/** 英語版の短い日付 "Sep 5 (Fri)"。今年以外は "Sep 5, 2027 (Fri)"（formatShort と同じ理由で年を付ける）。
+ *  **月は必ず綴る**: "9/5" は 米=Sep 5 / 英=May 9 と読みが割れる（[[Projects/sedori_radar_en]] 注意点§2）。
+ *  書式は画面監査（renderedDateProblems / parseDisplayedDate）が読める形に固定。 */
+export function formatShortEn(d: Date | string): string {
+  const x = new Date(d);
+  const y = x.getUTCFullYear();
+  const m = MONTHS_EN[x.getUTCMonth()];
+  const dow = DAYS_EN[x.getUTCDay()];
+  return y === todayJst().getUTCFullYear()
+    ? `${m} ${x.getUTCDate()} (${dow})`
+    : `${m} ${x.getUTCDate()}, ${y} (${dow})`;
+}
+
+/** 英語版の月精度ラベル "Sep 2026"（合成した日を出さない＝eventDateLabel と同じ規則）。 */
+export function formatMonthEn(d: Date | string): string {
+  const x = new Date(d);
+  return `${MONTHS_EN[x.getUTCMonth()]} ${x.getUTCFullYear()}`;
 }
 
 /** "2026年7月25日(土)" */
@@ -222,6 +244,21 @@ export function renderedDateProblems(text: string, today: Date): string[] {
       out.push(`曜日が暦と違う: 「${m[0]}」（${d.toISOString().slice(0, 10)} は${DAYS[d.getUTCDay()]}曜）`);
   }
 
+  // ①-EN 英語版（/en）の曜日（"Sep 5 (Fri)" / "Sep 5, 2027 (Fri)"）。JPと同じ「暦との突合」。
+  for (const m of t.matchAll(
+    /\b(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)\s(\d{1,2})(?:,\s?(\d{4}))?\s?\((Sun|Mon|Tue|Wed|Thu|Fri|Sat)\)/g
+  )) {
+    const mo = MONTHS_EN.indexOf(m[1]) + 1;
+    const day = Number(m[2]);
+    if (day < 1 || day > 31) continue;
+    const d = m[3] ? new Date(Date.UTC(Number(m[3]), mo - 1, day)) : nearestYear(mo, day);
+    if (d.getUTCDate() !== day) continue;
+    if (DAYS_EN[d.getUTCDay()] !== m[4])
+      out.push(
+        `曜日が暦と違う: 「${m[0]}」（${d.toISOString().slice(0, 10)} は ${DAYS_EN[d.getUTCDay()]}）`
+      );
+  }
+
   // ② 暦日のすぐ隣にある相対表記（本日/明日/あとN日）が、その暦日と合っているか。
   //    間に数字を挟まない短い範囲だけを見る（別のカードの文字列を巻き込まないため）。
   return out;
@@ -243,6 +280,14 @@ export function parseDisplayedDate(label: string, today: Date): Date | null {
     }
     return best.getUTCDate() === day ? best : null;
   };
+  // 英語版のラベル（"Sep 5 (Fri)" / "Sep 5, 2027 (Fri)"。空白は上で落ちている）。
+  // (?!\d) が無いと月精度の "Sep 2026" を「Sep 20」と読んでしまう（勝手に日精度を足す型）。
+  const enM = s.match(/^(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(\d{1,2})(?:,(\d{4}))?(?!\d)/i);
+  if (enM) {
+    const mo = MONTHS_EN.findIndex((x) => x.toLowerCase() === enM[1].toLowerCase()) + 1;
+    if (enM[3]) return new Date(Date.UTC(Number(enM[3]), mo - 1, Number(enM[2])));
+    return nearest(mo, Number(enM[2]));
+  }
   const long = s.match(/^(\d{4})年(\d{1,2})月(\d{1,2})日/);
   if (long) return new Date(Date.UTC(Number(long[1]), Number(long[2]) - 1, Number(long[3])));
   const withYear = s.match(/^(\d{4})\/(\d{1,2})\/(\d{1,2})/);
@@ -265,9 +310,22 @@ export function parseDisplayedDate(label: string, today: Date): Date | null {
  */
 export function countdownBadgeProblem(badge: string, dateLabel: string, today: Date): string | null {
   const b = badge.replace(/[🔥\s]/g, "");
-  const m = b.match(/^(本日|明日|あと(\d{1,2})日)$/);
-  if (!m) return null; // カウントダウンのバッジではない
-  const want = m[1] === "本日" ? 0 : m[1] === "明日" ? 1 : Number(m[2]);
+  const jp = b.match(/^(本日|明日|あと(\d{1,2})日)$/);
+  // 英語版バッジ（i18n.countdownLabel が出す "Today" / "Tomorrow" / "In N days"）。
+  // 空白は上で落ちるので "In3days" の形で読む。
+  const en = jp ? null : b.match(/^(Today|Tomorrow|In(\d{1,2})days?)$/i);
+  if (!jp && !en) return null; // カウントダウンのバッジではない
+  const want = jp
+    ? jp[1] === "本日"
+      ? 0
+      : jp[1] === "明日"
+        ? 1
+        : Number(jp[2])
+    : /^today$/i.test(en![1])
+      ? 0
+      : /^tomorrow$/i.test(en![1])
+        ? 1
+        : Number(en![2]);
   const d = parseDisplayedDate(dateLabel, today);
   if (!d) return null; // 日付が読めない（月精度の「2026年9月」等）＝この検査の対象外
   const diff = Math.round((d.getTime() - today.getTime()) / 86_400_000);
@@ -481,6 +539,20 @@ export function eventDateLabel(
     return `${x.getUTCFullYear()}年${x.getUTCMonth() + 1}月`;
   }
   if (eventDate) return style === "long" ? formatLong(eventDate) : formatShort(eventDate);
+  return displayEventDateText(eventDateText);
+}
+
+/**
+ * eventDateLabel の英語版。**精度の規則は同一**（月精度は "Sep 2026"・日精度は "9/5 (Fri)"）。
+ * 日付が無い行の eventDateText は収集元の日本語のまま返す＝訳さない
+ * （原文の言い換えは精度・意味を足すリスクがあるので、表示側が lang="ja" を付けて出す）。
+ */
+export function eventDateLabelEn(
+  eventDate: Date | string | null,
+  eventDateText: string | null
+): string | null {
+  if (eventDate && isMonthPrecision(eventDateText)) return formatMonthEn(eventDate);
+  if (eventDate) return formatShortEn(eventDate);
   return displayEventDateText(eventDateText);
 }
 

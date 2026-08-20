@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { FilterBar, type FilterValues } from "./FilterBar";
 import { ItemCard, type Item } from "./ItemCard";
 import { filterItems, groupItemsByDate, type ItemStatus, type ItemWhen } from "@/lib/itemFilter";
+import { groupLabel, UI, type Locale } from "@/lib/i18n";
 
 // 全件（今後の予定＋日付未定）を一度だけ受け取り、以降のジャンル/種別/時期/検索の絞り込みと
 // 「もっと見る」は全てブラウザ内で即時に処理する（サーバー往復ゼロ＝体感が速い）。
@@ -15,9 +16,14 @@ type Props = {
   genres: { genre: string; count: number }[];
   initial: FilterValues;
   initialShow: number;
+  /** 表示言語。フィルタの値（ジャンル等）はJP語彙のままで、文言と URL の起点だけ替わる。 */
+  locale?: Locale;
 };
 
-export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
+export function ItemBrowser({ items, genres, initial, initialShow, locale = "ja" }: Props) {
+  const t = UI[locale];
+  // 絞り込みURLの起点。/en は /en?genre=… に同期する（"/" に書くと言語が切り替わってしまう）。
+  const basePath = locale === "en" ? "/en" : "/";
   const [values, setValues] = useState<FilterValues>(initial);
   const [show, setShow] = useState(initialShow);
 
@@ -99,7 +105,7 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
     if (nextShow > PAGE_SIZE) p.set("show", String(nextShow));
     const qs = p.toString();
     // Next のナビゲーションを起こさず URL だけ更新（共有・リロード保持のため）。
-    window.history.replaceState(null, "", qs ? `/?${qs}` : "/");
+    window.history.replaceState(null, "", qs ? `${basePath}?${qs}` : basePath);
   }
 
   function onChange(patch: Partial<FilterValues>) {
@@ -125,24 +131,33 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
   return (
     <>
       <div className="mb-6">
-        <FilterBar genres={genresWithCount} values={values} onChange={onChange} onClear={onClear} />
+        <FilterBar genres={genresWithCount} values={values} onChange={onChange} onClear={onClear} locale={locale} />
       </div>
 
       {anyFilter && (
         <p className="mb-4 text-sm text-neutral-600 dark:text-neutral-400">
-          該当 <span className="font-semibold text-neutral-900 dark:text-neutral-50">{filtered.length}</span> 件
-          <span className="text-neutral-600 dark:text-neutral-400">（全 {items.length} 件中）</span>
+          {locale === "en" ? (
+            <>
+              <span className="font-semibold text-neutral-900 dark:text-neutral-50">{filtered.length}</span> matches
+              <span className="text-neutral-600 dark:text-neutral-400"> (of {items.length})</span>
+            </>
+          ) : (
+            <>
+              該当 <span className="font-semibold text-neutral-900 dark:text-neutral-50">{filtered.length}</span> 件
+              <span className="text-neutral-600 dark:text-neutral-400">（全 {items.length} 件中）</span>
+            </>
+          )}
         </p>
       )}
 
       {filtered.length === 0 ? (
         <div className="py-16 text-center">
-          <p className="text-neutral-600 dark:text-neutral-400">該当する商品が見つかりませんでした。</p>
+          <p className="text-neutral-600 dark:text-neutral-400">{t.noMatch}</p>
           <button
             onClick={onClear}
             className="mt-4 inline-block rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium text-neutral-700 transition hover:border-rose-400 hover:text-rose-600 dark:border-neutral-700 dark:text-neutral-200"
           >
-            絞り込みをリセット
+            {t.resetFilters}
           </button>
         </div>
       ) : (
@@ -150,12 +165,12 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
           {groups.map((g) => (
             <section key={g.label}>
               <h2 className="mb-3 flex items-baseline gap-2 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-                {g.label}
+                {groupLabel(g.label, locale)}
                 <span className="text-sm font-normal text-neutral-600 dark:text-neutral-400">{g.items.length}</span>
               </h2>
               <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
                 {g.items.map((item) => (
-                  <ItemCard key={item.id} item={item} />
+                  <ItemCard key={item.id} item={item} locale={locale} />
                 ))}
               </div>
             </section>
@@ -169,7 +184,7 @@ export function ItemBrowser({ items, genres, initial, initialShow }: Props) {
             onClick={loadMore}
             className="rounded-lg border border-neutral-300 bg-white px-6 py-2.5 text-sm font-semibold text-neutral-700 transition hover:border-rose-400 hover:text-rose-600 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-200"
           >
-            もっと見る（残り{remaining}件）
+            {t.showMore(remaining)}
           </button>
         </div>
       )}

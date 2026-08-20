@@ -17,6 +17,8 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
 
   const entries: MetadataRoute.Sitemap = [
     { url: base, lastModified: now, changeFrequency: "daily", priority: 1 },
+    // 英語版トップ（hreflang は各ページの metadata.alternates.languages が双方向で張る）。
+    { url: `${base}/en`, lastModified: now, changeFrequency: "daily", priority: 0.9 },
     // /premium は 2026-08-10 に取り下げ（lib/seo.ts の getPremiumItems のコメント参照）。
     // 消したページを sitemap に残すと 404 を自分から検索エンジンに申告することになる。
     { url: `${base}/lottery`, lastModified: now, changeFrequency: "daily", priority: 0.8 },

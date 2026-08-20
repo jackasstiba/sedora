@@ -177,3 +177,10 @@ export const AD_DISCLOSURE = "本サイトはアフィリエイト広告（楽�
 
 /** 購入導線の隣に置く一行（そのリンク自体が広告だと、押す直前に分かるようにする）。 */
 export const AD_DISCLOSURE_INLINE = "「楽天で探す」は広告（アフィリエイトリンク）です。";
+
+/**
+ * 英語版（/en）の広告表示。英語ページの読者に日本語の一文は届かないので言語を合わせる。
+ * 楽天ガイドラインの「日本語で」は日本語ページ向けの要件＝日本語ページ側は AD_DISCLOSURE を使う。
+ * 実際に /en に出ているかは `npm run audit:page` が見る（checkAdDisclosure が両言語を受ける）。
+ */
+export const AD_DISCLOSURE_EN = "This site uses affiliate advertising links.";

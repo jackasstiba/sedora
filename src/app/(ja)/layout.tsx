@@ -3,7 +3,7 @@ import { SiteAnalytics } from "@/components/SiteAnalytics";
 import { SiteHeader } from "@/components/SiteHeader";
 import { AdDisclosure } from "@/components/AdDisclosure";
 import { SiteFooter } from "@/components/SiteFooter";
-import "./globals.css";
+import "../globals.css";
 
 export const metadata: Metadata = {
   metadataBase: process.env.NEXT_PUBLIC_SITE_URL

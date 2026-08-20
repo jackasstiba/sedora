@@ -1,7 +1,36 @@
 import Link from "next/link";
+import type { Locale } from "@/lib/i18n";
 
 // 全ページ共通のフッター。免責と新着購読(RSS)をどのページからでも見られるように。
-export function SiteFooter() {
+export function SiteFooter({ locale = "ja" }: { locale?: Locale } = {}) {
+  if (locale === "en") {
+    return (
+      <footer className="mt-12 border-t border-neutral-200 dark:border-neutral-800">
+        <div className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-neutral-600 dark:text-neutral-400">
+          <p className="mb-2">
+            <Link href="/en" className="text-rose-600 hover:underline dark:text-rose-400">
+              Hatsukore
+            </Link>
+            {" · "}
+            <Link href="/" className="text-rose-600 hover:underline dark:text-rose-400" lang="ja">
+              日本語版
+            </Link>
+            {" · "}
+            {/* 方針ページは現状日本語のみ。英語だと約束しない（(Japanese) と明記）。 */}
+            <Link href="/privacy" className="text-rose-600 hover:underline dark:text-rose-400">
+              Privacy policy & disclaimer (Japanese)
+            </Link>
+          </p>
+          <p>
+            Upcoming Japanese pre-orders, releases and lottery drops for figures, trading cards,
+            sneakers, Ichiban Kuji and collab goods, collected and organized from public sources.
+            All dates and deadlines are Japan time (JST). Please confirm details on each official
+            or store page before ordering.
+          </p>
+        </div>
+      </footer>
+    );
+  }
   return (
     <footer className="mt-12 border-t border-neutral-200 dark:border-neutral-800">
       <div className="mx-auto w-full max-w-6xl px-4 py-6 text-xs text-neutral-600 dark:text-neutral-400">

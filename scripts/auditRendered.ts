@@ -20,7 +20,7 @@ import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
 import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
-import { AD_DISCLOSURE, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
+import { AD_DISCLOSURE, AD_DISCLOSURE_EN, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -51,8 +51,9 @@ function flag(page: string, kind: string, detail: string) {
  */
 function checkAdDisclosure($: cheerio.CheerioAPI, page: string): boolean {
   const body = $("body").text().replace(/\s+/g, " ");
-  if (body.includes(AD_DISCLOSURE)) return true;
-  flag(page, "広告表示の欠落", `「${AD_DISCLOSURE}」がページに出ていない`);
+  // 英語ページ（/en）は英語の開示文（AD_DISCLOSURE_EN）。どちらかが出ていればよい。
+  if (body.includes(AD_DISCLOSURE) || body.includes(AD_DISCLOSURE_EN)) return true;
+  flag(page, "広告表示の欠落", `「${AD_DISCLOSURE}」（または英語版）がページに出ていない`);
   return false;
 }
 
@@ -158,10 +159,17 @@ function cardDateProblems($: cheerio.CheerioAPI, today: Date): { problems: strin
       .find("span")
       .map((_, s) => $(s).text().replace(/\s+/g, " ").trim())
       .get();
-    const badge = texts.find((t) => /^(?:🔥\s*)?(?:本日|明日|あと\d{1,2}日)$/.test(t));
+    const badge = texts.find((t) =>
+      /^(?:🔥\s*)?(?:本日|明日|あと\d{1,2}日|Today|Tomorrow|In \d{1,2} days?)$/.test(t)
+    );
     if (!badge) return;
     badges++;
-    const dateLabel = texts.find((t) => /^(?:\d{4}[年/])?\d{1,2}[/月]\d{1,2}日?(?:\([日月火水木金土]\))?$/.test(t));
+    const dateLabel = texts.find(
+      (t) =>
+        /^(?:\d{4}[年/])?\d{1,2}[/月]\d{1,2}日?(?:\([日月火水木金土]\))?$/.test(t) ||
+        // 英語版のラベル（date.formatShortEn の書式と対）
+        /^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:, \d{4})? \((?:Sun|Mon|Tue|Wed|Thu|Fri|Sat)\)$/.test(t)
+    );
     if (!dateLabel) {
       problems.push(`カウントダウン「${badge}」が出ているのに日付ラベルが無い（${card.attr("href")}）`);
       return;
@@ -274,7 +282,9 @@ async function main() {
     //     一覧は120件ずつの段階表示なので「見出し＝描画枚数」ではない。ただし
     //     **見出しの件数 ＝ 描画枚数 ＋ 残り件数** は常に成り立たなければならない。
     //     ここが崩れるのは、本人が最も嫌う"数字の間違い"がそのまま出ている状態。
-    const more = text.match(/もっと見る（残り\s*([\d,]+)\s*件）/);
+    const more =
+      text.match(/もっと見る（残り\s*([\d,]+)\s*件）/) ??
+      text.match(/Show more \(([\d,]+) remaining\)/); // 英語版（i18n.UI.en.showMore と対）
     const remaining = more ? Number(more[1].replace(/,/g, "")) : 0;
     const counts = [...text.matchAll(/(掲載|相場|受付中・予定)\s*([\d,]+)\s*件/g)];
     for (const m of counts) {
@@ -284,6 +294,16 @@ async function main() {
           p.name,
           "件数の食い違い",
           `見出し「${m[1]} ${stated} 件」≠ 描画 ${titles.length} 枚 ＋ 残り ${remaining} 件`
+        );
+    }
+    // 英語版の見出し件数（/en の「Listed: N items」）。JPと同じ突合。
+    for (const m of text.matchAll(/Listed:\s*([\d,]+)\s*items/g)) {
+      const stated = Number(m[1].replace(/,/g, ""));
+      if (stated !== titles.length + remaining)
+        flag(
+          p.name,
+          "件数の食い違い",
+          `見出し「Listed: ${stated} items」≠ 描画 ${titles.length} 枚 ＋ 残り ${remaining} 件`
         );
     }
 

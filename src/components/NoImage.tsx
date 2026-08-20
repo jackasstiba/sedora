@@ -39,9 +39,11 @@ const GENRE_TINT: Record<string, string> = {
   その他: "from-neutral-100 to-neutral-200 dark:from-neutral-800 dark:to-neutral-900",
 };
 
-export function NoImage({ genre, title }: { genre: string; title?: string }) {
+export function NoImage({ genre, title, label }: { genre: string; title?: string; label?: string }) {
   const emoji = GENRE_EMOJI[genre] ?? "📦";
   const tint = GENRE_TINT[genre] ?? GENRE_TINT["その他"];
+  // 英語版はジャンルの英語ラベルを渡す（絵文字・色のキーはJP語彙のまま）。
+  const genreText = label ?? genre;
 
   // title あり＝文字タイル（商品名を主役に）。空きスペースに実情報を出して"意図した"見た目に。
   if (title) {
@@ -57,7 +59,7 @@ export function NoImage({ genre, title }: { genre: string; title?: string }) {
         </span>
         <span className="z-10 inline-flex w-fit items-center gap-1 rounded-full bg-white/70 px-2 py-0.5 text-[11px] font-semibold text-neutral-600 shadow-sm dark:bg-black/30 dark:text-neutral-300">
           <span aria-hidden>{emoji}</span>
-          {genre}
+          {genreText}
         </span>
         <p className="z-10 line-clamp-4 text-sm font-bold leading-snug text-neutral-800 dark:text-neutral-100">
           {title}
@@ -74,7 +76,7 @@ export function NoImage({ genre, title }: { genre: string; title?: string }) {
       <span className="text-4xl opacity-80" aria-hidden>
         {emoji}
       </span>
-      <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">{genre}</span>
+      <span className="text-xs font-semibold text-neutral-600 dark:text-neutral-400">{genreText}</span>
     </div>
   );
 }

@@ -12,12 +12,16 @@
  * 未知の「エントリー受付中」まで「予約終了」に書き換えていた（予約ではないのに予約と断定）。
  */
 import {
+  calendarDate,
   countdownBadgeProblem,
   parseDisplayedDate,
   renderedDateProblems,
   displayEventDateText,
   displayEventType,
+  eventDateLabelEn,
   eventPeriodText,
+  formatMonthEn,
+  formatShortEn,
   hasFrozenRelativeDate,
   isStalePromise,
   isStalePlan,
@@ -25,6 +29,7 @@ import {
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
+import { countdownLabelEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
   lastDeadline,
@@ -3516,7 +3521,7 @@ const cases: Case[] = [
     // 「空白は出るのにDBからは消えない」状態に戻る。
     name: "画像: プロキシも掃除と同じ判定関数を使っている",
     fn: () => {
-      const route = readFileSync("src/app/i/[id]/route.ts", "utf8");
+      const route = readFileSync("src/app/(ja)/i/[id]/route.ts", "utf8");
       const prune = readFileSync("scripts/pruneDeadImages.ts", "utf8");
       return /imageVerdict\(/.test(route) && /imageVerdict\(/.test(prune);
     },
@@ -3665,9 +3670,12 @@ const cases: Case[] = [
     // 3つ揃って初めて効く。1つ欠けても画面は正常なままなので突き合わせる。
     name: "除外: 設置口・イベント送信・受け口の3つが同じ判定を通っている",
     fn: () => {
-      const layout = readFileSync("src/app/layout.tsx", "utf8");
-      if (/<Analytics\s*\/>/.test(layout)) return "layout が素の <Analytics /> を置いている（beforeSend が効かない）";
-      if (!layout.includes("SiteAnalytics")) return "layout が除外つきの設置口を使っていない";
+      // ルートレイアウトは2つ（(ja) と /en）。どちらも同じ設置口を通っていること。
+      for (const p of ["src/app/(ja)/layout.tsx", "src/app/en/layout.tsx"]) {
+        const layout = readFileSync(p, "utf8");
+        if (/<Analytics\s*\/>/.test(layout)) return `${p} が素の <Analytics /> を置いている（beforeSend が効かない）`;
+        if (!layout.includes("SiteAnalytics")) return `${p} が除外つきの設置口を使っていない`;
+      }
       const wrapper = readFileSync("src/components/SiteAnalytics.tsx", "utf8");
       if (!wrapper.includes("beforeSend")) return "設置口に beforeSend が無い";
       if (!readFileSync("src/lib/logEvent.ts", "utf8").includes("currentNologDecision"))
@@ -3677,6 +3685,109 @@ const cases: Case[] = [
       return "";
     },
     want: "",
+  },
+
+  // ── 英語版（/en）2026-08-20 ────────────────────────────────────────────
+  // 日付書式・語彙・突合の英語面。JPと同じく「鳴る側」と「鳴らない側」を両方固定する。
+  // 書式の約束: 月は綴る（"9/5" は米英で読みが割れる）・TZはJST明記（[[Projects/sedori_radar_en]]）。
+  {
+    name: "EN日付: 今年は年なし・来年は年つき（月は綴る）",
+    fn: () => {
+      const key = "HATSUKORE_SIMULATE_TODAY";
+      const old = process.env[key];
+      process.env[key] = "2026-08-20";
+      try {
+        return `${formatShortEn("2026-09-05T00:00:00.000Z")}|${formatShortEn("2027-01-05T00:00:00.000Z")}`;
+      } finally {
+        if (old === undefined) delete process.env[key];
+        else process.env[key] = old;
+      }
+    },
+    want: "Sep 5 (Sat)|Jan 5, 2027 (Tue)",
+  },
+  { name: "EN日付: 月精度は月までしか書かない", fn: () => formatMonthEn("2026-09-01T00:00:00.000Z"), want: "Sep 2026" },
+  {
+    name: "EN日付: 月精度の行に合成した特定日を出さない（eventDateLabelEn）",
+    fn: () => eventDateLabelEn("2026-09-01T00:00:00.000Z", "2026年9月発送予定"),
+    want: "Sep 2026",
+  },
+  {
+    name: "EN日付: 投稿日は日付欄に出さない（JPと同じ規則）",
+    fn: () => eventDateLabelEn(null, "投稿日: 2026-08-07"),
+    want: null as string | null,
+  },
+  {
+    name: "EN曜日突合: 暦と違う曜日で鳴る（2026-09-05は土曜）",
+    fn: () => renderedDateProblems("Sep 5 (Fri)", calendarDate(2026, 8, 20)).length,
+    want: 1,
+  },
+  {
+    name: "EN曜日突合: 正しい曜日では鳴らない",
+    fn: () => renderedDateProblems("Sep 5 (Sat)", calendarDate(2026, 8, 20)).length,
+    want: 0,
+  },
+  {
+    name: "EN曜日突合: 年つき書式も見る（2027-01-05は火曜）",
+    fn: () =>
+      renderedDateProblems("Jan 5, 2027 (Wed)", calendarDate(2026, 8, 20)).length +
+      renderedDateProblems("Jan 5, 2027 (Tue)", calendarDate(2026, 8, 20)).length,
+    want: 1,
+  },
+  {
+    name: "ENラベル読取: 年なし・年つきとも読める（parseDisplayedDate）",
+    fn: () =>
+      `${parseDisplayedDate("Sep 5 (Sat)", calendarDate(2026, 8, 20))?.toISOString().slice(0, 10)}|${parseDisplayedDate("Sep 5, 2027 (Sun)", calendarDate(2026, 8, 20))?.toISOString().slice(0, 10)}`,
+    want: "2026-09-05|2027-09-05",
+  },
+  {
+    name: "ENラベル読取: 月精度 'Sep 2026' に日を足さない（nullを返す）",
+    fn: () => parseDisplayedDate("Sep 2026", calendarDate(2026, 8, 20)),
+    want: null as Date | null,
+  },
+  {
+    name: "ENバッジ突合: 'Today' と当日ラベルは食い違いなし",
+    fn: () => countdownBadgeProblem("🔥 Today", "Sep 5 (Sat)", calendarDate(2026, 9, 5)),
+    want: null as string | null,
+  },
+  {
+    name: "ENバッジ突合: 'Tomorrow' と当日ラベルは鳴る",
+    fn: () => countdownBadgeProblem("Tomorrow", "Sep 5 (Sat)", calendarDate(2026, 9, 5)) !== null,
+    want: true,
+  },
+  {
+    name: "ENバッジ突合: 'In 3 days' は3日先ラベルと一致",
+    fn: () => countdownBadgeProblem("In 3 days", "Sep 5 (Sat)", calendarDate(2026, 9, 2)),
+    want: null as string | null,
+  },
+  {
+    name: "ENカウントダウン: Today/Tomorrow/In N days",
+    fn: () => `${countdownLabelEn(0)}|${countdownLabelEn(1)}|${countdownLabelEn(3)}`,
+    want: "Today|Tomorrow|In 3 days",
+  },
+  {
+    name: "EN語彙: 対応表にある種別だけ訳す・無い種別は日本語のまま（断定を足さない）",
+    fn: () => `${eventTypeLabel("抽選", "en")}|${eventTypeLabel("エントリー受付中", "en")}`,
+    want: "Lottery|エントリー受付中",
+  },
+  {
+    name: "EN語彙: ジャンル・節見出しも同じ規則",
+    fn: () => `${genreLabel("フィギュア", "en")}|${genreLabel("未知のジャンル", "en")}|${groupLabel("今日", "en")}`,
+    want: "Figures|未知のジャンル|Today",
+  },
+  {
+    name: "投稿・表示層: 英語の禁止語も拾う（大文字小文字を吸収）",
+    fn: () => findForbidden("Resell for PROFIT").join(","),
+    want: "resell,profit",
+  },
+  {
+    name: "投稿・表示層: 通常の英語本文は禁止語に引っかからない",
+    fn: () => findForbidden("Pre-orders open · lottery deadline Sep 5, 23:59 JST").length,
+    want: 0,
+  },
+  {
+    name: "表示層スキャン: 英語ソースの 'resale' も拾う",
+    fn: () => forbiddenInDisplayText('<p className="x">Great for resale!</p>').join(","),
+    want: "resale",
   },
 ];
 

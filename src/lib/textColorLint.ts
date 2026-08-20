@@ -74,7 +74,7 @@ export const TEXT_COLOR_EXCEPTIONS: { file: string; cls: string; why: string }[]
     why: "押せないジャンルチップ（cursor-not-allowed）。WCAG は無効化された操作部品をコントラスト要件の対象外にしている。薄いことが「押せない」の意味を担っている。",
   },
   {
-    file: "src/app/items/[id]/page.tsx",
+    file: "src/app/(ja)/items/[id]/page.tsx",
     cls: "text-neutral-300",
     why: "賞品画像が無いときの 🎁 プレースホルダ。カラー絵文字は自分の色で描かれるので文字色はほぼ効かない（装飾であって読ませる文字ではない）。",
   },

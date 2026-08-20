@@ -21,8 +21,14 @@ const SITE = process.env.NEXT_PUBLIC_SITE_URL ?? "";
 
 // トップは自己参照 canonical を明示（?genre= 等の絞り込みURLは同一の静的HTMLを返すため、
 // 検索エンジンには正規URL＝トップに集約させて重複評価を防ぐ）。
+// hreflang は英語版トップ（/en）と**双方向**で張る（片方向だけだと無効。
+// [[Projects/sedori_radar_en]] 注意点§1。/en 側は src/app/en/page.tsx）。
 export const metadata = {
-  alternates: { canonical: "/" },
+  alternates: {
+    canonical: "/",
+    // 各言語版は**自分自身も含めて**全言語を列挙する（Googleのhreflang仕様）。
+    languages: { ja: "/", en: "/en", "x-default": "/" },
+  },
 };
 
 // 「もっと見る」の初期表示件数（ItemBrowser 側と一致させる）。
