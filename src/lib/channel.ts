@@ -16,6 +16,12 @@
 //  ・billys-tokyo.net    … BILLY'S ENT 公式通販の商品/LAUNCHページ
 //  ・raffle-kuji.jp      … オンラインくじプラットフォーム（オンラインで引き、賞品が配送される）
 //  ・nike.com            … Nike SNKRS の launch ページ（オンラインの発売/抽選エントリー）
+//
+// 裏取りの記録（2026-08-21 追加・各1ページを実際に開いて確認）:
+//  ・amazon.co.jp        … /dp/ の商品ページ（「カートに入れる/今すぐ買う」、招待制販売の
+//                          「招待をリクエスト」を実ページで確認）。**同じホストに検索結果URLも
+//                          載りうる**ので、Amazonだけはパスが /dp/ のときに限る（ホスト決め打ちにしない）。
+//                          表示中の該当67件が全件 /dp/ であることも確認済み。
 
 const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   chiikawa_market: new Set(["chiikawamarket.jp"]),
@@ -25,18 +31,28 @@ const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   billys: new Set(["billys-tokyo.net"]),
   raffle_kuji: new Set(["raffle-kuji.jp"]),
   nike_snkrs: new Set(["nike.com"]),
+  nyuka_now: new Set(["amazon.co.jp"]),
+  card_chusen: new Set(["amazon.co.jp"]),
 };
+
+/** ホスト一致だけでは「注文ページ」と言えないホストの追加条件。 */
+function isOrderPath(host: string, u: URL): boolean {
+  if (host === "amazon.co.jp") return /^\/(?:[^/]+\/)?dp\//.test(u.pathname);
+  return true;
+}
 
 /** カードに出すタグの文字列。audit:page が /en の描画結果と突き合わせるので、
  *  変えるなら scripts/auditRendered.ts 側も一緒に変える。 */
 export const ONLINE_TAG_EN = "🛒 Online (JP)";
 
-function hostOf(u: string | null | undefined): string | null {
-  if (!u) return null;
+function matchesVerified(hosts: ReadonlySet<string>, u: string | null | undefined): boolean {
+  if (!u) return false;
   try {
-    return new URL(u).hostname.replace(/^www\./, "").toLowerCase();
+    const parsed = new URL(u);
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    return hosts.has(host) && isOrderPath(host, parsed);
   } catch {
-    return null;
+    return false;
   }
 }
 
@@ -51,7 +67,5 @@ export function isOnlineItem(row: {
 }): boolean {
   const hosts = VERIFIED_ONLINE_PAIRS[row.source];
   if (!hosts) return false;
-  const h1 = hostOf(row.url);
-  const h2 = hostOf(row.officialUrl);
-  return (h1 !== null && hosts.has(h1)) || (h2 !== null && hosts.has(h2));
+  return matchesVerified(hosts, row.url) || matchesVerified(hosts, row.officialUrl);
 }

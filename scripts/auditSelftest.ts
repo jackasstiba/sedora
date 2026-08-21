@@ -3908,6 +3908,22 @@ const cases: Case[] = [
       isOnlineItem({ source: "takaratomy_mall", url: null }),
     want: false,
   },
+  {
+    name: "入手経路: Amazonの /dp/ 商品ページは online（入荷Now・店舗別トレカ抽選）",
+    fn: () =>
+      isOnlineItem({ source: "nyuka_now", url: "https://www.amazon.co.jp/dp/B0DDWZWW1Z" }) &&
+      isOnlineItem({ source: "card_chusen", url: "https://www.amazon.co.jp/dp/B0GN5JV7JS" }),
+    want: true,
+  },
+  {
+    name: "入手経路: Amazonでも /dp/ 以外（検索結果URL）には出さない",
+    fn: () =>
+      isOnlineItem({
+        source: "nyuka_now",
+        url: "https://www.amazon.co.jp/s?k=%E3%83%9D%E3%82%B1%E3%83%A2%E3%83%B3%E3%82%AB%E3%83%BC%E3%83%89",
+      }),
+    want: false,
+  },
 ];
 
 let ng = 0;
