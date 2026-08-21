@@ -52,10 +52,13 @@ export async function SiteHeader({ locale = "ja" }: { locale?: Locale } = {}) {
           </Link>
         )}
 
-        {/* ジャンルの横スクロールナビ（モバイルでも指でスワイプ可） */}
+        {/* ジャンルナビ。モバイル＝横スクロール（指でスワイプ可）／md以上＝折り返して全部見せる。
+            以前は全幅で overflow-x-auto ＋スクロールバー非表示だったため、**PCでは末尾が
+            見切れたままスクロール手段が無かった**（ホイールは縦にしか効かず、バーも出ない。
+            実際に「酒・ウ」で切れて操作不能という指摘を受けた 2026-08-21）。 */}
         <nav
           aria-label={en ? "Genres" : "ジャンル"}
-          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto whitespace-nowrap [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:flex-wrap md:overflow-x-visible"
         >
           {genres.map((g) =>
             en ? (
