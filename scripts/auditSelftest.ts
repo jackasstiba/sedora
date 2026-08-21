@@ -1877,6 +1877,25 @@ const cases: Case[] = [
     },
     want: "ONE PIECEカードゲーム スタートデッキEX ルフィ&エース【ST-29】",
   },
+  {
+    // 実測 2026-08-21: 応募リンクを持たないカード（375枚中50枚）の店が隣のカードのCTAを拾い、
+    // 8枠が別の店・別の商品の応募ページへ誘導していた（京山店OP-13→ガンリュウ小田原店OP-17）。
+    // カード境界(id="card-…")をまたいでURLを拾わないこと＝リンク無しカードは載せない。
+    name: "cardchusen: 応募リンクの無いカードが隣のカードのURLを拾わない",
+    fn: () => {
+      const html =
+        '</head><div id="card-a-store-2026-08-21" data-card>' +
+        '<p class="board-card__store" title="商品A【OP-13】">リンク無し店</p>' +
+        '<div class="board-card__due"> 締切 8/23(日) 23:59 </div></div>' +
+        '<div id="card-b-store-2026-08-21" data-card>' +
+        '<p class="board-card__store" title="商品B【OP-17】">リンクあり店</p>' +
+        '<div class="board-card__due"> 締切 8/24(月) 23:59 </div>' +
+        '<a class="board-card__cta" href="https://example.com/b">応募</a></div>';
+      const got = parseCardChusen(html, today);
+      return got.map((e) => `${e.store}|${e.url}`).join(",");
+    },
+    want: "リンクあり店|https://example.com/b",
+  },
 
   // ── ワンピースカード公式（2026-08-15新設） ──────────
   {

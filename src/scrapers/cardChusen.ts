@@ -168,26 +168,37 @@ type Entry = {
   conds: string[];
 };
 
-/** 一覧HTMLから店×商品の応募枠を全部取り出す（純関数・selftest対象）。 */
+/** 一覧HTMLから店×商品の応募枠を全部取り出す（純関数・selftest対象）。
+ *
+ *  **必ずカード単位に切ってから抽出する。** 以前は1本の正規表現（store→due→cta を距離制限で
+ *  接続）で流していたが、応募リンクを持たないカード（店頭抽選など・実測 2026-08-21 は
+ *  375枚中50枚）の店が**隣のカードの応募URL**を拾い、8枠が別の店・別の商品の応募ページへ
+ *  誘導していた（実測: 「古本市場 京山店」のOP-13が、ガンリュウ小田原店のOP-17のXポストを
+ *  指していた）。境界をまたげない構造にすれば、この型は距離やカード長に関係なく起きない。
+ *  応募リンクの無いカードは従来どおり載せない（応募先を知らないものに URL を断定しない）。 */
 export function parseCardChusen(html: string, reference = todayJst()): Entry[] {
   const body = html.slice(html.indexOf("</head>"));
   const out: Entry[] = [];
-  for (const m of body.matchAll(
-    /board-card__store" title="([^"]+)"[^>]*>([\s\S]*?)<\/p>[\s\S]{0,600}?board-card__due"[^>]*>([\s\S]*?)<\/div>[\s\S]{0,300}?board-card__cta" href="([^"]+)"/g
-  )) {
-    const product = decodeHtmlEntities(m[1]).trim();
-    const store = stripTags(m[2]);
-    const due = parseDue(stripTags(m[3]), reference);
+  // カードの先頭＝ id="card-…"。アンカーが1つも無い入力（selftestの断片HTML）は全体を1枚と扱う。
+  const starts = [...body.matchAll(/id="card-[a-z0-9-]+"/g)].map((m) => m.index!);
+  if (starts.length === 0) starts.push(0);
+  for (let i = 0; i < starts.length; i++) {
+    const seg = body.slice(starts[i], starts[i + 1] ?? body.length);
+    const storeM = seg.match(/board-card__store" title="([^"]+)"[^>]*>([\s\S]*?)<\/p>/);
+    const dueM = seg.match(/board-card__due"[^>]*>([\s\S]*?)<\/div>/);
+    const ctaM = seg.match(/board-card__cta" href="([^"]+)"/);
+    if (!storeM || !dueM || !ctaM) continue;
+    const product = decodeHtmlEntities(storeM[1]).trim();
+    const store = stripTags(storeM[2]);
+    const due = parseDue(stripTags(dueM[1]), reference);
     // 応募ページURLもエンティティを戻す。`?q=…&amp;b=birthday` のまま配ると、クエリ名が
     // `amp;b` になって絞り込みが落ちる（実測 2026-08-16: しまむらパークの応募リンク）。
     // 商品名だけ decodeHtmlEntities していて、URLは素通しだった。
-    const url = decodeHtmlEntities(m[4]);
+    const url = decodeHtmlEntities(ctaM[1]);
     if (!product || !store || !url) continue;
-    // カードの条件タグは store 要素より前にあるので、この match からは取れない。
-    // 条件は直前1000字から拾う。
-    const before = body.slice(Math.max(0, (m.index ?? 0) - 1000), m.index ?? 0);
-    const conds = [...before.matchAll(/board-cond__txt">([^<]+)</g)].map((c) => c[1]);
-    out.push({ product, store, url, due, conds: conds.slice(-3) });
+    // 条件タグは同じカードの中から拾う（カード単位なので隣の条件を拾う心配は無い）。
+    const conds = [...seg.matchAll(/board-cond__txt">([^<]+)</g)].map((c) => c[1]);
+    out.push({ product, store, url, due, conds: conds.slice(0, 3) });
   }
   return out;
 }
