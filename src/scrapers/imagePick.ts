@@ -62,8 +62,22 @@ export function absolutize(src: string, pageUrl: string): string | null {
  *     数えられ、灰色の他所サイトの画像なしタイルがそのまま並んでいた（2026-08-15 実測）。
  *   ・pbs.twimg.com/profile_images/…（Xアカウントのアイコン。商品ではないうえ巡回先が割れる）
  */
-export const GENERIC_IMAGE_RE =
-  /binoculars|no[-_]?image|noimage|nophoto|default|placeholder|logo|icon|avatar|gravatar|blank|dummy|sprite|ogp|og[-_]?image|snsshare|sns[-_]|share[-_/]|\/share\/|banner|bnr\d|\/common\/|\/themes?\/|\/assets\/img\/(?:common|share)\/|profile_images|\/empty\.|\/uploads\/201[0-8]\//i;
+const GENERIC_IMAGE_CORE =
+  "binoculars|no[-_]?image|noimage|nophoto|default|placeholder|logo|icon|avatar|gravatar|blank|dummy|sprite|ogp|og[-_]?image|snsshare|sns[-_]|share[-_/]|\\/share\\/|\\/common\\/|\\/themes?\\/|\\/assets\\/img\\/(?:common|share)\\/|profile_images|\\/empty\\.|\\/uploads\\/201[0-8]\\/";
+export const GENERIC_IMAGE_RE = new RegExp(`${GENERIC_IMAGE_CORE}|banner|bnr\\d`, "i");
+const GENERIC_IMAGE_NO_BANNER_RE = new RegExp(GENERIC_IMAGE_CORE, "i");
+
+/**
+ * **商品写真まで「banner」と命名する一次ストア**のCDNパス（例外はホストとセットで持つ）。
+ *
+ * hololive公式ショップ（Shopify）は商品ページの写真が全部 `holo_◯◯_banner_◯.png` という
+ * 命名で（実測 2026-08-21: 250商品中136枚）、banner 語を汎用画像の根拠にすると
+ * **この店の一次画像が全滅**する。この店のCDNパスに限り banner だけは根拠にしない
+ * （no-image・logo 等それ以外の汎用判定は生きたまま）。
+ * 例外を語だけで持つと、本当に汎用のバナーまで全ホストで通してしまう＝
+ * 「例外リストはクラス名だけで持たない」（rules_hatsukore 2026-08-17）と同じ理由。
+ */
+const BANNER_NAMED_FIRSTPARTY_RE = /cdn\.shopify\.com\/s\/files\/1\/0529\/2641\/5045\//i;
 
 /**
  * **掲載する根拠が無いホスト**の画像か（＝商品画像であっても採らない）。
@@ -115,7 +129,8 @@ const AD_HOST_RE =
  * /products/2026/06/18/… ）まで「汎用画像」と見なして消してしまう。
  */
 export function isGenericImageUrl(url: string): boolean {
-  return AD_HOST_RE.test(url) || GENERIC_IMAGE_RE.test(url);
+  const re = BANNER_NAMED_FIRSTPARTY_RE.test(url) ? GENERIC_IMAGE_NO_BANNER_RE : GENERIC_IMAGE_RE;
+  return AD_HOST_RE.test(url) || re.test(url);
 }
 
 /**

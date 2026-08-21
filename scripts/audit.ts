@@ -200,8 +200,11 @@ async function main() {
   //      出てこない以上どのソースでも誤り＝全件を母数にできる。
   //      実測: トレカ速報の8件が「【MTG】| ホビット コレクター・ブースター」だった。
   {
+    // 楽譜のリピート記号 `||:` `:||` は正当な商品名の一部（実測 2026-08-21:
+    // hololive公式「IRyS 1st Concert “HOPE ||: Beyond the Stars”」）。区切り記号は
+    // 単独のパイプなので、リピート記号だけ除いてから判定する。
     const bad = shown
-      .filter((r) => /[|｜]/.test(cleanListTitle(r.source, r.title)))
+      .filter((r) => /[|｜]/.test(cleanListTitle(r.source, r.title).replace(/\|\|+:|:\|\|+/g, "")))
       .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title)}`);
     report("title_pipe_residue", "タイトルに収集元の区切り記号が残っている", "error", bad, baseline, shown.length);
   }

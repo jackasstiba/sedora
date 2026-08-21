@@ -92,6 +92,11 @@ const SOURCE_LABELS: Record<string, string> = {
   gashapon: "ガシャポン公式",
   // 2026-08-21 追加。POP MART 日本公式オンラインストア（一次情報）＝店名を出してよい。
   popmart: "POP MART公式",
+  // 2026-08-21 追加。いずれも公式ストア/公式サイト（一次情報）＝店名を出してよい。
+  nagano_market: "ナガノマーケット",
+  mofusand_market: "mofusand公式ストア",
+  hololive_shop: "hololive公式ショップ",
+  gundam_gcg: "ガンダムカードゲーム公式",
 };
 
 export function sourceLabel(source: string): string {
@@ -413,6 +418,12 @@ export function productUrlKey(u: string | null | undefined): string | null {
   try {
     const p = new URL(u);
     const seg = p.pathname.split("/").filter(Boolean);
+    // ONE PIECEカードゲーム公式は /products/<種別>/<商品コード>/ の3段（実測 2026-08-21:
+    // /products/boosters/op17/ を onepiece_card と torecamap が両方指してカードが2枚並んだ）。
+    // 公式は1商品=1ページなので同一性キーにしてよい。他ホストの3段パスは知らないので適用しない。
+    if (/(^|\.)onepiece-cardgame\.com$/i.test(p.hostname) && seg.length === 3 && /^products$/i.test(seg[0])) {
+      return `${p.hostname.toLowerCase()}/${seg.map((s) => s.toLowerCase()).join("/")}`;
+    }
     if (!(seg.length === 2 && /^(products?|item|items|goods)$/i.test(seg[0]))) return null;
     let slug = seg[1].toLowerCase();
     // 1kuji.com は再販売ページを「<商品コード>_2」のように版数付きで切る（実測:

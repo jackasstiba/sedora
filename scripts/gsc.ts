@@ -29,7 +29,7 @@ function b64url(input: Buffer | string): string {
 }
 
 async function getAccessToken(key: KeyJson): Promise<string> {
-  const iat = Math.floor(Date.now() / 1000);
+  const iat = Math.floor(nowInstant().getTime() / 1000);
   const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
   const claims = b64url(
     JSON.stringify({

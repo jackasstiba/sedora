@@ -35,6 +35,12 @@ const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen", "billys"]);
  */
 const RECONCILE_UNDATED_SOURCES = new Set([
   "chiikawa_market",
+  // ちいかわと同じ日付別コレクション運用の姉妹店（2026-08-21 追加）。
+  "nagano_market",
+  "mofusand_market",
+  // hololive_shop の日付なし行＝「直近30日の新着・在庫あり」。窓から外れた行は返されない
+  // ので、ここで突き合わせて消す（取り込みと掲載で同じ物差し＝pokemon_goods の教訓）。
+  "hololive_shop",
   "takaratomy_mall",
   // 月精度の予定は、当月分だけ日付なしになる（monthPlanDate）。その月が終われば収集元から
   // 消えるので、突き合わせないと「今月発売予定」のまま居座る。

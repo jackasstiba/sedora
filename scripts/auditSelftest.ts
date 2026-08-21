@@ -121,6 +121,9 @@ import { normalizeForSearch } from "../src/lib/itemFilter";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
 import { popmartEventType, popmartProductUrl, popmartImage } from "../src/scrapers/popmart";
+import { parseDatedCollectionHandle, splitCharaStoreTitle, charaStoreGenre } from "../src/scrapers/shopifyCharaStore";
+import { parseGundamProducts, parseGundamDate } from "../src/scrapers/gundamGcg";
+import { parseHoloSchedule, holoGenre, holoImage, holoTitleWithUnit, isHoloPreorder } from "../src/scrapers/hololiveShop";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
@@ -2957,6 +2960,167 @@ const cases: Case[] = [
     fn: () => popmartImage({ npcImages_trans: {}, bannerImages: [] }),
     want: null,
   },
+
+  // ── 日付別コレクション型Shopifyストア（ちいかわ/ナガノ/mofusand 共通・2026-08-21） ──
+  // mofusand は suffix型（20251010re）や枝番（20251128-2）を使う（実測）。
+  { name: "キャラEC: 20260821 は発売", fn: () => parseDatedCollectionHandle("20260821")?.kind, want: "発売" },
+  { name: "キャラEC: pre20260826 は予約", fn: () => parseDatedCollectionHandle("pre20260826")?.kind, want: "予約" },
+  { name: "キャラEC: suffix型 20251010re も再販", fn: () => parseDatedCollectionHandle("20251010re")?.kind, want: "再販" },
+  { name: "キャラEC: 枝番 20251128-2 は日付そのまま発売", fn: () => parseDatedCollectionHandle("20251128-2")?.date?.toISOString().slice(0, 10), want: "2025-11-28" },
+  { name: "キャラEC: 語尾つき 20250124-plush も読める", fn: () => parseDatedCollectionHandle("20250124-plush")?.kind, want: "発売" },
+  { name: "キャラEC: 13月は日付コレクションではない", fn: () => parseDatedCollectionHandle("20261301"), want: null },
+  {
+    // ナガノ実物: 種別タグと**3連続の運用注記【…】**をタイトルから剥がし、発送注記は eventDateText に移す
+    name: "キャラEC: 【予約】と連続する運用注記【…】を剥がす",
+    fn: () =>
+      splitCharaStoreTitle(
+        "【予約】ナガノキャラクターズ ハッピーバッグ2027（未年）【2026年12月中旬より順次発送予定（発送延期の場合もキャンセル不可）】【通常商品と同時購入・配送希望日指定不可】【キャンペーン対象外】"
+      )[0],
+    want: "ナガノキャラクターズ ハッピーバッグ2027（未年）",
+  },
+  {
+    name: "キャラEC: 連続注記の中でも発送時期の注記が eventDateText に残る",
+    fn: () =>
+      splitCharaStoreTitle(
+        "【予約】A【2026年12月中旬より順次発送予定（発送延期の場合もキャンセル不可）】【キャンペーン対象外】"
+      )[1],
+    want: "2026年12月中旬より順次発送予定（発送延期の場合もキャンセル不可）",
+  },
+  {
+    name: "キャラEC: 剥がした発送注記は捨てずに返す（eventDateText 行き）",
+    fn: () => splitCharaStoreTitle("【予約】A【2026年12月中旬より順次発送予定】")[1],
+    want: "2026年12月中旬より順次発送予定",
+  },
+  {
+    name: "キャラEC: 発送系でない【】は商品名の一部として残す",
+    fn: () => splitCharaStoreTitle("mofusand ぬいぐるみ【サメにゃん】")[0],
+    want: "mofusand ぬいぐるみ【サメにゃん】",
+  },
+  { name: "キャラEC: ぬいぐるみはキャラグッズ（フィギュアに倒さない）", fn: () => charaStoreGenre("ぬいぐるみ", "くま ふわもち抱っこぬいぐるみ"), want: "キャラグッズ" },
+  { name: "キャラEC: ソフビはソフビ・アートトイ", fn: () => charaStoreGenre("フィギュア", "おっきいソフビフィギュア"), want: "ソフビ・アートトイ" },
+
+  // ── ガンダムカードゲーム公式（2026-08-21） ──
+  {
+    name: "ガンダム公式: mvBox から 商品名/日付/価格/リンク を読む",
+    fn: () => {
+      const html =
+        '<div class="mvBox"><div class="mvIllust"><img src="../images/products/index/mv/st14/sp.jpg" alt="ST14"></div>' +
+        '<div class="category">スタートデッキ</div><div class="number">[ST14]</div><h2 class="title">Heavy Dominion</h2>' +
+        '<div class="mvLeftText"><div class="date">2026.9.26</div><div class="price">メーカー希望小売価格：￥1,650(税込)</div></div>' +
+        '<div class="btnCol"><a href="st14.html" class="btn">この商品を見る</a></div></div>';
+      const b = parseGundamProducts(html)[0];
+      return `${b?.number}|${b?.title}|${b?.dateText}|${b?.price}|${b?.url}`;
+    },
+    want: "ST14|Heavy Dominion|2026.9.26|1,650円（税込）|https://www.gundam-gcg.com/jp/products/st14.html",
+  },
+  { name: "ガンダム公式: 商品ブロックの無いHTMLは0件（→scraperがthrowして赤くする）", fn: () => parseGundamProducts("<html><body>menu</body></html>").length, want: 0 },
+  { name: "ガンダム公式: 2026.9.26 は暦日になる", fn: () => parseGundamDate("2026.9.26", new Date(Date.UTC(2026, 7, 21)))?.toISOString().slice(0, 10), want: "2026-09-26" },
+  {
+    // 月精度は monthPlanDate の規約（月初が過ぎていれば null＝日付未定。その月のどこかの日を作らない）
+    name: "ガンダム公式: 月だけの 2026.8 は当月途中なら日付未定",
+    fn: () => parseGundamDate("2026.8", new Date(Date.UTC(2026, 7, 21))),
+    want: null,
+  },
+
+  // ── hololive公式ショップ（2026-08-21） ──
+  {
+    // 実物のマークアップ: <section class="Pdt_shipping"><p><span class="shipping_ttl">受注受付期間</span> : A ～ B</p>
+    name: "ホロライブ: 受注受付期間の締切（後ろの日付）を読む",
+    fn: () =>
+      parseHoloSchedule(
+        '<section class="Pdt_shipping"><p><span class="shipping_ttl">受注受付期間</span> : 2026年08月20日 20時00分 ～ 2026年09月24日 18時00分</p><span class="shipping_ttl">発送予定日</span>：2027年03月下旬までに発送</section>'
+      ).periodEnd?.toISOString().slice(0, 10),
+    want: "2026-09-24",
+  },
+  {
+    name: "ホロライブ: 文言はそのまま保存する（date_text 突合の相手）",
+    fn: () =>
+      parseHoloSchedule(
+        '<p><span class="shipping_ttl">受注受付期間</span> : 2026年08月20日 20時00分 ～ 2026年09月24日 18時00分</p>'
+      ).periodRaw,
+    want: "2026年08月20日 20時00分 ～ 2026年09月24日 18時00分",
+  },
+  {
+    // 予約販売（期間なし）: 発送予定月が未来なら月初を予定日に
+    name: "ホロライブ: 期間なしは発送予定月（未来なら月初）",
+    fn: () =>
+      parseHoloSchedule('<span class="shipping_ttl">発送予定日</span>：2026年09月中旬までに発送')
+        .shipMonthDate(new Date(Date.UTC(2026, 7, 21)))
+        ?.toISOString()
+        .slice(0, 10),
+    want: "2026-09-01",
+  },
+  {
+    name: "ホロライブ: 発送予定月の月初が過ぎていれば日付未定（過去日を作らない）",
+    fn: () =>
+      parseHoloSchedule('<span class="shipping_ttl">発送予定日</span>：2026年08月中旬までに発送').shipMonthDate(
+        new Date(Date.UTC(2026, 7, 21))
+      ),
+    want: null,
+  },
+  { name: "ホロライブ: 期間の無いページは締切を作らない", fn: () => parseHoloSchedule("<html></html>").periodEnd, want: null },
+  { name: "ホロライブ: 受注生産商品タグは予約扱い", fn: () => isHoloPreorder(["Group_ホロライブ", "受注生産商品"]), want: true },
+  { name: "ホロライブ: タレントタグだけなら在庫販売", fn: () => isHoloPreorder(["Talent_大神ミオ"]), want: false },
+  {
+    // images[0] は告知バナー（banner名→汎用画像判定に落ちる）のことが多い。商品写真＝
+    // 汎用判定に落ちない最初の1枚を選ぶ（実測: 250商品中136枚が banner 名で画像なしになっていた）
+    name: "ホロライブ: バナー画像を飛ばして商品写真を選ぶ",
+    fn: () =>
+      holoImage([
+        { src: "https://cdn.shopify.com/s/files/1/x/holo_OCG_banner_JP_260807.png" },
+        { src: "https://cdn.shopify.com/s/files/1/x/item_photo_01.png" },
+      ]),
+    want: "https://cdn.shopify.com/s/files/1/x/item_photo_01.png",
+  },
+  {
+    name: "ホロライブ: 全部バナー名でも**他店のCDN**なら null（推測画像を付けない）",
+    fn: () => holoImage([{ src: "https://cdn.shopify.com/s/files/1/x/holo_A_banner_JP.png" }]),
+    want: null,
+  },
+  {
+    // この店は商品写真まで banner と命名する（実測136/250枚）。ホロライブ店のCDNパスに限り
+    // banner 語は汎用の根拠にしない（例外はホストとセットで持つ）。
+    name: "ホロライブ: 自店CDNの banner 名は商品写真として採る",
+    fn: () => holoImage([{ src: "https://cdn.shopify.com/s/files/1/0529/2641/5045/files/holo_RO_badge_banner_JP_260723.png" }]),
+    want: "https://cdn.shopify.com/s/files/1/0529/2641/5045/files/holo_RO_badge_banner_JP_260723.png",
+  },
+  {
+    name: "ホロライブ: 自店CDNでも no-image 等の汎用判定は生きている",
+    fn: () => holoImage([{ src: "https://cdn.shopify.com/s/files/1/0529/2641/5045/files/no-image.png" }]),
+    want: null,
+  },
+  { name: "ホロライブ: ホロカはトレカ", fn: () => holoGenre("hololive OFFICIAL CARD GAME ブースターパック"), want: "トレカ" },
+  {
+    // 実測: 商品名「ブースターパック…」に5,280円が付き price_unit_suspect が鳴った。
+    // 実体は variant が「（BOX：12パック入り）」のBOX売り＝販売単位を商品名に足す。
+    name: "ホロライブ: variantがBOXなら商品名に販売単位を足す",
+    fn: () => holoTitleWithUnit("ブースターパック「ボリュームヴォルテックス」", "グッズ / ブースターパック「ボリュームヴォルテックス」（BOX：12パック入り）"),
+    want: "ブースターパック「ボリュームヴォルテックス」（BOX：12パック入り）",
+  },
+  {
+    name: "ホロライブ: 既にBOXと書いてある商品名には重ねない",
+    fn: () => holoTitleWithUnit("ブースターパック BOXセット", "グッズ（BOX：12パック入り）"),
+    want: "ブースターパック BOXセット",
+  },
+  {
+    name: "ホロライブ: variantに単位が無ければ何も足さない",
+    fn: () => holoTitleWithUnit("アクリルスタンド", "Default Title"),
+    want: "アクリルスタンド",
+  },
+  {
+    // 実測: onepiece_card と torecamap が同じ /products/boosters/op17/ を指してカードが2枚並んだ。
+    // 公式の3段パスも個別商品ページとして同一性キーにする（他ホストの3段は適用しない）。
+    name: "URL同一性: ONE PIECE公式の3段パスもキーになる",
+    fn: () => productUrlKey("https://www.onepiece-cardgame.com/products/boosters/op17/"),
+    want: "www.onepiece-cardgame.com/products/boosters/op17",
+  },
+  {
+    name: "URL同一性: 知らないホストの3段パスはキーにしない（誤マージ防止）",
+    fn: () => productUrlKey("https://example.com/products/boosters/op17/"),
+    want: null,
+  },
+  { name: "ホロライブ: figma はフィギュア", fn: () => holoGenre("figma 猫又おかゆ"), want: "フィギュア" },
+  { name: "ホロライブ: アクリルスタンドはキャラグッズ", fn: () => holoGenre("大神ミオ 誕生日記念2026 アクリルスタンド"), want: "キャラグッズ" },
 
 
   // ── 商品ページの <title>（検索クエリの形になっているか） ────────────

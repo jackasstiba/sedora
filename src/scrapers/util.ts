@@ -63,7 +63,7 @@ export type ShopifyProduct = {
   published_at: string;
   tags: string[];
   images: { src: string }[];
-  variants: { price: string; available: boolean }[];
+  variants: { title?: string; price: string; available: boolean }[];
 };
 
 /**

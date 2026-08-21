@@ -25,6 +25,11 @@ const OFFICIAL_URL_SOURCES = new Set([
   "medicom_toy", // メディコム・トイ公式の商品ページ
   "gashapon", // ガシャポンオフィシャルサイトの商品ページ
   "popmart", // POP MART 日本公式ストアの商品ページ（URLは公式ルーター実装から写した形）
+  // 2026-08-21 追加。いずれも公式ストア/公式サイトの商品ページに直リンクする。
+  "nagano_market", // ナガノマーケット公式の商品ページ
+  "mofusand_market", // mofusand もふもふマーケット公式の商品ページ
+  "hololive_shop", // hololive production OFFICIAL SHOP の商品ページ
+  "gundam_gcg", // ガンダムカードゲーム公式の商品ページ
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -98,6 +103,13 @@ const SEARCHABLE_SOURCES = new Set([
   "mita_draw",
   // 2026-08-21 追加。タイトルは商品名そのもの（シリーズ名＋種別）＝市場検索できる。
   "popmart",
+  "nagano_market",
+  "mofusand_market",
+  "hololive_shop",
+  "gundam_gcg",
+  // X巡回の新規行は人手で構造化した商品名そのもの（例: BEYBLADE X CX-19 ランダムブースター）。
+  // url がX告知のことがあり公式扱いにはできないが、市場検索の導線は約束できる（2026-08-21）。
+  "x_watch",
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */

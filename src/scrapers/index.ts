@@ -27,6 +27,10 @@ import { scrapeBillys } from "./billys";
 import { scrapeMedicomToy } from "./medicomToy";
 import { scrapeGashapon } from "./gashapon";
 import { scrapePopmart } from "./popmart";
+import { scrapeNaganoMarket } from "./naganoMarket";
+import { scrapeMofusandMarket } from "./mofusandMarket";
+import { scrapeHololiveShop } from "./hololiveShop";
+import { scrapeGundamGcg } from "./gundamGcg";
 
 export type ScraperResult = {
   source: string;
@@ -70,6 +74,12 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   // 2026-08-21 追加: POP MART 日本公式（アートトイの一次情報）。内部APIから新商品カレンダーを
   // 取得（[[Projects/sedori_radar_popmart]]）。公式ストア＝収集元非公開の対象外・直リンク可。
   { source: "popmart", run: scrapePopmart },
+  // 2026-08-21 追加: S帯候補の再挑戦（[[Projects/sedori_radar_source_candidates]] 第3回）。
+  // どれも公式ストア/公式サイト＝収集元非公開の対象外・直リンク可。
+  { source: "nagano_market", run: scrapeNaganoMarket },
+  { source: "mofusand_market", run: scrapeMofusandMarket },
+  { source: "hololive_shop", run: scrapeHololiveShop },
+  { source: "gundam_gcg", run: scrapeGundamGcg },
 ];
 
 /** 登録されている収集元の名前（`--only=` の検証に使う）。 */
