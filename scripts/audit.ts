@@ -32,7 +32,7 @@ import {
   todayJst,
 } from "../src/lib/date";
 import { dateTextConflict, extractDates } from "../src/lib/dateText";
-import { cleanListTitle, cutsMidWord } from "../src/lib/title";
+import { cleanListTitle, cutsMidWord, looksTruncatedTitle } from "../src/lib/title";
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, overlapsRange, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
@@ -557,7 +557,7 @@ async function main() {
     const bad: string[] = [];
     for (const r of shown) {
       const c = cleanListTitle(r.source, r.title);
-      if (/[ぁ-ん一-龥][でにをはがのへ]$/.test(c) && /\s/.test(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
+      if (looksTruncatedTitle(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
     report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
   }

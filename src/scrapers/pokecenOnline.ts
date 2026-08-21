@@ -48,11 +48,22 @@ export function pokecenGenre(title: string): { genre: string; subGenre: string }
   return { genre: "ポケモン", subGenre: "ポケモンセンター" };
 }
 
+/** Queue-it（仮想待機室）のページか。高需要時にポケセンが有効化し、商品HTMLの代わりに返る。
+ *  実測 2026-08-21 22時の待機室ページに `<meta id="queue-it_log">` があった。通常ページにも
+ *  導入スクリプトが載る可能性があるので、この判定は**タイルが0件のときだけ**使う。 */
+export function isQueueItPage(html: string): boolean {
+  return /queue-?it/i.test(html);
+}
+
 export async function scrapePokecenOnline(): Promise<ScrapedItem[]> {
   const html = await fetchHtml(LIST_URL);
   const tiles = parsePokecenTiles(html);
-  // 0件は「新商品が無い」ではなくマークアップ変更・導線変更とみなして赤くする
+  // 0件は「新商品が無い」ではない。実測 2026-08-21 22時: 一覧の代わりに Queue-it 待機室
+  // （40KB・noindex）が返っていた＝一時ゲート。それ以外の0件はマークアップ変更を疑って赤くする
   // （巡回失敗なら前回データが残り、3日で source_stale が知らせる）。
+  if (tiles.length === 0 && isQueueItPage(html)) {
+    throw new Error("pokecen_online: Queue-it待機室が有効（一時的な入場制限）。時間を置けば直る型");
+  }
   if (tiles.length === 0) throw new Error("pokecen_online: 新商品タイルが0件（マークアップ変更を疑う）");
 
   return tiles.map((t) => {

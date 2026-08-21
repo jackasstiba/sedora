@@ -424,7 +424,9 @@ export function extractMapUrl(html: string): string | null {
   if (!cell) return null;
   const href = cell.match(/href="(https?:\/\/[^"]+)"/)?.[1];
   if (!href) return null;
-  return /(?:maps\.app\.goo\.gl|google\.[a-z.]+\/maps|goo\.gl\/maps)/.test(href) ? href : null;
+  // href属性の & は &amp; でエンコードされている。生のまま保存すると ?api=1&amp;query=… の
+  // クエリ名が壊れ、地図検索が効かないリンクになる（実測 #117027）。
+  return /(?:maps\.app\.goo\.gl|google\.[a-z.]+\/maps|goo\.gl\/maps)/.test(href) ? decodeEnt(href) : null;
 }
 
 /** 「開催場所」の会場名。<br> 区切りの複数店舗にも対応する。取れなければ空配列。 */

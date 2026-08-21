@@ -84,7 +84,7 @@ const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
-import { extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import { extractMapUrl, extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
 import { figislandListPlaceholder } from "../src/scrapers/figisland";
@@ -124,13 +124,13 @@ import { popmartEventType, popmartProductUrl, popmartImage } from "../src/scrape
 import { parseDatedCollectionHandle, splitCharaStoreTitle, charaStoreGenre } from "../src/scrapers/shopifyCharaStore";
 import { parseGundamProducts, parseGundamDate } from "../src/scrapers/gundamGcg";
 import { parseHoloSchedule, holoGenre, holoImage, holoTitleWithUnit, isHoloPreorder } from "../src/scrapers/hololiveShop";
-import { parsePokecenTiles, pokecenGenre } from "../src/scrapers/pokecenOnline";
+import { isQueueItPage, parsePokecenTiles, pokecenGenre } from "../src/scrapers/pokecenOnline";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
 import { searchQueryName as imgSearchQueryName } from "../src/scrapers/imagePick";
 import { identityCodes, keepableSameProduct } from "../src/scrapers/imagePick";
-import { cleanListTitle, cutsMidWord, hasProductSegment, itemPageTitle, venueForTitle } from "../src/lib/title";
+import { cleanListTitle, cutsMidWord, hasProductSegment, itemPageTitle, looksTruncatedTitle, venueForTitle } from "../src/lib/title";
 import { extractSoleJan, isGenericImageUrl, isUnlicensedImageHost, isUsableImageCandidate, pickPageImage, productNameMatches } from "../src/scrapers/imagePick";
 import { isRecentPokemonGoods, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
@@ -1359,6 +1359,36 @@ const cases: Case[] = [
       ),
     want: "https://ex.com/campaign/x?a=1&b=2",
   },
+  // ── 2026-08-21 追加: 地図URLの &amp;（実測 #117027: ?api=1&amp;query=… のまま保存され
+  // クエリ名が amp;query に化けて地図検索が効かないリンクになっていた） ──
+  {
+    name: "地図URLの &amp; をデコードして保存する",
+    fn: () =>
+      extractMapUrl(
+        '<tr><th>アクセス・地図</th><td><a href="https://www.google.com/maps/search/?api=1&amp;query=中部国際空港">地図</a></td></tr>'
+      ),
+    want: "https://www.google.com/maps/search/?api=1&query=中部国際空港",
+  },
+  // ── 2026-08-21 追加: 宙ぶらりん助詞の判定（audit (9) の純関数化） ──
+  // 鳴る側: チャネル句が残った実バグの形（修正前の #117298 表示）
+  { name: "宙ぶらりん判定: 「〜しまむら通販で」は鳴る", fn: () => looksTruncatedTitle("グローグー 刺しゅうTシャツ しまむら通販で"), want: true },
+  // 鳴らない側: 「〜もの」は名詞語尾（実測 #118039・楽天165件で実在を裏取りした正規商品名）
+  { name: "宙ぶらりん判定: 「名状しがたきもの」は鳴らない", fn: () => looksTruncatedTitle("30MM DAEMON X MACHINA TS 名状しがたきもの"), want: false },
+  // ── 2026-08-21 追加: チャネル句＋日付告知の一括除去（#117298 の表示修正） ──
+  {
+    name: "日付直前の「〇〇通販で」も告知と一緒に落とす",
+    fn: () => cleanListTitle("collabo_cafe", "グローグー 刺しゅうTシャツ しまむら通販で8月22日より受注販売!"),
+    want: "グローグー 刺しゅうTシャツ",
+  },
+  // 鳴らない側: 空白で切れた「〜で」入り商品名は日付告知だけ剥がして本体を残す
+  {
+    name: "「で」入り商品名は巻き添えにしない（空白の節はまたがない）",
+    fn: () => cleanListTitle("collabo_cafe", "ポケモンで遊ぼうセット 8月1日より発売!"),
+    want: "ポケモンで遊ぼうセット",
+  },
+  // ── 2026-08-21 追加: ポケセンの Queue-it 待機室判定（実測 22時に一覧の代わりに返った） ──
+  { name: "Queue-it待機室ページを名指しできる", fn: () => isQueueItPage('<meta id="queue-it_log" data-proxyurl="https://logging-x.queue-it.net/">'), want: true },
+  { name: "通常HTMLはQueue-it扱いしない", fn: () => isQueueItPage('<div class="product-tile" data-pid="4521329371234">'), want: false },
   { name: "個別商品ページの判定（/products/JAN）", fn: () => isSingleProductUrl("https://anime-store.jp/products/4934054076093"), want: true },
   { name: "個別商品ページの判定（/item/12345）", fn: () => isSingleProductUrl("https://bsp-prize.jp/item/2785343/"), want: true },
   // お知らせ配下の新商品紹介は商品ページではない（実測: これを商品ページ扱いすると

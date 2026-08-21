@@ -90,8 +90,12 @@ const ANNOUNCE_VERB =
 // 「N週」は第あり・なし両方。曜日カッコ (土) も日付側で許容。
 const DATE_TOKEN =
   "(?:\\d{4}\\s*[年.．]\\s*)?\\d{1,2}\\s*[月.．]\\s*(?:第?\\s*\\d{1,2}\\s*週|\\d{1,2}\\s*日?|上旬|中旬|下旬|末|頃|ごろ)?";
+// 日付の直前に密着した販売チャネル句（「しまむら通販で8月22日より受注販売!」の「しまむら通販で」）。
+// これを残すと告知だけ剥がれて「〜しまむら通販で」と助詞が宙ぶらりんに残る（実測 #117298）。
+// 空白を含まない（＝商品名の節をまたがない）「〜で」だけを日付とセットで落とす。
+const CHANNEL_BEFORE_DATE = "(?:[^\\s　、!！。]{1,20}で)?";
 const DATE_NOTICE_TAIL = new RegExp(
-  `(?:\\s|　|を|は|も|が|、|・)*${DATE_TOKEN}\\s*(?:\\([日月火水木金土]\\))?\\s*(?:頃|ごろ)?\\s*(?:より|から|〜|~|以降)\\s*[^!！。]*?${ANNOUNCE_VERB}[^!！。]*[!！]\\s*$`
+  `(?:\\s|　|を|は|も|が|、|・)*${CHANNEL_BEFORE_DATE}${DATE_TOKEN}\\s*(?:\\([日月火水木金土]\\))?\\s*(?:頃|ごろ)?\\s*(?:より|から|〜|~|以降)\\s*[^!！。]*?${ANNOUNCE_VERB}[^!！。]*[!！]\\s*$`
 );
 
 /** 末尾の日付告知（「〜8月6日よりコラボ開催!」等）を表示用に除去する。全ソース対象・非破壊。
@@ -100,6 +104,15 @@ const DATE_NOTICE_TAIL = new RegExp(
 export function stripDateNoticeTail(title: string): string {
   const t = title.trim().replace(DATE_NOTICE_TAIL, "").trim();
   return t.length >= 6 ? t : title.trim();
+}
+
+/**
+ * 表示タイトルが「文の途中で切れた痕跡」（末尾が宙ぶらりん助詞）に見えるか。audit (9) の判定。
+ * 「〜もの」は助詞ではなく名詞語尾（実測 #118039「30MM DAEMON X MACHINA TS 名状しがたきもの」
+ * ＝楽天165件で実在を裏取り済みの正規商品名）なので、末尾「の」でも鳴らさない。
+ */
+export function looksTruncatedTitle(clean: string): boolean {
+  return /[ぁ-ん一-龥][でにをはがのへ]$/.test(clean) && /\s/.test(clean) && !/もの$/.test(clean);
 }
 
 /**
