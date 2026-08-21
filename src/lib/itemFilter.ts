@@ -97,6 +97,7 @@ const SOURCE_LABELS: Record<string, string> = {
   mofusand_market: "mofusand公式ストア",
   hololive_shop: "hololive公式ショップ",
   gundam_gcg: "ガンダムカードゲーム公式",
+  pokecen_online: "ポケモンセンターオンライン",
 };
 
 export function sourceLabel(source: string): string {

@@ -31,6 +31,7 @@ import { scrapeNaganoMarket } from "./naganoMarket";
 import { scrapeMofusandMarket } from "./mofusandMarket";
 import { scrapeHololiveShop } from "./hololiveShop";
 import { scrapeGundamGcg } from "./gundamGcg";
+import { scrapePokecenOnline } from "./pokecenOnline";
 
 export type ScraperResult = {
   source: string;
@@ -80,6 +81,7 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   { source: "mofusand_market", run: scrapeMofusandMarket },
   { source: "hololive_shop", run: scrapeHololiveShop },
   { source: "gundam_gcg", run: scrapeGundamGcg },
+  { source: "pokecen_online", run: scrapePokecenOnline },
 ];
 
 /** 登録されている収集元の名前（`--only=` の検証に使う）。 */

@@ -41,6 +41,8 @@ const RECONCILE_UNDATED_SOURCES = new Set([
   // hololive_shop の日付なし行＝「直近30日の新着・在庫あり」。窓から外れた行は返されない
   // ので、ここで突き合わせて消す（取り込みと掲載で同じ物差し＝pokemon_goods の教訓）。
   "hololive_shop",
+  // pokecen_online の行は全件日付なし＝「新商品一覧（最新100件）に今あること」が載せる根拠。
+  "pokecen_online",
   "takaratomy_mall",
   // 月精度の予定は、当月分だけ日付なしになる（monthPlanDate）。その月が終われば収集元から
   // 消えるので、突き合わせないと「今月発売予定」のまま居座る。

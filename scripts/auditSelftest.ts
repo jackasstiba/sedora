@@ -124,6 +124,7 @@ import { popmartEventType, popmartProductUrl, popmartImage } from "../src/scrape
 import { parseDatedCollectionHandle, splitCharaStoreTitle, charaStoreGenre } from "../src/scrapers/shopifyCharaStore";
 import { parseGundamProducts, parseGundamDate } from "../src/scrapers/gundamGcg";
 import { parseHoloSchedule, holoGenre, holoImage, holoTitleWithUnit, isHoloPreorder } from "../src/scrapers/hololiveShop";
+import { parsePokecenTiles, pokecenGenre } from "../src/scrapers/pokecenOnline";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
@@ -3121,6 +3122,21 @@ const cases: Case[] = [
   },
   { name: "ホロライブ: figma はフィギュア", fn: () => holoGenre("figma 猫又おかゆ"), want: "フィギュア" },
   { name: "ホロライブ: アクリルスタンドはキャラグッズ", fn: () => holoGenre("大神ミオ 誕生日記念2026 アクリルスタンド"), want: "キャラグッズ" },
+
+  // ── ポケモンセンターオンライン（2026-08-21・実物のタイルを写した合成HTML） ──
+  {
+    name: "ポケセン: 商品タイルから pid/商品名/価格/画像 を読む",
+    fn: () => {
+      const html =
+        '<ul class="comltemlist product-grid"> <li class="product" data-pid="4573102722058"> <div class="pho"><a href="/4573102722058.html"><img src="https://www.pokemoncenter-online.com/a/img/item/4573102722058/M/x.jpg" alt="プラコロ" loading="lazy" /></a></div> <div class="txtBox"> <p class="txt"><a href="/4573102722058.html">プラコロ スタートセット イーブイ 05</a></p> <p class="price "> <a href="/4573102722058.html"> 990<small>円</small> </a> </p> </div> </li></ul>';
+      const t = parsePokecenTiles(html)[0];
+      return `${t?.pid}|${t?.title}|${t?.priceYen}|${t?.imageUrl?.includes("4573102722058")}`;
+    },
+    want: "4573102722058|プラコロ スタートセット イーブイ 05|990|true",
+  },
+  { name: "ポケセン: タイルの無いHTMLは0件（→scraperがthrowして赤くする）", fn: () => parsePokecenTiles("<html><body>nav</body></html>").length, want: 0 },
+  { name: "ポケセン: ポケカ商品はトレカへ", fn: () => pokecenGenre("ポケモンカードゲーム MEGA 拡張パック").genre, want: "トレカ" },
+  { name: "ポケセン: グッズはポケモンへ", fn: () => pokecenGenre("プラコロ スタートセット イーブイ 05").genre, want: "ポケモン" },
 
 
   // ── 商品ページの <title>（検索クエリの形になっているか） ────────────

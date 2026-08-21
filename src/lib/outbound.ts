@@ -30,6 +30,7 @@ const OFFICIAL_URL_SOURCES = new Set([
   "mofusand_market", // mofusand もふもふマーケット公式の商品ページ
   "hololive_shop", // hololive production OFFICIAL SHOP の商品ページ
   "gundam_gcg", // ガンダムカードゲーム公式の商品ページ
+  "pokecen_online", // ポケモンセンターオンラインの商品ページ（/<JAN>.html）
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -107,6 +108,7 @@ const SEARCHABLE_SOURCES = new Set([
   "mofusand_market",
   "hololive_shop",
   "gundam_gcg",
+  "pokecen_online",
   // X巡回の新規行は人手で構造化した商品名そのもの（例: BEYBLADE X CX-19 ランダムブースター）。
   // url がX告知のことがあり公式扱いにはできないが、市場検索の導線は約束できる（2026-08-21）。
   "x_watch",
@@ -188,13 +190,11 @@ export function rakutenSearchUrl(title: string, affiliateId = RAKUTEN_AFFILIATE_
  * 「楽天アフィリエイト」というプログラム名の明記までは要求されていない
  * （2026-08-21 に楽天のステマ規制対応ページで確認）ので、本文は短い汎用形にし、
  * プログラム名はプライバシーポリシーの「アフィリエイトプログラムについて」で明記する。
- * → 文字列をここに1本化し、全ページ共通ヘッダ直下と、購入導線の隣の2箇所で使う。
+ * → 文字列をここに1本化し、全ページ共通ヘッダ直下で使う（要件を満たすのはこの1箇所）。
+ *   購入導線の隣に置いていた個別注記（「楽天で探す」は広告…）は 2026-08-21 に廃止。
  *   実際に本番の全ページに出ているかは `npm run audit:page` が毎回確かめる。
  */
 export const AD_DISCLOSURE = "本サイトはアフィリエイト広告を利用しています。";
-
-/** 購入導線の隣に置く一行（そのリンク自体が広告だと、押す直前に分かるようにする）。 */
-export const AD_DISCLOSURE_INLINE = "「楽天で探す」は広告（アフィリエイトリンク）です。";
 
 /**
  * 英語版（/en）の広告表示。英語ページの読者に日本語の一文は届かないので言語を合わせる。
