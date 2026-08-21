@@ -32,6 +32,7 @@
     "ingest:x": "node --env-file-if-exists=.env --import tsx scripts/ingestXWatch.ts",
     "x:audit": "node --env-file-if-exists=.env --import tsx scripts/x_watch/audit.ts",
     "analytics": "node --env-file-if-exists=.env --import tsx scripts/analytics.ts",
+    "gsc": "node --env-file-if-exists=.env --import tsx scripts/gsc.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "migrate:events": "node --env-file-if-exists=.env --import tsx scripts/migrateEvents.ts",
     "migrate:genre": "node --env-file-if-exists=.env --import tsx scripts/migrateGenreVocab.ts",
