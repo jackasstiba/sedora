@@ -6,7 +6,7 @@ import { toCardItem } from "@/lib/cardItem";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
-import { AD_DISCLOSURE_INLINE, hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
+import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
@@ -398,7 +398,8 @@ export default async function ItemPage({ params }: Props) {
             )}
             {/* 実際に購入できる場所への導線（商品名で楽天市場を検索）＝サイトで唯一の収益導線。
                 収集元URLを出さない代わりに、公式リンクを持たない商品でも行き止まりにしない導線。
-                このリンクはアフィリエイト＝**広告**なので、押す直前に分かる位置にその旨を出す。 */}
+                このリンクはアフィリエイト＝**広告**。その旨の表示は全ページ共通ヘッダ直下の
+                AD_DISCLOSURE が担う（ボタン脇の個別注記は 2026-08-21 に廃止）。 */}
             {showRakuten && (
               <OutboundLink
                 href={rakutenSearchUrl(hasSearchableTitle(item.source) ? item.title : displayTitle)}
@@ -412,7 +413,6 @@ export default async function ItemPage({ params }: Props) {
             )}
           </div>
           <p className="text-xs text-neutral-600 dark:text-neutral-400">
-            {showRakuten && <span>※ {AD_DISCLOSURE_INLINE}<br /></span>}
             ※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
           </p>
         </div>
