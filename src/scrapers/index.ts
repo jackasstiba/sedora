@@ -26,6 +26,7 @@ import { scrapeTakaraTomyMall } from "./takaratomyMall";
 import { scrapeBillys } from "./billys";
 import { scrapeMedicomToy } from "./medicomToy";
 import { scrapeGashapon } from "./gashapon";
+import { scrapePopmart } from "./popmart";
 
 export type ScraperResult = {
   source: string;
@@ -66,6 +67,9 @@ const SCRAPERS: { source: string; run: Scraper }[] = [
   { source: "billys", run: scrapeBillys },
   { source: "medicom_toy", run: scrapeMedicomToy },
   { source: "gashapon", run: scrapeGashapon },
+  // 2026-08-21 追加: POP MART 日本公式（アートトイの一次情報）。内部APIから新商品カレンダーを
+  // 取得（[[Projects/sedori_radar_popmart]]）。公式ストア＝収集元非公開の対象外・直リンク可。
+  { source: "popmart", run: scrapePopmart },
 ];
 
 /** 登録されている収集元の名前（`--only=` の検証に使う）。 */

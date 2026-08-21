@@ -90,6 +90,8 @@ const SOURCE_LABELS: Record<string, string> = {
   billys: "BILLY'S ENT",
   medicom_toy: "メディコム・トイ",
   gashapon: "ガシャポン公式",
+  // 2026-08-21 追加。POP MART 日本公式オンラインストア（一次情報）＝店名を出してよい。
+  popmart: "POP MART公式",
 };
 
 export function sourceLabel(source: string): string {

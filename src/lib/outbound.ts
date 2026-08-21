@@ -24,6 +24,7 @@ const OFFICIAL_URL_SOURCES = new Set([
   "billys", // BILLY'S ENT 公式通販の商品/LAUNCH ページ
   "medicom_toy", // メディコム・トイ公式の商品ページ
   "gashapon", // ガシャポンオフィシャルサイトの商品ページ
+  "popmart", // POP MART 日本公式ストアの商品ページ（URLは公式ルーター実装から写した形）
 ]);
 
 /** item.url を「公式ページ」と表記してよいか（それ以外は情報元＝まとめ/告知ページ） */
@@ -95,6 +96,8 @@ const SEARCHABLE_SOURCES = new Set([
   "gashapon",
   "billys",
   "mita_draw",
+  // 2026-08-21 追加。タイトルは商品名そのもの（シリーズ名＋種別）＝市場検索できる。
+  "popmart",
 ]);
 
 /** 「楽天で探す」等の購入導線（商品名検索）を出してよいソースか */
