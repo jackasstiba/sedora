@@ -11,6 +11,8 @@ import { GENRE_ORDER } from "../src/lib/itemFilter";
 
 const RENAME: Record<string, string> = {
   ゲーム: "家電・ゲーム機",
+  // 2026-08-21 廃止（本人判断: 映像・音楽タグは要らない）。既存行は「その他」へ寄せる。
+  "映像・音楽": "その他",
 };
 
 async function main() {

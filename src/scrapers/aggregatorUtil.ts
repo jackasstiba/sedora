@@ -166,10 +166,7 @@ export function classifyAggregatorGenre(text: string): string {
     return "フィギュア";
   }
 
-  // 映像・音楽
-  if (/ブルーレイ|blu-ray|dvd|4k\s*uhd|steelbook|スチールブック|レコード|アナログ盤|cd\b|アルバム/i.test(t)) {
-    return "映像・音楽";
-  }
+  // 映像・音楽（Blu-ray/CD等）は2026-08-21に語彙から廃止＝「その他」に落ちる。
 
   return "その他";
 }

@@ -61,8 +61,6 @@ export const GENRE_TO_GOOGLE_CATEGORY: Record<string, GoogleProductCategory | nu
   キャラグッズ: null,
   // 家電とゲーム機で別カテゴリになるものを1ジャンルにまとめている枠。
   "家電・ゲーム機": null,
-  // 映像（DVD/Blu-ray）と音楽（CD）で別カテゴリ。
-  "映像・音楽": null,
   その他: null,
 };
 

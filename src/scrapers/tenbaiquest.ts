@@ -58,7 +58,7 @@ const CAT_GENRE: Record<string, string> = {
   フィギュア: "フィギュア",
   スニーカー: "スニーカー",
   ゲーム: "家電・ゲーム機", // 語彙は GENRE_ORDER に揃える
-  音楽: "映像・音楽",
+  // 音楽→映像・音楽 の対応は2026-08-21のジャンル廃止で削除（該当カテゴリは「その他」のまま）。
 };
 
 type Card = { slugPath: string; title: string; cat: string };

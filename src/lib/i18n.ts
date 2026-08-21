@@ -25,7 +25,6 @@ const GENRE_EN: Record<string, string> = {
   "ソフビ・アートトイ": "Sofubi & art toys",
   "家電・ゲーム機": "Electronics & consoles",
   "酒・ウイスキー": "Whisky & spirits",
-  "映像・音楽": "Media & music",
   その他: "Other",
 };
 

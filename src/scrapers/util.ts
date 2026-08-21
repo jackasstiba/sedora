@@ -250,7 +250,9 @@ export function classifyGenre(text: string): string {
   if (/スニーカー|sneaker|nike|adidas|new balance|jordan|dunk|asics|エアフォース|エアマックス|エアジョーダン/i.test(t)) {
     return "スニーカー";
   }
-  if (/ブルーレイ|blu-ray|dvd|4k|steelbook|スチールブック/i.test(t)) return "映像・音楽";
+  // 映像・音楽ジャンルは2026-08-21廃止。メディア商品は「その他」へ
+  // （ゲーム判定より先に見るのは従来の優先順位の維持＝Blu-ray付きゲーム題名を家電に流さない）。
+  if (/ブルーレイ|blu-ray|dvd|4k|steelbook|スチールブック/i.test(t)) return "その他";
   // ジャンル名は itemFilter.ts の GENRE_ORDER の語彙に揃える。「ゲーム」という別ラベルを
   // 出すと、同じ商品が「ゲーム」と「家電・ゲーム機」に散り、絞り込みからも漏れる。
   if (/ゲーム|game|switch|playstation|quest|meta/i.test(t)) return "家電・ゲーム機";
