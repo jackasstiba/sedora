@@ -3,10 +3,14 @@ import type { Locale } from "@/lib/i18n";
 
 // 広告である旨の表示。ヘッダーの直下＝**ファーストビュー**に全ページ共通で出す
 // （ステマ規制／楽天アフィリエイトのガイドライン。文言の根拠は lib/outbound.ts）。
-// 目立たせすぎず、しかし読める大きさ・色で出す（視認しづらい色・極小文字は禁止行為）。
+// ⚠ ここより下（フッター等）へは移せない: 楽天のガイドラインはファーストビュー表示を
+// 必須とし、ページ下部のみの記載を禁止行為に挙げている（2026-08-21 確認）。
+// 「目立たなくする」は場所ではなく見た目で行う＝全幅の帯（背景+ボーダー+中央寄せ）を
+// やめて右寄せの小さな一行にする。ただし極小文字・視認しづらい色は禁止行為なので、
+// 文字サイズ（text-xs）と AA を満たす色はここが下限（audit の text_color 検査の対象）。
 export function AdDisclosure({ locale = "ja" }: { locale?: Locale } = {}) {
   return (
-    <p className="border-b border-neutral-200 bg-neutral-50 px-4 py-1.5 text-center text-xs text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
+    <p className="px-4 py-1 text-right text-xs text-neutral-600 dark:text-neutral-400">
       {locale === "en" ? AD_DISCLOSURE_EN : AD_DISCLOSURE}
     </p>
   );
