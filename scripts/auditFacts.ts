@@ -28,8 +28,9 @@ import { franchiseAliases } from "../src/lib/franchise";
 import { identityTokens, pageShowsProduct } from "../src/lib/identity";
 import { parseYen } from "../src/lib/margin";
 import { datesInclude, extractDates } from "../src/lib/dateText";
-import { isMonthPrecision } from "../src/lib/date";
+import { isMonthPrecision, jstCalDate } from "../src/lib/date";
 import { parseStoresJson } from "../src/lib/stores";
+import { fetchPopmartCalendar, type PopmartCalendarItem } from "../src/scrapers/popmart";
 
 // 本文の代わりにログイン壁・同意画面を返すホスト。文字数は十分あるので「本文が取れた」と
 // 誤認し、識別語が1つも出ない＝要確認、という**中身を見ていない誤報**になる（実測: x_watch の
@@ -167,6 +168,19 @@ async function deadImageReason(url: string): Promise<string | null> {
   }
 }
 
+// popmart のカレンダー（sourceId → API行）。1回だけ取り、失敗したら空のまま＝
+// 全行「窓の外」扱い（unusable）になるだけで、検査自体は落とさない。
+let popmartCalCache: Map<string, PopmartCalendarItem> | null = null;
+async function popmartCalendarById(): Promise<Map<string, PopmartCalendarItem>> {
+  if (popmartCalCache) return popmartCalCache;
+  try {
+    popmartCalCache = new Map((await fetchPopmartCalendar()).map((p) => [p.id, p]));
+  } catch {
+    popmartCalCache = new Map();
+  }
+  return popmartCalCache;
+}
+
 async function main() {
   const rows = (await loadDisplayedItems()).filter((r) => !ONLY_SOURCE || r.source === ONLY_SOURCE);
   const bySource = new Map<string, typeof rows>();
@@ -207,6 +221,38 @@ async function main() {
             kind: "画像が表示できない",
             detail: `[${source} #${r.id}] ${bad} ${r.imageUrl.slice(0, 80)}`,
           });
+      }
+
+      // popmart はページHTMLに商品情報が一切無い（RSCストリーミングのSPA。存在しないURLでも
+      // 同じ見た目の200が返る）。ここを本文検査に流すと「価格が本文に無い」が**構造的に毎回鳴る**
+      // （実測 2026-08-21: 3件＝読めていないことを根拠にした指摘。takaratomy_mall で通った道と同じ）。
+      // popmart の一次情報は店のAPIそのものなので、**APIの現在値と突合する**＝取り込み後に
+      // 店側が価格・日付を変えた（こちらが陳腐化した）ことを検出する本物の検査になる。
+      if (source === "popmart") {
+        const cal = await popmartCalendarById();
+        const p = cal.get(r.sourceId);
+        if (!p) {
+          // カレンダーの窓（直近約1ヶ月）から流れた行。裏取り先が無くなっただけで誤りの証拠ではない。
+          unusable++;
+          continue;
+        }
+        checked++;
+        const name = cleanListTitle(r.source, r.title);
+        const apiPrice = p.price ? `${p.price.toLocaleString()}円` : null;
+        if (r.price && apiPrice && r.price !== apiPrice)
+          findings.push({
+            kind: "価格が一次情報と食い違う",
+            detail: `[popmart #${r.id}] 掲載 ${r.price} ↔ API ${apiPrice} ${name.slice(0, 40)}`,
+          });
+        const apiDate = p.saleStartAt ? jstCalDate(Date.parse(p.saleStartAt)) : null;
+        if (r.eventDate && apiDate && r.eventDate.getTime() !== apiDate.getTime())
+          findings.push({
+            kind: "日付が一次情報と食い違う",
+            detail: `[popmart #${r.id}] 掲載 ${r.eventDate.toISOString().slice(0, 10)} ↔ API ${apiDate
+              .toISOString()
+              .slice(0, 10)} ${name.slice(0, 40)}`,
+          });
+        continue;
       }
 
       const page = await pageText(r.url);

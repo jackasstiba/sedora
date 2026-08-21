@@ -120,6 +120,7 @@ import { cannotSourceImage } from "../src/scrapers/imagePick";
 import { normalizeForSearch } from "../src/lib/itemFilter";
 import { normalizeBillysBrand, parseBillysLaunch } from "../src/scrapers/billys";
 import { parseChiikawaCollection, chiikawaGenre } from "../src/scrapers/chiikawaMarket";
+import { popmartEventType, popmartProductUrl, popmartImage } from "../src/scrapers/popmart";
 import { isResaleWorthyGashapon, type GashaponCard } from "../src/scrapers/gashapon";
 import { parseMitaDrawDetail } from "../src/scrapers/mitaDraw";
 import { monthPlanDate } from "../src/scrapers/util";
@@ -2194,6 +2195,78 @@ const cases: Case[] = [
     want: false,
   },
   {
+    // 2026-08-21: 裏取り済みの略号対応表（TOKEN_EQUIVALENTS）。SDEX＝SDガンダム EXスタンダード。
+    // 正規化（長音「ー」落とし）を通した形で比較していることもこのテストが固定する。
+    name: "画像: 略号SDEXは店の正式表記（EXスタンダード）と一致してよい",
+    fn: () =>
+      productNameMatches(
+        "SDEX ガンダムエアリアル",
+        "SDガンダム EXスタンダード 『機動戦士ガンダム 水星の魔女』 ガンダムエアリアル (プラモデル)"
+      ),
+    want: true,
+  },
+  {
+    name: "画像: 略号ACVIはARMORED COREの正式表記と一致してよい",
+    fn: () =>
+      productNameMatches(
+        "30MM ACVI SCHNEIDER NACHTREIHER/40E スティールヘイズ",
+        "30MM ARMORED CORE VI FIRES OF RUBICON SCHNEIDER NACHTREIHER/40E スティールヘイズ プラモデル"
+      ),
+    want: true,
+  },
+  {
+    // 対応表はグレード略号の言い換えを許すだけで、**別グレードには相変わらず一致しない**
+    // （SDEX の言い換え先が無い候補は、機体名が同じでも借りない）。
+    name: "画像: 略号対応はあっても別グレードの出品は借りない",
+    fn: () => productNameMatches("SDEX ガンダムエアリアル", "HG 1/144 ガンダムエアリアル 水星の魔女"),
+    want: false,
+  },
+  {
+    // 「御三家カードセット」は店側が「カードセット」＋御三家名の列挙で書く。
+    // どの御三家かはポケモン名トークンの全語一致が担保する（下の鳴らない側とセット）。
+    name: "画像: 御三家カードセットは店の表記（カードセット＋御三家名）と一致してよい",
+    fn: () =>
+      productNameMatches(
+        "ポケモンカード 30th CELEBRATION 御三家カードセット(フシギダネ・ヒトカゲ・ゼニガメ)",
+        "10月16日発売 予約 ポケモンカードゲーム MEGA 30th CELEBRATION カードセット フシギダネ・ヒトカゲ・ゼニガメ"
+      ),
+    want: true,
+  },
+  {
+    name: "画像: 御三家カードセットでも御三家の中身が違えば借りない",
+    fn: () =>
+      productNameMatches(
+        "ポケモンカード 30th CELEBRATION 御三家カードセット(ナエトル・ヒコザル・ポッチャマ)",
+        "10月16日発売 予約 ポケモンカードゲーム MEGA 30th CELEBRATION カードセット フシギダネ・ヒトカゲ・ゼニガメ"
+      ),
+    want: false,
+  },
+  {
+    // 2026-08-21: まとめ見出しの接尾語（nyuka_now）を検索語から剥がす。
+    name: "画像: 検索語から「〜の抽選予約・…情報まとめ」の接尾語を落とす",
+    fn: () => imgSearchQueryName("ポケモンカード インフェルノXの抽選予約・先着販売・在庫あり・再販入荷情報まとめ"),
+    want: "ポケモンカード インフェルノX",
+  },
+  {
+    // 同梱アクセサリの併記（/オフィシャルカードスリーブ）は本体側の出品名に無いので落とす。
+    name: "画像: 検索語から末尾の同梱スリーブ併記を落とす",
+    fn: () => imgSearchQueryName("ONE PIECEカードゲーム ブースターパック「世界最強の戦士」【OP-17】/オフィシャルカードスリーブ"),
+    want: "ONE PIECEカードゲーム ブースターパック「世界最強の戦士」【OP-17】",
+  },
+  {
+    // 「購入券」（購入権の表記ゆれ）も販売条件として落とす。
+    name: "画像: 検索語から「再販分 購入券」を落とす",
+    fn: () => imgSearchQueryName("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」再販分 購入券"),
+    want: "ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」",
+  },
+  {
+    // 接尾語剥がしが商品名本体を巻き込まないこと（「予約」で終わる正当な名前ではなく、
+    // 途中に販売語を含むだけの名前は触らない）。
+    name: "画像: 接尾語剥がしは商品名の途中の語を巻き込まない",
+    fn: () => imgSearchQueryName("しゅごキャラ! 20周年原画展 in 東京ソラマチ"),
+    want: "しゅごキャラ! 20周年原画展 in 東京ソラマチ",
+  },
+  {
     // JANは一意識別子。存在しないJANでも楽天は無関係な商品を返すので、
     // 「JANがURL/画像URLに入っていること」を確認できたものだけ使う（＝この関数の一意性判定）。
     name: "画像: 記事に商品コードが2つ以上あるときは特定しない",
@@ -2848,6 +2921,42 @@ const cases: Case[] = [
     want: "キャラグッズ",
   },
   { name: "ちいかわ: ソフビはソフビ・アートトイ", fn: () => chiikawaGenre("フィギュア", "おっきいソフビフィギュア"), want: "ソフビ・アートトイ" },
+
+  // POP MART: businessType→種別と、URLの組み立て（slug/idの順を逆にするとSPAは200のまま
+  // 中身の無いページを出す＝HTTPでは検出できないので、形をここで固定する）
+  { name: "POP MART: shop は発売", fn: () => popmartEventType("shop"), want: "発売" },
+  { name: "POP MART: draw は抽選", fn: () => popmartEventType("draw"), want: "抽選" },
+  { name: "POP MART: 未知のbusinessTypeは発売に倒す（抽選と断定しない）", fn: () => popmartEventType(undefined), want: "発売" },
+  {
+    name: "POP MART: 商品URLは /products/<slug>/<id> の順",
+    fn: () => popmartProductUrl("shop", "labubu-series", "abc-123"),
+    want: "https://www.popmart.com/jp/products/labubu-series/abc-123",
+  },
+  {
+    name: "POP MART: 抽選は /pop-now/box-set/ 配下",
+    fn: () => popmartProductUrl("draw", "labubu-series", "abc-123"),
+    want: "https://www.popmart.com/jp/pop-now/box-set/labubu-series/abc-123",
+  },
+  {
+    name: "POP MART: slugが『-』だけの行はidだけでURLを作る（実在する形）",
+    fn: () => popmartProductUrl("shop", "-", "abc-123"),
+    want: "https://www.popmart.com/jp/products/abc-123",
+  },
+  {
+    name: "POP MART: 画像は一覧サムネ(ja)を最優先で借りる",
+    fn: () => popmartImage({ npcImages_trans: { ja: "https://x/npc.jpg" }, bannerImages: [{ link_trans: { "en-us": "https://x/b.jpg" } }] }),
+    want: "https://x/npc.jpg",
+  },
+  {
+    name: "POP MART: サムネが無ければバナーの最初の実URL（空文字はスキップ）",
+    fn: () => popmartImage({ npcImages_trans: {}, bannerImages: [{ link_trans: { ja: "", "en-us": "https://x/b.jpg" } }] }),
+    want: "https://x/b.jpg",
+  },
+  {
+    name: "POP MART: どこにも画像が無ければ null（推測画像を付けない）",
+    fn: () => popmartImage({ npcImages_trans: {}, bannerImages: [] }),
+    want: null,
+  },
 
 
   // ── 商品ページの <title>（検索クエリの形になっているか） ────────────
