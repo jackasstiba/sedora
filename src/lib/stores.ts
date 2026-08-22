@@ -56,6 +56,47 @@ export function storeSectionCopy(source: string): {
   };
 }
 
+/**
+ * stores 節の文言（英語版 /en）。storeSectionCopy と同じ出し分け規則の英語。
+ * 見出し "accepting entries" は scripts/auditRendered.ts の closedStoresShownAsOpen が
+ * 「受付中の約束」を見つける目印に使う（JAの「受付中ストア」と対）。変えるなら検査側も一緒に。
+ * note には「日本の住所・電話・店のアプリが要ることが多い」と正直に書く＝海外から
+ * 応募できると約束しない（[[Projects/sedori_radar_en]] 観点B）。
+ */
+export function storeSectionCopyEn(source: string): {
+  heading: string;
+  note: string;
+  button: string;
+} {
+  if (source === "collabo_cafe")
+    return {
+      heading: "📍 Venues",
+      note: "Sold at the event venues in Japan only. Check opening hours and availability on each store or official page.",
+      button: "Map →",
+    };
+  return {
+    heading: "🎯 Stores accepting entries / pre-orders",
+    note: "Japanese retailers currently accepting lottery entries or pre-orders. Many require a Japanese address, phone number or store app — check the conditions, stock and deadline on each official page. Dates below are month/day, times JST.",
+    button: "Entry page →",
+  };
+}
+
+/**
+ * storeWhenLabel の英語版。**相対表記（本日/明日）への置き換えはしない**＝保存済みの
+ * 絶対表記（"〜8/17 23:59"）をそのまま出す（節の注記が month/day・JST を宣言する）。
+ * 受付開始が未来の枠だけは、受付中の一覧に同じ顔で並ばないよう事実を英語で添える
+ * （JAの「（受付前）」と同じ理由）。
+ */
+export function storeWhenLabelEn(s: StoreEntry, today: Date): string | null {
+  if (!s.when) return null;
+  if (!s.at || s.kind !== "開始") return s.when;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.at);
+  if (!m) return s.when;
+  const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  const days = Math.round((at - today.getTime()) / 86_400_000);
+  return days > 0 ? `${s.when} (not open yet)` : s.when;
+}
+
 export function groupStoresByLabel(stores: StoreEntry[]): StoreGroup[] {
   const groups = new Map<string, StoreGroup>();
   for (const s of stores) {

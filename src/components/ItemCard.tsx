@@ -65,7 +65,9 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
 
   return (
     <Link
-      href={`/items/${item.id}`}
+      // ENのカードはEN詳細（/en/items/*）へ。日本語詳細に落とすと海外読者が迷子になる
+      // （Phase 2b-2）。audit:page のカードセレクタは両方のプレフィクスを数える。
+      href={en ? `/en/items/${item.id}` : `/items/${item.id}`}
       className="group flex flex-col overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md dark:border-neutral-800 dark:bg-neutral-900"
     >
       <div className="relative aspect-square w-full overflow-hidden bg-neutral-100 dark:bg-neutral-800">

@@ -55,6 +55,33 @@ export function eventTypeLabel(eventType: string, locale: Locale): string {
   return EVENT_LABEL_EN[eventType] ?? eventType;
 }
 
+/** 日付欄の見出し（itemFilter.eventDateHeading が返す日本語）→ 英語。
+ *  eventDateHeading の生成規則（`${eventType}日`・「〜中/〜予定」はそのまま・抽選の実データ判定・
+ *  「発送予定」）が返しうる語だけを対応表に持ち、**表に無い見出しは日本語のまま出す**
+ *  （未知の種別に英語の断定を足さない＝EVENT_LABEL_EN と同じ原則）。 */
+const DATE_HEADING_EN: Record<string, string> = {
+  発送予定: "Ships (est.)",
+  応募締切: "Entry deadline",
+  受付開始: "Entries open",
+  告知の日付: "Date in announcement",
+  予約日: "Pre-order date",
+  予約開始日: "Pre-orders open",
+  受付開始日: "Entries open",
+  販売開始日: "On sale",
+  予約終了日: "Pre-orders closed",
+  抽選日: "Lottery date",
+  発売日: "Release date",
+  開催日: "Event date",
+  再販日: "Restock date",
+  登場日: "Arrival date",
+  予約受付中: "Pre-orders open",
+  登場予定: "Expected arrival",
+};
+
+export function dateHeadingEn(headingJa: string): string {
+  return DATE_HEADING_EN[headingJa] ?? headingJa;
+}
+
 /** groupItemsByDate が返す日本語の節見出し → 英語。 */
 const GROUP_LABEL_EN: Record<string, string> = {
   今日: "Today",

@@ -94,7 +94,15 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   return {
     title,
     description,
-    alternates: SITE ? { canonical: `${SITE}/items/${item.id}` } : undefined,
+    alternates: {
+      canonical: SITE ? `${SITE}/items/${item.id}` : undefined,
+      // 英語詳細（/en/items/*）と**双方向**の hreflang（片方向は無効。EN側は en/items/[id]/page.tsx）。
+      languages: {
+        ja: `/items/${item.id}`,
+        en: `/en/items/${item.id}`,
+        "x-default": `/items/${item.id}`,
+      },
+    },
     openGraph: {
       title,
       description,

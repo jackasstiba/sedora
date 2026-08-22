@@ -16,6 +16,10 @@ export function SiteFooter({ locale = "ja" }: { locale?: Locale } = {}) {
               日本語版
             </Link>
             {" · "}
+            <Link href="/en/how-to-buy" className="text-rose-600 hover:underline dark:text-rose-400">
+              How to buy from Japan
+            </Link>
+            {" · "}
             <Link href="/en/privacy" className="text-rose-600 hover:underline dark:text-rose-400">
               Privacy policy & disclaimer
             </Link>

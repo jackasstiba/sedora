@@ -154,7 +154,9 @@ function toUrl(name: string): string {
 function cardDateProblems($: cheerio.CheerioAPI, today: Date): { problems: string[]; badges: number } {
   const problems: string[] = [];
   let badges = 0;
-  $('a[href^="/items/"]').each((_, el) => {
+  // ENカードは /en/items/* へリンクする（ItemCard）。片方だけ数えると /en のカードが
+  // 全部「0枚」になり、件数突合が誤報／日付突合が空振りする。
+  $('a[href^="/items/"], a[href^="/en/items/"]').each((_, el) => {
     const card = $(el);
     const texts = card
       .find("span")
@@ -204,7 +206,10 @@ function closedStoresShownAsOpen(
   const problems: string[] = [];
   let examined = 0;
   $("section").each((_, sec) => {
-    if (!$(sec).find("h2").first().text().includes("受付中ストア")) return;
+    // JA「受付中ストア」／EN「accepting entries」（stores.storeSectionCopyEn と対。
+    // 見出し文言を変えるならここも一緒に変える＝JAと同じ運用）。
+    const h = $(sec).find("h2").first().text();
+    if (!h.includes("受付中ストア") && !h.includes("accepting entries")) return;
     $(sec)
       .find("li")
       .each((_, li) => {
@@ -221,7 +226,7 @@ function closedStoresShownAsOpen(
 /** 商品カードの見出しテキストを取り出す（カードは /items/N へのリンク）。 */
 function cardTitles($: cheerio.CheerioAPI): string[] {
   const out: string[] = [];
-  $('a[href^="/items/"]').each((_, el) => {
+  $('a[href^="/items/"], a[href^="/en/items/"]').each((_, el) => {
     const t = $(el).find("h3").first().text().trim() || $(el).text().trim();
     if (t) out.push(t.replace(/\s+/g, " "));
   });
@@ -249,6 +254,8 @@ async function main() {
   let sourceLeaks = 0;
   // /en の入手経路タグを何枚見たか（母数。0枚で終わったら判定側かセレクタが壊れている）。
   let onlineTagsSeen = 0;
+  // 英語詳細（/en/items/*）を何ページ見たか（母数）。
+  let enDetailChecked = 0;
   for (const p of pages) {
     const html = await fetchPage(toUrl(p.name));
     if (html === null) {
@@ -426,6 +433,57 @@ async function main() {
           if (n > 1) flag(`/items/${r.id}`, "区別できない同一表示", `リスト内で「${t.slice(0, 50)}」が ${n} 回`);
       });
     }
+
+    // 英語詳細（/en/items/*）。データはJA詳細（上で全件級に検査済み）と同一なので、
+    // ENは「表示の枠が英語でも同じ約束を守っているか」を層別の抜き取りで見る:
+    // 受付中ストアあり／賞ギャラリーあり／通常行。閉店済みストアの突合（closedStores…）は
+    // 見出しの英語版（"accepting entries"）でも節を見つけられるようにしてある。
+    const enSample = [...withStores.slice(0, 6), ...withPrizes.slice(0, 4), ...sample.slice(0, 6)];
+    for (const r of enSample) {
+      const page = `/en/items/${r.id}`;
+      const html = await fetchPage(`${BASE}${page}`);
+      if (html === null) {
+        flag(page, "取得失敗", "EN詳細ページを取得できない");
+        continue;
+      }
+      checked++;
+      enDetailChecked++;
+      const $ = cheerio.load(html);
+      $("script, style, noscript").remove();
+      const text = $("main").text().replace(/\s+/g, " ").trim();
+      sourceLeaks += checkSourceLeak(html, page, hiddenHosts);
+      checkAdDisclosure($, page);
+      rakutenLinksSeen += checkRakutenLinks($, page);
+      for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
+        if (text.includes(bad)) flag(page, "未定義値の露出", `本文に「${bad}」が出ている`);
+      }
+      for (const msg of renderedDateProblems(text, today)) flag(page, "日付の食い違い（画面）", msg);
+      const enCardDates = cardDateProblems($, today);
+      badgesSeen += enCardDates.badges;
+      for (const msg of enCardDates.problems) flag(page, "日付の食い違い（画面）", msg);
+      const closedEn = closedStoresShownAsOpen($, today);
+      storeRowsSeen += closedEn.examined;
+      for (const msg of closedEn.problems) flag(page, "受付終了の店を受付中として出している", msg);
+    }
+  }
+
+  // 英語の固定ガイド（/en/how-to-buy）。カードは無いが、配信物の検査
+  // （収集元リーク・広告表示・未定義値の露出）は同じ網に入れる。
+  {
+    const page = "/en/how-to-buy";
+    const html = await fetchPage(`${BASE}${page}`);
+    if (html === null) flag(page, "取得失敗", "ガイドページを取得できない");
+    else {
+      checked++;
+      const $ = cheerio.load(html);
+      $("script, style, noscript").remove();
+      const text = $("main").text().replace(/\s+/g, " ").trim();
+      sourceLeaks += checkSourceLeak(html, page, hiddenHosts);
+      checkAdDisclosure($, page);
+      for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
+        if (text.includes(bad)) flag(page, "未定義値の露出", `本文に「${bad}」が出ている`);
+      }
+    }
   }
 
   // 「指摘0件」が“ちゃんと見た上での0件”なのか“何も見ていない0件”なのかを区別するため、
@@ -433,7 +491,7 @@ async function main() {
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
       `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / ` +
-      `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚`
+      `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚 / EN詳細 ${enDetailChecked}ページ`
   );
   // 隠すべきホストが1つも作れていないなら、この検査は何も守っていない。
   if (checked > 0 && hiddenHosts.length === 0) {

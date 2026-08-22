@@ -29,7 +29,7 @@ import {
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
-import { countdownLabelEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
+import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
 import { isOnlineItem } from "../src/lib/channel";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
@@ -37,7 +37,9 @@ import {
   preferredStoreUrl,
   soonestOpenDeadline,
   splitStoresByDeadline,
+  storeSectionCopyEn,
   storeWhenLabel,
+  storeWhenLabelEn,
   type StoreEntry,
 } from "../src/lib/stores";
 import { unfreezeStoreWhen } from "./backfillDisplayText";
@@ -82,7 +84,7 @@ const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36";
 const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
-import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, rakutenSearchUrl } from "../src/lib/outbound";
+import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, officialUrlLabelEn, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import { extractMapUrl, extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
@@ -4257,6 +4259,48 @@ const cases: Case[] = [
       isOnlineItem({ source: "nyuka_now", url: "https://www.amazon.co.jp/dp/B0DDWZWW1Z" }) &&
       isOnlineItem({ source: "card_chusen", url: "https://www.amazon.co.jp/dp/B0GN5JV7JS" }),
     want: true,
+  },
+  // ── EN商品詳細（/en/items/*・2026-08-22）: 訳すのは対応表にある語だけ・未知は日本語のまま ──
+  {
+    name: "EN日付見出し: eventDateHeading の既知の見出しを訳す",
+    fn: () =>
+      `${dateHeadingEn(eventDateHeading("抽選", null, false, { source: "card_chusen", eventDate: null, stores: null }))}|` +
+      `${dateHeadingEn(eventDateHeading("予約", "2026年10月発送予定", false))}|` +
+      `${dateHeadingEn(eventDateHeading("発売", null, false))}`,
+    want: "Entry deadline|Ships (est.)|Release date",
+  },
+  {
+    name: "EN日付見出し: 対応表に無い見出しは日本語のまま（断定を足さない）",
+    fn: () => dateHeadingEn("未知の種別日"),
+    want: "未知の種別日",
+  },
+  {
+    name: "ENストア節: コラボは会場・それ以外は受付中の約束（見出しは audit:page の目印と対）",
+    fn: () =>
+      `${storeSectionCopyEn("collabo_cafe").heading}|${storeSectionCopyEn("nyuka_now").heading.includes("accepting entries")}`,
+    want: "📍 Venues|true",
+  },
+  {
+    name: "EN受付ラベル: 絶対表記のまま出す（本日/明日への置換をしない＝保存物が古びても嘘にならない）",
+    fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "〜8/8 22:00", note: null, at: "2026-08-08", kind: "締切" }, calendarDate(2026, 8, 8)),
+    want: "〜8/8 22:00",
+  },
+  {
+    name: "EN受付ラベル: 開始が未来なら not open yet を添える（受付中と同じ顔で並べない）",
+    fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, calendarDate(2026, 8, 8)),
+    want: "8/20 00:00〜 (not open yet)",
+  },
+  {
+    name: "EN受付ラベル: 開始が過去なら何も足さない",
+    fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "7/8 12:00〜", note: null, at: "2026-07-08", kind: "開始" }, calendarDate(2026, 8, 8)),
+    want: "7/8 12:00〜",
+  },
+  {
+    name: "EN公式ボタン: 実売内容を確認できた時だけ販売内容を約束（JAと同じ強さ）",
+    fn: () =>
+      `${officialUrlLabelEn("公式販売：グッズ 500〜3,000円", "collabo_cafe").includes("sale details")}|` +
+      `${officialUrlLabelEn(null, "collabo_cafe")}|${officialUrlLabelEn(null, "figisland_pb")}`,
+    want: "true|View official page →|View on Premium Bandai →",
   },
   {
     name: "入手経路: Amazonでも /dp/ 以外（検索結果URL）には出さない",

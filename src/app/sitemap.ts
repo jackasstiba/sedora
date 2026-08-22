@@ -26,6 +26,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     // 扱われる（広告審査でも見られる面）。
     { url: `${base}/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     { url: `${base}/en/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
+    // 英語版の固定ガイド（海外読者の入口ページ）。
+    { url: `${base}/en/how-to-buy`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
+    // ※ /en/items/* は sitemap に載せない（v1判断）: 本文の大半が日本語原文のまま＝
+    //   薄い英語ページを2千件申告しない。hreflang は日英の items ページが双方向で宣言済みなので、
+    //   検索エンジンへの対応付けはそちらで足りる。EN詳細の英語化が進んだら追加を再検討。
   ];
 
   for (const g of genres) {

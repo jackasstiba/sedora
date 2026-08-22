@@ -79,7 +79,10 @@ export default async function HomeEn() {
           🛒 Online (JP) = ordered or entered on an official Japanese online store or draw
           platform. Most of them ship within Japan only; overseas collectors commonly order
           through proxy/forwarding services. Items without the tag are unverified — many are
-          in-store only.
+          in-store only.{" "}
+          <a href="/en/how-to-buy" className="font-semibold text-rose-600 hover:underline dark:text-rose-400">
+            How to buy from Japan →
+          </a>
         </p>
       </header>
 

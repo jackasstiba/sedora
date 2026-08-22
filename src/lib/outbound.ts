@@ -73,6 +73,18 @@ export function officialUrlLabel(
     : "公式ページを見る →";
 }
 
+/** officialUrlLabel の英語版（/en）。約束の強さの規則は日本語と同一:
+ *  実売内容を確認できた時だけ「販売内容」を約束し、そうでなければ「公式ページ」に留める。 */
+export function officialUrlLabelEn(
+  highlights: string | null | undefined,
+  source?: string
+): string {
+  if (source === "figisland_pb") return "View on Premium Bandai →";
+  return hasVerifiedSaleContent(highlights)
+    ? "See sale details on the official page →"
+    : "View official page →";
+}
+
 // タイトルが商品名として市場検索に使えるソース。
 // Xミラー(channeltono/rarecheck)やイベント(collabo_cafe)は「7月28日10時より…販売開始」等の
 // 文章タイトルで、そのまま検索すると無関係な結果になるため購入導線を出さない。
