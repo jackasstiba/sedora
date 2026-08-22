@@ -1778,17 +1778,20 @@ const cases: Case[] = [
   },
   {
     // 月別ページの「未定」セクションは、読者に見えている見出し（h1）の月を月精度で持たせる。
-    // 日は作らない（eventDate は null のまま）。観点A実測 2026-08-20（#68180: 収集元の
-    // 商品ページは「発売日 2026年11月未定」なのに、こちらは「日付未定」で出していた）。
+    // 観点A実測 2026-08-20（#68180: 収集元の商品ページは「発売日 2026年11月未定」なのに、
+    // こちらは「日付未定」で出していた）。eventDate は monthPlanDate の規約で未来月＝月初
+    // （表示は「YYYY年M月」のまま＝日は出ない）。当月なら null のまま。
     name: "torecasoku: 未定セクションはページの月を月精度で持たせる",
     fn: () => {
       const html =
         '<h1 class="entry-titlekiji">2026年11月1日 ～ 11月30日 発売一覧</h1>' +
         '<ul class="goods_list"><li class="releasedate-section" data-release="20261132">▼ 未定 商品を表示 ▼</li>' +
         '<li class="goods_info"><div class="group_parent"><div class="title"><a href="/tcg/archives/1">テスト商品パック</a></div></div></li></ul>';
-      return parseTorecasokuList(html).map((i) => `${i.eventDate}|${i.eventDateText}`).join(";");
+      return parseTorecasokuList(html, new Set(), today)
+        .map((i) => `${ymd(i.eventDate)}|${i.eventDateText}`)
+        .join(";");
     },
-    want: "null|2026年11月発売予定",
+    want: "2026-11-01|2026年11月発売予定",
   },
   {
     // 鳴らない側①: 月は h1 の表示文言からだけ作る。h1 が月の形でなければ何も足さない
@@ -1914,15 +1917,17 @@ const cases: Case[] = [
   {
     // 実測: 表示は「2026.10」なのに datetime="2026-10-01" と**サイト側が日を合成**している。
     // 属性でなく表示文言で精度を決める（ミス15「分かっている精度でしか書かない」）。
+    // eventDate は**表示文言の月**から monthPlanDate の規約で月初を持たせる（属性は読まない。
+    // eventDateText が月精度のままなので表示に日は出ない）。
     name: "onepiece: 表示が月精度なら datetime の合成日を信じない",
     fn: () => {
       const p = parseOnePieceProducts(
         '<a href="/products/eb05/" class="linkListColItem"><h4 class="linkListColTitle">EB-05</h4><time class="newsDate" datetime="2026-10-01">2026.10</time></a>'
       )[0];
       const row = p ? buildOnePieceItem(p, today) : null;
-      return row ? `${row.eventDate}|${row.eventDateText}` : null;
+      return row ? `${ymd(row.eventDate)}|${row.eventDateText}` : null;
     },
-    want: "null|2026年10月発売予定",
+    want: "2026-10-01|2026年10月発売予定",
   },
   {
     name: "onepiece: 発売30日超の過去商品は載せない（全期間一覧のため）",

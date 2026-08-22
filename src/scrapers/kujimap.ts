@@ -1,6 +1,6 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
-import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
+import { fetchHtml, monthPlanDate, parseJapaneseFullDate, sleep } from "./util";
 import { cleanStoreUrl, stripTags } from "./aggregatorUtil";
 
 // くじびき全国マップ（kujimap.com）: 一番くじ以外のくじブランド
@@ -139,6 +139,7 @@ export function buildKujimapItem(
   if (!detail.officialUrl) return null; // url は「公式ページ」と表示するため必須
 
   // 発売日が7日以上過去のくじは載せない（サイトマップは古いページのlastmod更新も拾うため）。
+  let monthDate: Date | null = null; // 月精度の月初（monthPlanDate の規約。当月なら null）
   if (detail.date) {
     const age = (reference.getTime() - detail.date.getTime()) / 86_400_000;
     if (age > 7) return null;
@@ -148,6 +149,9 @@ export function buildKujimapItem(
     if (ym) {
       const endOfMonth = new Date(Date.UTC(Number(ym[1]), Number(ym[2]), 0));
       if (endOfMonth.getTime() < reference.getTime()) return null;
+      // 未来月なら月初を持たせる（並び順・「発売中」への誤混入防止）。日は作らない＝
+      // 表示は「YYYY年M月」のまま（date_fabricated_precision の約束）。
+      monthDate = monthPlanDate(Number(ym[1]), Number(ym[2]), reference);
     }
   } else {
     return null; // 日付が全く読めないページは載せない
@@ -170,7 +174,7 @@ export function buildKujimapItem(
     genre: "くじ",
     subGenre: BRANDS[m[1]] === "くじ" ? null : BRANDS[m[1]],
     eventType: "発売",
-    eventDate: detail.date,
+    eventDate: detail.date ?? monthDate,
     eventDateText: detail.date ? null : detail.monthText,
     price: null,
     url: detail.officialUrl,

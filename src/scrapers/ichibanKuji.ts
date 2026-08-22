@@ -1,7 +1,16 @@
 import { ScrapedItem } from "./types";
-import { jstYearMonth } from "../lib/date";
+import { jstYearMonth, todayJst } from "../lib/date";
 import { extractKujiFee, extractKujiPrizes, extractKujiStores, formatKujiHighlights } from "./ichibanKujiEnrich";
-import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
+import { fetchHtml, monthPlanDate, parseJapaneseFullDate, parseJapaneseYearMonth, sleep } from "./util";
+
+// 「2026年09月下旬発売予定」のような月精度は monthPlanDate の規約で月初を持たせる
+// （当月なら null）。日は作らない＝表示は「2026年9月」のまま（date_fabricated_precision の約束）。
+function kujiDate(dateText: string): Date | null {
+  const full = parseJapaneseFullDate(dateText);
+  if (full) return full;
+  const ym = parseJapaneseYearMonth(dateText);
+  return ym ? monthPlanDate(ym.getUTCFullYear(), ym.getUTCMonth() + 1, todayJst()) : null;
+}
 
 // 一番くじ倶楽部（BANDAI SPIRITS公式）のラインナップ。フィギュア景品・ラストワン賞は
 // せどり/転売の二次相場が高い定番ジャンル。各商品に店頭/オンラインの発売日が入る。
@@ -52,7 +61,7 @@ export async function scrapeIchibanKuji(): Promise<ScrapedItem[]> {
         genre: "一番くじ",
         subGenre: null,
         eventType: "発売",
-        eventDate: dateText ? parseJapaneseFullDate(dateText) : null,
+        eventDate: dateText ? kujiDate(dateText) : null,
         eventDateText: dateText,
         price: null,
         url: `https://1kuji.com/products/${slug}`,

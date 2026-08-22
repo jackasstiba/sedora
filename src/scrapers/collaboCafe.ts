@@ -16,7 +16,9 @@ import {
   classifyGenre,
   extractDateAndEventFromText,
   fetchHtml,
+  monthPlanDate,
   parseJapaneseFullDate,
+  parseJapaneseYearMonth,
   sleep,
 } from "./util";
 import { crawlPages } from "./crawl";
@@ -116,7 +118,14 @@ function parseArticle(block: string): ScrapedItem | null {
   // 例: 「期間 : 2026年7月24日〜8月31日」→ 開始日をイベント日に、テキストは範囲を残す
   const periodRaw = block.match(/event-date[^>]*>([^<]*)</)?.[1] ?? "";
   const period = periodRaw.replace(/^\s*期間\s*[:：]\s*/, "").trim();
-  const eventDate = parseJapaneseFullDate(period) ?? extractDateAndEventFromText(title).date;
+  // 「2026年10月発売予定」のような月精度は monthPlanDate の規約で月初を持たせる
+  // （当月＝月初が過去なら null のまま）。日は作らない＝表示は「2026年10月」のまま。
+  // これが無いと未来月の物販が eventDate=null で「発売中」ビューに混ざる（実測 2026-08-22: 94件）。
+  const ym = parseJapaneseYearMonth(period);
+  const eventDate =
+    parseJapaneseFullDate(period) ??
+    extractDateAndEventFromText(title).date ??
+    (ym ? monthPlanDate(ym.getUTCFullYear(), ym.getUTCMonth() + 1, todayJst()) : null);
 
   // くじ・グッズは「物販」なので、コラボ一括ではなく中身でジャンル判定し「発売」にする。
   // （例: 一番くじ商品が genre=コラボ / eventType=開催 になっていた分類ズレの修正）

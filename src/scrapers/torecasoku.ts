@@ -1,7 +1,7 @@
 import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
-import { jstYearMonth } from "../lib/date";
-import { fetchHtml, parseYyyymmdd, sleep } from "./util";
+import { jstYearMonth, todayJst } from "../lib/date";
+import { fetchHtml, monthPlanDate, parseYyyymmdd, sleep } from "./util";
 import { isSuspectPackPrice } from "../lib/margin";
 
 // トレカ速報（ota-goods.info）のTCG発売日カレンダー。
@@ -54,7 +54,11 @@ function classifyTorecasokuGenre(title: string): string {
 }
 
 /** 月別ページ1枚から商品行を取り出す（純関数・selftest対象）。 */
-export function parseTorecasokuList(html: string, seen: Set<string> = new Set()): ScrapedItem[] {
+export function parseTorecasokuList(
+  html: string,
+  seen: Set<string> = new Set(),
+  reference = todayJst()
+): ScrapedItem[] {
   const items: ScrapedItem[] = [];
   const $ = cheerio.load(html);
 
@@ -64,10 +68,13 @@ export function parseTorecasokuList(html: string, seen: Set<string> = new Set())
   // 言っているのに、こちらは日付ごと捨てて「日付未定」で出していた。月は読者に見えている
   // 見出し「2026年11月1日 ～ 11月30日 発売一覧」から作る（data-release 属性の月
   // "20261132" からは作らない＝日付は表示文言から作る規約・ミス38）。
-  // 日は作らない（eventDate は null のまま＝date_fabricated_precision と同じ約束）。
+  // 日は作らない＝表示は「YYYY年M月」のまま（date_fabricated_precision の約束）。並び順の
+  // ための eventDate は monthPlanDate の規約（未来月＝月初・当月＝null）で月精度に持たせる。
+  // これが無いと未来月ページの「未定」行が「発売中」ビューに混ざる。
   const h1 = $("h1").first().text().replace(/\s+/g, " ").trim();
   const hm = h1.match(/(\d{4})年\s*(\d{1,2})月\s*\d{1,2}日\s*[～〜]/);
   const pageMonthText = hm ? `${hm[1]}年${Number(hm[2])}月発売予定` : null;
+  const pageMonthDate = hm ? monthPlanDate(Number(hm[1]), Number(hm[2]), reference) : null;
 
   // 日付ヘッダと商品が同列に並ぶ本体リストだけを対象にする（releasedate-section を含む ul）。
   $("ul.goods_list")
@@ -96,6 +103,7 @@ export function parseTorecasokuList(html: string, seen: Set<string> = new Set())
               currentDateText = currentDate
                 ? $li.text().replace(/\s+/g, " ").trim() || null
                 : pageMonthText;
+              if (!currentDate) currentDate = pageMonthDate; // 未定セクション＝月精度
               return;
             }
             if (!$li.hasClass("goods_info")) return;

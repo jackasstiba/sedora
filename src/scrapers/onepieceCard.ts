@@ -1,6 +1,6 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
-import { fetchHtml } from "./util";
+import { fetchHtml, monthPlanDate } from "./util";
 import { stripTags } from "./aggregatorUtil";
 
 // ONE PIECEカードゲーム公式（onepiece-cardgame.com）の商品ラインナップ。
@@ -71,6 +71,7 @@ export function parseOnePieceProducts(html: string): OnePieceProduct[] {
 
 /** 掲載判定＋行の組み立て（純関数・selftest対象）。 */
 export function buildOnePieceItem(p: OnePieceProduct, reference = todayJst()): ScrapedItem | null {
+  let monthDate: Date | null = null; // 月精度の月初（monthPlanDate の規約。当月なら null）
   if (p.date) {
     const age = (reference.getTime() - p.date.getTime()) / 86_400_000;
     if (age > RECENT_DAYS) return null;
@@ -79,6 +80,9 @@ export function buildOnePieceItem(p: OnePieceProduct, reference = todayJst()): S
     if (!ym) return null;
     const endOfMonth = new Date(Date.UTC(Number(ym[1]), Number(ym[2]), 0));
     if (endOfMonth.getTime() < reference.getTime()) return null;
+    // 未来月なら月初を持たせる（並び順・「発売中」への誤混入防止）。日は作らない＝
+    // 表示は「YYYY年M月」のまま（date_fabricated_precision の約束）。
+    monthDate = monthPlanDate(Number(ym[1]), Number(ym[2]), reference);
   } else {
     return null; // 発売日の無い行（発売済みアクセサリ等）は載せない
   }
@@ -97,7 +101,7 @@ export function buildOnePieceItem(p: OnePieceProduct, reference = todayJst()): S
     genre: "トレカ",
     subGenre: "ワンピースカード",
     eventType: "発売",
-    eventDate: p.date,
+    eventDate: p.date ?? monthDate,
     eventDateText: p.date ? null : p.monthText,
     price: p.price,
     url: p.url,

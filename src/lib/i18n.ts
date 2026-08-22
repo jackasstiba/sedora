@@ -88,7 +88,7 @@ export const UI = {
     whenLabel: "時期:",
     statusTabs: [
       { value: "", label: "すべて" },
-      { value: "now", label: "速報(いま買える)" },
+      { value: "now", label: "発売中" },
       { value: "reserve", label: "予約" },
       { value: "lottery", label: "抽選" },
       { value: "release", label: "発売・登場" },

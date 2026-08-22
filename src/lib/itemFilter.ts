@@ -1,6 +1,6 @@
 // サーバー(Prisma)とクライアント(ブラウザ内フィルタ)で共有する、絞り込みの純粋ロジック。
 // prisma を import しないこと（クライアントバンドルに載せるため）。
-import { isStalePlan, plannedDateFromText, todayJst } from "./date";
+import { isMonthPrecision, isStalePlan, plannedDateFromText, todayJst } from "./date";
 import { parseYen } from "./margin";
 import {
   parseStoresJson,
@@ -523,13 +523,20 @@ function dedupeSameSourceExact<T extends DedupeItem>(items: T[]): T[] {
  * 短いタイトル（実測「コービー 5」#27860/#27861）が検査も解消もされず、一覧に同じカードが
  * 2枚並んでいた。生タイトルが1文字違わず同じなら別商品ではありえないので、長さ条件なしで畳む。
  */
-function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
+function dedupeIdenticalTitle<T extends DedupeItem & { eventDateText?: string | null }>(
+  items: T[]
+): T[] {
   // 同一ソース・同一生タイトルでまず束ね、日付ごとの扱いはグループ内で決める。
   // 2026-08-15 実測: トレカ速報が同じ商品を「発売日 2026年11月未定」の旧記事と
   // 「11/21」の確定記事の両方で持ち続け（BS77・アイカツの2組）、day をキーに含む
   // 従来ロジックでは別グループになって二重掲載が残った。生タイトルが1字違わず同じで
   // 片方だけ日付なしなら、それは同じ商品の「月未定だった頃の記事」＝日付なし側を落とす。
   // 日付ありが複数（再販で別日）はどちらも本物なので温存する。
+  //
+  // 「月未定だった頃の記事」は eventDate=null とは限らない（2026-08-22: 月精度の行も
+  // monthPlanDate の規約で月初の eventDate を持つようになった）。月精度の日付は
+  // 「日付なし」と同格に扱い、日精度の確定版があればそちらへ畳む。月初という合成日を
+  // 確定日と同列に「別日＝再販」と読むと、同じ商品が2枚並ぶ（audit の二重掲載で実測）。
   const groups = new Map<string, T[]>();
   for (const it of items) {
     const k = `${it.source}|${it.title}`;
@@ -538,8 +545,8 @@ function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
   const drop = new Set<number>();
   for (const g of groups.values()) {
     if (g.length < 2) continue;
-    const dated = g.filter((it) => it.eventDate);
-    const dateless = g.filter((it) => !it.eventDate);
+    const dated = g.filter((it) => it.eventDate && !isMonthPrecision(it.eventDateText ?? null));
+    const dateless = g.filter((it) => !it.eventDate || isMonthPrecision(it.eventDateText ?? null));
 
     // 日付ありは同じ日どうしだけ畳む（別日＝再販は温存）
     const byDay = new Map<string, T[]>();
@@ -571,7 +578,22 @@ function dedupeIdenticalTitle<T extends DedupeItem>(items: T[]): T[] {
         drop.add(it.id);
       }
     } else {
-      collapse(dateless);
+      // 日精度が無いグループ。月精度どうしは同じ月（＝同じ月初）だけ畳む（別月＝再販は温存）。
+      const byMonth = new Map<string, T[]>();
+      for (const it of dateless) {
+        const key = it.eventDate ? dayISO(it.eventDate) : "none";
+        (byMonth.get(key) ?? byMonth.set(key, []).get(key)!).push(it);
+      }
+      for (const sub of byMonth.values()) collapse(sub);
+      // 月精度版が残っているなら、真の日付なし版は同じ商品の「月も未定だった頃の記事」＝畳む。
+      const monthKeep = dateless.find((it) => it.eventDate && !drop.has(it.id));
+      if (monthKeep) {
+        for (const it of byMonth.get("none") ?? []) {
+          if (drop.has(it.id)) continue;
+          inheritEnrichment(monthKeep, it);
+          drop.add(it.id);
+        }
+      }
     }
   }
   return drop.size ? items.filter((it) => !drop.has(it.id)) : items;
