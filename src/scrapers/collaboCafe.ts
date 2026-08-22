@@ -10,7 +10,9 @@ import {
   extractOfficialUrl,
   formatOfficialItems,
   formatSale,
+  parseShopifyOfficialItems,
   pickVerifiedEventDate,
+  shopifyJsonUrl,
 } from "./collaboEnrich";
 import {
   classifyGenre,
@@ -229,13 +231,19 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
       item.officialUrl = official;
       let saleText: string | null = null;
       if (official) {
-        const officialHtml = await fetchOfficial(official);
-        if (officialHtml) {
-          const officialItems = extractOfficialItems(official, officialHtml);
-          if (officialItems) saleText = formatOfficialItems(officialItems);
-          if (!saleText) {
-            const sale = extractOfficialSale(officialHtml);
-            if (sale) saleText = formatSale(sale);
+        // ① Shopify の公開JSON（URLの形で判断・JSONが返れば自己検証済み）＝最も正確。
+        const shopItems = await fetchShopifyItems(official);
+        if (shopItems) saleText = formatOfficialItems(shopItems);
+        if (!saleText) {
+          const officialHtml = await fetchOfficial(official);
+          if (officialHtml) {
+            // ② サイト別パーサ（rakuspa等） ③ 価格帯だけのフォールバック
+            const officialItems = extractOfficialItems(official, officialHtml);
+            if (officialItems) saleText = formatOfficialItems(officialItems);
+            if (!saleText) {
+              const sale = extractOfficialSale(officialHtml);
+              if (sale) saleText = formatSale(sale);
+            }
           }
         }
         await sleep(300);
@@ -256,6 +264,18 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
 
   // 深掘りした行だけを返す（上のコメント参照＝返さない行はDBでそのまま残る）。
   return enrichTargets;
+}
+
+/**
+ * 公式URLが Shopify の形なら公開JSONを取り、{商品名, 価格} を返す（そうでなければ null）。
+ * 取りに行くのは URL が `/collections/…` か `/products/…` のときだけ＝無駄打ちしない。
+ * JSONが返らなければ Shopify ではないので null（＝HTMLのパーサへ落ちる）。
+ */
+async function fetchShopifyItems(url: string): Promise<{ name: string; price: number }[] | null> {
+  const jsonUrl = shopifyJsonUrl(url);
+  if (!jsonUrl) return null;
+  const body = await fetchOfficial(jsonUrl);
+  return body ? parseShopifyOfficialItems(body) : null;
 }
 
 // 公式サイトは各社バラバラ（遅い/SPA/別文字コード）なので、タイムアウトを付けて

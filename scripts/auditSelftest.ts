@@ -109,7 +109,14 @@ const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, officialUrlLabelEn, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
-import { extractMapUrl, extractOfficialUrl, isSingleProductUrl } from "../src/scrapers/collaboEnrich";
+import {
+  extractMapUrl,
+  extractOfficialUrl,
+  formatOfficialItems,
+  isSingleProductUrl,
+  parseShopifyOfficialItems,
+  shopifyJsonUrl,
+} from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
 import { figislandListPlaceholder } from "../src/scrapers/figisland";
@@ -119,7 +126,7 @@ import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/s
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { parseCardChusen, parseDue, productKey, splitSaleConditions } from "../src/scrapers/cardChusen";
-import { buildSaleUnits, groupSaleUnits, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
+import { buildSaleUnits, groupSaleUnits, isBundlePriced, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { parseTorecasokuList } from "../src/scrapers/torecasoku";
 import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
@@ -4395,6 +4402,83 @@ const cases: Case[] = [
     name: "ENカタログ: 未知の slug では店を返さない（存在しないページを作らない）",
     fn: () => enCatalogStoreBySlug("no-such-store"),
     want: null,
+  },
+  // ── Phase 3c続き: 公式ページが Shopify なら公開JSONで商品名＋価格を取る ──
+  {
+    // ホストを決め打ちせず**URLの形**で判断する（コラボの officialUrl は198ホストに散っている）。
+    name: "Shopify判定: コレクションと単品はJSONを取りに行く・検索結果とトップは行かない",
+    // ※ null を join すると空文字になって「取りに行かない」と「空を返した」が
+    //   出力上で区別できなくなるので、String() を通してから並べる。
+    fn: () =>
+      [
+        shopifyJsonUrl("https://anime-store.jp/collections/touhou-project-goods"),
+        shopifyJsonUrl("https://anime-store.jp/products/4570194419828"),
+        shopifyJsonUrl("https://anime-store.jp/search?type=product&q=x"),
+        shopifyJsonUrl("https://anime-store.jp/"),
+        shopifyJsonUrl("not a url"),
+      ]
+        .map(String)
+        .join("\n"),
+    want: [
+      "https://anime-store.jp/collections/touhou-project-goods/products.json?limit=250",
+      "https://anime-store.jp/products/4570194419828.js",
+      "null",
+      "null",
+      "null",
+    ].join("\n"),
+  },
+  {
+    name: "Shopify取得: 一覧(products.json)は価格が円単位のまま",
+    fn: () => {
+      const items = parseShopifyOfficialItems(
+        JSON.stringify({ products: [{ title: "『東方Project』缶バッジ12", variants: [{ price: "3300" }] }] })
+      );
+      return `${items?.[0].name}=${items?.[0].price}`;
+    },
+    want: "『東方Project』缶バッジ12=3300",
+  },
+  {
+    // 🔴 単位の罠: 単品(.js)の price は**銭**（3300円 → 330000）。取り違えると価格が100倍になる。
+    name: "Shopify取得: 単品(.js)の価格は銭単位なので円に直す（100倍の嘘を出さない）",
+    fn: () => {
+      const items = parseShopifyOfficialItems(
+        JSON.stringify({ title: "『ホロライブ』PalVerse Pale. 星街すいせい", price: 330000, variants: [{ price: "3300" }] })
+      );
+      return `${items?.[0].name}=${items?.[0].price}`;
+    },
+    want: "『ホロライブ』PalVerse Pale. 星街すいせい=3300",
+  },
+  {
+    name: "Shopify取得: HTMLが返ったら null（＝Shopifyでないので他のパーサへ落とす）",
+    fn: () => parseShopifyOfficialItems("<!doctype html><html></html>"),
+    want: null,
+  },
+  {
+    // 実測の再現: 公式コレクションに混ざるまとめ売りが「1個の値段」の顔で数万円出ていた。
+    name: "まとめ売り判定: BOX・◯種セットは1個の値段でない／通常の単品は対象外",
+    fn: () =>
+      `${isBundlePriced("『モノノ怪』アクスタ付き3種セット")}` +
+      `|${isBundlePriced("『モノノ怪』アクセサリー3種セット(アクリルスタンド付き)")}` +
+      `|${isBundlePriced("『クリィミーマミ』缶バッジ11/ブラインド(全5種)【BOX】")}` +
+      `|${isBundlePriced("『モノノ怪 第三章 蛇神』アクリル色紙/薬売り 離の剣")}`,
+    want: "true|true|true|false",
+  },
+  {
+    name: "公式販売の要約: まとめ売りを価格帯に混ぜない（1個の値段の顔で数万円を出さない）",
+    fn: () =>
+      formatOfficialItems([
+        { name: "『モノノ怪 第三章』アクリル色紙/薬売り", price: 1100 },
+        { name: "『モノノ怪』アクスタ付き3種セット", price: 22880 },
+        { name: "『モノノ怪』アクリルスタンド02", price: 1980 },
+      ]),
+    want: "公式販売: 色紙¥1,100 / アクリルスタンド¥1,980",
+  },
+  {
+    name: "Shopify取得: 商品0件・価格0の行は採らない（値段の無い行を並べない）",
+    fn: () =>
+      `${parseShopifyOfficialItems(JSON.stringify({ products: [] }))}` +
+      `|${parseShopifyOfficialItems(JSON.stringify({ products: [{ title: "X", variants: [{ price: "0" }] }] }))}`,
+    want: "null|null",
   },
   // ── Phase 3c: コラボ要約の書式（組み立て↔読み解き）と英語化 ──
   {

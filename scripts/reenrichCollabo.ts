@@ -20,7 +20,9 @@ import {
   formatVenueStores,
   formatOfficialItems,
   formatSale,
+  parseShopifyOfficialItems,
   pickVerifiedEventDate,
+  shopifyJsonUrl,
 } from "../src/scrapers/collaboEnrich";
 
 async function fetchOfficial(url: string): Promise<string | null> {
@@ -33,6 +35,14 @@ async function fetchOfficial(url: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+/** 公式URLが Shopify の形なら公開JSONから商品名＋価格を取る（collaboCafe と同じ判断）。 */
+async function fetchShopifyItems(url: string): Promise<{ name: string; price: number }[] | null> {
+  const jsonUrl = shopifyJsonUrl(url);
+  if (!jsonUrl) return null;
+  const body = await fetchOfficial(jsonUrl);
+  return body ? parseShopifyOfficialItems(body) : null;
 }
 
 async function main() {
@@ -70,13 +80,18 @@ async function main() {
       const official = extractOfficialUrl(html, { allowSingleProduct: it.eventType !== "開催" });
       let saleText: string | null = null;
       if (official) {
-        const oh = await fetchOfficial(official);
-        if (oh) {
-          const oi = extractOfficialItems(official, oh);
-          saleText = oi ? formatOfficialItems(oi) : null;
-          if (!saleText) {
-            const s = extractOfficialSale(oh);
-            if (s) saleText = formatSale(s);
+        // ① Shopify の公開JSON（最も正確） ② サイト別パーサ ③ 価格帯のみ、の順に落とす。
+        const shopItems = await fetchShopifyItems(official);
+        if (shopItems) saleText = formatOfficialItems(shopItems);
+        if (!saleText) {
+          const oh = await fetchOfficial(official);
+          if (oh) {
+            const oi = extractOfficialItems(official, oh);
+            saleText = oi ? formatOfficialItems(oi) : null;
+            if (!saleText) {
+              const s = extractOfficialSale(oh);
+              if (s) saleText = formatSale(s);
+            }
           }
         }
         await sleep(250);

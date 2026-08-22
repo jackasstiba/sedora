@@ -6,6 +6,7 @@ import {
   buildHighlights,
   type CollabMechanism,
 } from "../lib/collabHighlights";
+import { isBundlePriced } from "../lib/saleUnit";
 import { cleanStoreUrl } from "./aggregatorUtil";
 
 // コラボイベント記事の「本文」から、せどらーが最も欲しい情報＝抽選/ランダム/数量限定の
@@ -353,11 +354,83 @@ export function extractOfficialItems(
   return null;
 }
 
+// ── Shopify の公開JSON（ホストを決め打ちしない・URLの形で判断して自己検証する） ──────
+//
+// なぜ要るか（2026-08-22 実測）: コラボ593件の officialUrl は **198ホスト**に散っていて、
+// 135ホストは1件しか無い＝サイト別パーサを1本書いても効く範囲が小さい。ところが
+// **anime-store.jp だけで254件（最大）**あり、しかも Shopify だった。
+// 内訳: `/collections/…` 157件 ・ `/products/…` 25件 ・ `/search?…` 41件 ・ ルート 31件。
+//
+// 設計:
+//  ・**ホストの allowlist を作らない。** Shopify は URL の形（/collections/ か /products/）と
+//    公開JSONの有無で**自己検証できる**（JSONが返って商品が入っていれば Shopify）。
+//    こうすると、長い尾に混じった他の Shopify 公式ストアにも自動で効く。
+//  ・**検索結果URL（/search）とトップは対象外。** 「その頁に並んでいる商品」と言えないため
+//    （楽天の検索結果URLを購入導線として約束しない、と同じ理由）。
+//  ・コレクションは**シリーズ単位のことがある**（実測: `cho-kaguyahime-goods` は43件、
+//    当該コラボ以外の再販も含む）。だから画面のラベルは「この頁に載っている商品」であって
+//    「このコラボのラインナップ」とは書かない（EN: "Listed on the official page"）。
+
+/** 公式URL → Shopify の公開JSONのURL（形が違えば null＝取りに行かない）。純関数・selftest対象。 */
+export function shopifyJsonUrl(url: string): string | null {
+  let u: URL;
+  try {
+    u = new URL(url);
+  } catch {
+    return null;
+  }
+  const seg = u.pathname.split("/").filter(Boolean);
+  if (seg.length >= 2 && seg[0] === "collections") {
+    // 商品一覧（コレクション）。?limit=250 は Shopify の上限。
+    return `${u.origin}/collections/${encodeURIComponent(seg[1])}/products.json?limit=250`;
+  }
+  if (seg.length >= 2 && seg[0] === "products") {
+    // 単品ページ。**この形がいちばん正確**（その商品そのものの名前と価格）。
+    return `${u.origin}/products/${encodeURIComponent(seg[1])}.js`;
+  }
+  return null; // /search・ルート・その他＝「並んでいる商品」と言えない
+}
+
+type ShopifyJson = {
+  products?: { title?: string; variants?: { price?: string | number }[] }[];
+  title?: string;
+  price?: number; // 単品(.js)は**銭単位**（3300円 → 330000）
+  variants?: { price?: string | number }[];
+};
+
+/** Shopify の公開JSONから {商品名, 価格} を取る。JSONでない/商品が無ければ null（自己検証）。 */
+export function parseShopifyOfficialItems(body: string): { name: string; price: number }[] | null {
+  let j: ShopifyJson;
+  try {
+    j = JSON.parse(body) as ShopifyJson;
+  } catch {
+    return null; // HTMLが返った＝Shopifyではない
+  }
+  const out: { name: string; price: number }[] = [];
+  if (Array.isArray(j.products)) {
+    for (const p of j.products) {
+      const name = (p.title ?? "").replace(/\s+/g, " ").trim();
+      const price = Number(p.variants?.[0]?.price ?? 0); // 一覧(products.json)は**円単位**
+      if (name && Number.isFinite(price) && price > 0) out.push({ name, price });
+    }
+  } else if (j.title) {
+    // 単品(.js)。price は銭単位なので100で割る（一覧と単位が違う＝ここを間違えると100倍になる）。
+    const name = j.title.replace(/\s+/g, " ").trim();
+    const sen = Number(j.price ?? j.variants?.[0]?.price ?? 0);
+    const price = Math.round(sen / 100);
+    if (name && Number.isFinite(price) && price > 0) out.push({ name, price });
+  }
+  return out.length ? out : null;
+}
+
 /** 公式の商品を賞品カテゴリ（タオル/缶バッジ等）＋価格帯に正規化して要約。
  *  例: "公式販売: タオル¥1,430 / 缶バッジ¥550 / アクスタ¥880〜1,540 …" */
 export function formatOfficialItems(items: { name: string; price: number }[]): string | null {
   const buckets = new Map<string, { min: number; max: number }>();
   for (const it of items) {
+    // まとめ売り（BOX・◯種セット）は**1個の値段ではない**ので、種別ごとの価格帯に混ぜない。
+    // 混ぜると「アクスタ ¥22,880」のように1個の値段の顔で数万円が出る（実測・saleUnit.ts 参照）。
+    if (isBundlePriced(it.name)) continue;
     const key = GOODS_NOUNS.find((n) => it.name.includes(n));
     if (!key) continue; // 賞品名詞に紐づかない行（雑多/雛形）は要約に載せない
     const b = buckets.get(key);
