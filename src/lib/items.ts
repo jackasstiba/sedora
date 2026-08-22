@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
+import { JP_SCOPE_WHERE } from "./scope";
 import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeItems, sortByEventDate, type ItemStatus, type ItemWhen } from "./itemFilter";
 
 // 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
@@ -21,6 +22,7 @@ export type ItemFilter = {
 export async function getGenres(): Promise<{ genre: string; count: number }[]> {
   const rows = await prisma.item.groupBy({
     by: ["genre"],
+    where: JP_SCOPE_WHERE, // EN専用行を数えない（ジャンルの件数はJP面の顔）
     _count: true,
     orderBy: { _count: { genre: "desc" } },
   });
@@ -30,6 +32,7 @@ export async function getGenres(): Promise<{ genre: string; count: number }[]> {
 export async function getSources(): Promise<{ source: string; count: number }[]> {
   const rows = await prisma.item.groupBy({
     by: ["source"],
+    where: JP_SCOPE_WHERE,
     _count: true,
     orderBy: { _count: { source: "desc" } },
   });
@@ -38,7 +41,8 @@ export async function getSources(): Promise<{ source: string; count: number }[]>
 
 export async function getItems(filter: ItemFilter) {
   const where: Prisma.ItemWhereInput = {};
-  const and: Prisma.ItemWhereInput[] = []; // OR グループを複数持つため AND で束ねる
+  // OR グループを複数持つため AND で束ねる。EN専用行（scope="en"）はJP面に出さない。
+  const and: Prisma.ItemWhereInput[] = [JP_SCOPE_WHERE];
   if (filter.genre) where.genre = filter.genre;
   if (filter.source) where.source = filter.source;
   if (filter.query) where.title = { contains: filter.query };

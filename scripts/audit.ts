@@ -40,6 +40,7 @@ import { parsePrizesJson } from "../src/lib/prizes";
 import { GENRE_TO_GOOGLE_CATEGORY } from "../src/lib/productCategory";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
+import { enScopeLeaks } from "../src/lib/scope";
 import { countWatchlist } from "../src/lib/watchlist";
 import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
@@ -178,6 +179,22 @@ async function main() {
     const upcoming = all.filter((r) => !r.eventDate || r.eventDate >= today);
     const missing = upcoming.filter((r) => !byId.has(r.id));
     console.log(`(参考) 今後＋日付未定 ${upcoming.length}件のうち、どのページにも出ないもの ${missing.length}件（重複解消・非商品投稿の除外を含む）`);
+  }
+
+  // (0a) EN専用スコープの漏れ（Phase 3a・2026-08-22）。scope="en"（EN専用カタログ行）は
+  //      EN_ONLY_PAGES（3bで /en/catalog を登録）以外のどのページにも出てはいけない。
+  //      取得クエリ側の JP_SCOPE_WHERE の**適用漏れ**（新しいページ関数がフィルタを忘れる型）を
+  //      ここで捕まえる。鳴る側/鳴らない側は audit:selftest で固定済み。
+  {
+    const leaks = enScopeLeaks(pages);
+    report(
+      "en_scope_leak",
+      "EN専用行(scope=en)がJP面のページに漏れている",
+      "error",
+      leaks,
+      baseline,
+      pages.reduce((n, p) => n + p.rows.length, 0)
+    );
   }
 
   // (1) 整形後タイトルに残る実況の断片。

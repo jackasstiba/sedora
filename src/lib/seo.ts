@@ -11,6 +11,7 @@ import {
   withLiveStoreDeadline,
 } from "./itemFilter";
 import { computeMargin } from "./margin";
+import { JP_SCOPE_WHERE } from "./scope";
 import { franchiseAliases, franchiseLabel } from "./franchise";
 import { cleanListTitle } from "./title";
 import { buildSaleUnits, groupSaleUnits } from "./saleUnit";
@@ -42,7 +43,10 @@ export async function getSaleUnits(item: {
     // 同じ収集元の「同じ発売日の行」＋「日付なしの行」だけを見る。日付なしを外すと、
     // 実測のトレカ速報 `…(BOX=8)` のように**単位表記側だけ日付を持たない**組を取り逃がす。
     // 束ねてよいかの判断（別の回を混ぜない）は groupSaleUnits が一覧と同じ規則で行う。
-    where: { source: item.source, OR: [{ eventDate: item.eventDate as Date }, { eventDate: null }] },
+    where: {
+      source: item.source,
+      AND: [{ OR: [{ eventDate: item.eventDate as Date }, { eventDate: null }] }, JP_SCOPE_WHERE],
+    },
     select: { id: true, source: true, title: true, price: true, url: true, eventDate: true, eventDateText: true },
     take: 600,
   });
@@ -87,7 +91,7 @@ export async function getRelatedItems(
     ? await prisma.item.findMany({
         where: {
           id: { notIn: [item.id, ...excludeIds] },
-          AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming],
+          AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming, JP_SCOPE_WHERE],
         },
         orderBy,
         take: take + 8, // dedupe で減る分を見込んで多めに取る
@@ -106,7 +110,7 @@ export async function getRelatedItems(
     need > 0
       ? dedupeItems(
           await prisma.item.findMany({
-            where: { genre: item.genre, id: { notIn: excluded }, ...upcoming },
+            where: { genre: item.genre, id: { notIn: excluded }, AND: [upcoming, JP_SCOPE_WHERE] },
             orderBy,
             take: need + 8,
           })
@@ -127,7 +131,7 @@ export async function getRelatedItems(
 export async function getItemsByGenre(genre: string, take = 1500) {
   const today = todayJst();
   const rows = await prisma.item.findMany({
-    where: { genre, OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+    where: { genre, AND: [{ OR: [{ eventDate: { gte: today } }, { eventDate: null }] }, JP_SCOPE_WHERE] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
     take,
   });
@@ -155,7 +159,7 @@ export async function getItemsByGenre(genre: string, take = 1500) {
  */
 export async function getPremiumItems(take = 200) {
   const rows = await prisma.item.findMany({
-    where: { marketPriceText: { not: null } },
+    where: { marketPriceText: { not: null }, AND: [JP_SCOPE_WHERE] },
     orderBy: { id: "desc" },
     take: 1000,
   });
@@ -205,6 +209,7 @@ export async function getLotteryItems(take = 300) {
           ],
         },
         { OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+        JP_SCOPE_WHERE,
       ],
     },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
@@ -248,14 +253,14 @@ export async function getItemsByMonth(month: string, take = 300) {
   //  この修正とは無関係な差分が出る）。2本目＝月をまたいで入ってくる行だけを足す。
   const [inMonthRows, spillRows] = await Promise.all([
     prisma.item.findMany({
-      where: { eventDate: { gte: range.start, lt: range.end } },
+      where: { eventDate: { gte: range.start, lt: range.end }, AND: [JP_SCOPE_WHERE] },
       orderBy: [{ eventDate: "asc" }, { id: "desc" }],
       take,
     }),
     // 締切が翌月以降にずれ込む「応募期間がこの月から始まっている」行。stores を持つ行
     // だけが幅を持つので、広げる範囲はそこに限る（無関係な翌月分を引き込まない）。
     prisma.item.findMany({
-      where: { eventDate: { gte: range.end, lt: lookahead }, stores: { not: null } },
+      where: { eventDate: { gte: range.end, lt: lookahead }, stores: { not: null }, AND: [JP_SCOPE_WHERE] },
       orderBy: [{ eventDate: "asc" }, { id: "desc" }],
       take: 200,
     }),
@@ -288,7 +293,7 @@ export function monthLabel(month: string): string {
  *  （getSitemapItemRefs が過去アイテムを除外しているのと同じ方針で整合させる）。 */
 export async function getMonthsWithItems(): Promise<string[]> {
   const rows = await prisma.item.findMany({
-    where: { eventDate: { not: null } },
+    where: { eventDate: { not: null }, AND: [JP_SCOPE_WHERE] },
     // stores を持つ行は応募期間に**幅**があり、開始月と締切月が違うことがある
     // （getItemsByMonth と同じ基準で月を数えないと、中身はあるのにサイトマップと
     //  内部リンクから漏れる月が生まれる）。
@@ -320,7 +325,7 @@ export async function getMonthsWithItems(): Promise<string[]> {
 
 /** 内部リンク用：ジャンル一覧（表示順を固定、未知ジャンルは末尾） */
 export async function getGenreList(): Promise<string[]> {
-  const rows = await prisma.item.groupBy({ by: ["genre"], _count: true });
+  const rows = await prisma.item.groupBy({ by: ["genre"], where: JP_SCOPE_WHERE, _count: true });
   const genres = rows.map((r) => r.genre);
   return genres.sort((a, b) => {
     const ia = GENRE_ORDER.indexOf(a);
@@ -339,7 +344,8 @@ export async function getSitemapItemRefs() {
   const grace = new Date(today);
   grace.setUTCDate(grace.getUTCDate() - 60); // 直近60日で終了した分は残す
   const rows = await prisma.item.findMany({
-    where: { OR: [{ eventDate: { gte: grace } }, { eventDate: null }] },
+    // EN専用行は sitemap にも申告しない（表示範囲の定義と揃える。8/10 の sitemap 事故と同じ理由）。
+    where: { AND: [{ OR: [{ eventDate: { gte: grace } }, { eventDate: null }] }, JP_SCOPE_WHERE] },
     select: {
       id: true,
       scrapedAt: true,

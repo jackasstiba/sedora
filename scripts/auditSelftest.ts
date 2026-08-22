@@ -31,6 +31,7 @@ import {
 } from "../src/lib/date";
 import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
 import { isOnlineItem } from "../src/lib/channel";
+import { enScopeLeaks, isJpScope } from "../src/lib/scope";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
   lastDeadline,
@@ -4310,6 +4311,27 @@ const cases: Case[] = [
         url: "https://www.amazon.co.jp/s?k=%E3%83%9D%E3%82%B1%E3%83%A2%E3%83%B3%E3%82%AB%E3%83%BC%E3%83%89",
       }),
     want: false,
+  },
+  // ── EN専用スコープ（Phase 3a・2026-08-22）: scope="en" はJP面に出たら鳴る・許可ページと通常行では鳴らない ──
+  {
+    name: "ENスコープ: scope=en がJP面のページに居たら漏れとして列挙（鳴る側）",
+    fn: () => enScopeLeaks([{ name: "/", rows: [{ id: 1, scope: "en" }, { id: 2, scope: null }] }]).join(","),
+    want: "/ #1",
+  },
+  {
+    name: "ENスコープ: scope=null/未設定（既存全行）はJP面でOK（鳴らない側）",
+    fn: () => enScopeLeaks([{ name: "/genre/フィギュア", rows: [{ id: 1, scope: null }, { id: 2 }] }]).length,
+    want: 0,
+  },
+  {
+    name: "ENスコープ: 許可ページ（EN_ONLY_PAGES 登録側）では scope=en でも鳴らない",
+    fn: () => enScopeLeaks([{ name: "/en/catalog", rows: [{ id: 3, scope: "en" }] }], new Set(["/en/catalog"])).length,
+    want: 0,
+  },
+  {
+    name: "ENスコープ: isJpScope は null/未設定/both=true・en=false（NULLをSQLのnotで落とさない境界と同じ意味論）",
+    fn: () => `${isJpScope(null)}|${isJpScope(undefined)}|${isJpScope("both")}|${isJpScope("en")}`,
+    want: "true|true|true|false",
   },
 ];
 

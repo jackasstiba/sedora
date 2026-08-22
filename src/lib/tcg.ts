@@ -1,6 +1,7 @@
 import { prisma } from "./prisma";
 import { todayJst } from "./date";
 import { dedupeItems, sortByEventDate } from "./itemFilter";
+import { JP_SCOPE_WHERE } from "./scope";
 
 // トレカを「タイトル別」（ポケカ / ワンピースカード / 遊戯王 …）に束ねるための定義。
 // DBにタイトル列は無く、データが源ごとに分散している（pokemoncard=ポケカ、
@@ -76,7 +77,7 @@ export function isTcgTitle(label: string): boolean {
 async function upcomingTcgRows() {
   const today = todayJst();
   const rows = await prisma.item.findMany({
-    where: { genre: "トレカ", OR: [{ eventDate: { gte: today } }, { eventDate: null }] },
+    where: { genre: "トレカ", AND: [{ OR: [{ eventDate: { gte: today } }, { eventDate: null }] }, JP_SCOPE_WHERE] },
     orderBy: [{ eventDate: { sort: "asc", nulls: "last" } }, { id: "desc" }],
   });
   // 他の一覧と同じ整理を通す。以前は dedupeCrossSource だけを呼んでいたため、語順違い・

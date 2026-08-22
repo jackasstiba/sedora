@@ -78,6 +78,11 @@ export const TEXT_COLOR_EXCEPTIONS: { file: string; cls: string; why: string }[]
     cls: "text-neutral-300",
     why: "賞品画像が無いときの 🎁 プレースホルダ。カラー絵文字は自分の色で描かれるので文字色はほぼ効かない（装飾であって読ませる文字ではない）。",
   },
+  {
+    file: "src/app/en/items/[id]/page.tsx",
+    cls: "text-neutral-300",
+    why: "上と同じ 🎁 プレースホルダのEN詳細版（2026-08-22 のEN商品詳細でJA側からコピーされた同一リテラル）。装飾絵文字なので読ませる文字ではない。",
+  },
 ];
 
 /** パス区切りの違い（Windows の \ ）を吸収して比較する。 */

@@ -12,7 +12,11 @@ import { createClient } from "@libsql/client";
 // 使い方: npm run db:alter [-- prisma/alter_sales_channel.sql ...]
 //   引数なしなら既知の alter ファイルを全部流す。
 
-const DEFAULT_FILES = ["prisma/alter_market_price.sql", "prisma/alter_sales_channel.sql"];
+const DEFAULT_FILES = [
+  "prisma/alter_market_price.sql",
+  "prisma/alter_sales_channel.sql",
+  "prisma/alter_scope.sql",
+];
 
 type Alter = { table: string; column: string; stmt: string };
 
