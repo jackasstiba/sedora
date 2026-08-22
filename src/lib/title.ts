@@ -107,12 +107,28 @@ export function stripDateNoticeTail(title: string): string {
 }
 
 /**
+ * **助詞の字で終わる固有名詞**。ここに載るものは「切れた痕跡」ではなく、それが名前の全体。
+ *
+ * 一般化して逃がさない（＝「末尾のひらがな3文字以上は名前とみなす」等にしない）: それだと
+ * 「〜からの」「〜について」のような本物の切れ残りまで黙って通す。**知っているものだけ**を、
+ * 理由と出どころを添えて1件ずつ載せる（[[System/rules_hatsukore]] の例外リストの約束と同じ）。
+ *
+ * ・風真いろは … ホロライブ5期生（秘密結社holoX）のタレント名。末尾の「は」は名前の一部。
+ *   実測 2026-08-22（Phase 3b で公式ショップのカタログを取り込んだ回）: この名前を持つ
+ *   グッズ4件が一斉に鳴った（`hololive friends with u 風真いろは` 等）。
+ */
+const PARTICLE_ENDING_PROPER_NOUNS = ["風真いろは"];
+
+/**
  * 表示タイトルが「文の途中で切れた痕跡」（末尾が宙ぶらりん助詞）に見えるか。audit (9) の判定。
  * 「〜もの」は助詞ではなく名詞語尾（実測 #118039「30MM DAEMON X MACHINA TS 名状しがたきもの」
  * ＝楽天165件で実在を裏取り済みの正規商品名）なので、末尾「の」でも鳴らさない。
+ * 助詞の字で終わる固有名詞（タレント名等）も鳴らさない＝ PARTICLE_ENDING_PROPER_NOUNS。
  */
 export function looksTruncatedTitle(clean: string): boolean {
-  return /[ぁ-ん一-龥][でにをはがのへ]$/.test(clean) && /\s/.test(clean) && !/もの$/.test(clean);
+  if (!/[ぁ-ん一-龥][でにをはがのへ]$/.test(clean) || !/\s/.test(clean)) return false;
+  if (/もの$/.test(clean)) return false;
+  return !PARTICLE_ENDING_PROPER_NOUNS.some((n) => clean.endsWith(n));
 }
 
 /**

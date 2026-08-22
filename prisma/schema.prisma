@@ -64,6 +64,12 @@ model Item {
   // src/lib/scope.ts の JP_SCOPE_WHERE を通すこと（漏れは audit `en_scope_leak` が落とす）。
   scope String?
 
+  // その出品が**収集元の店に並んだ日**（Shopify の published_at 等）。イベント日ではないので
+  // eventDate とは別列にする（画面の日付欄には出さない）。EN専用カタログ（/en/catalog）を
+  // 新着順に並べるために要る: id は「こちらが初めて見た順」なので、窓の外から後で
+  // カタログに落ちてくる行が必ず末尾に付き、店の並び順を復元できない。
+  storeListedAt DateTime?
+
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])

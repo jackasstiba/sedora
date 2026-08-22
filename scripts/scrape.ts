@@ -139,6 +139,12 @@ async function main() {
           salesChannel: item.salesChannel ?? null,
           prizes,
           stores: item.stores ?? null,
+          // 掲載スコープは**毎回の巡回で決め直す**（窓の内外を跨いだ行はその回で切り替わる）。
+          // 未設定のスクレイパーは null＝日英両方。undefined にすると「窓の外へ出た」行が
+          // scope="en" のまま JP に戻れなくなる。
+          scope: item.scope ?? null,
+          // 店に並んだ日。返さないスクレイパーでは既存値を消さない（?? undefined＝更新しない）。
+          storeListedAt: item.storeListedAt ?? undefined,
           scrapedAt: nowInstant(),
         },
       });

@@ -1,7 +1,7 @@
 import { prisma } from "./prisma";
 import type { Prisma } from "@/generated/prisma/client";
 import { todayJst } from "./date";
-import { JP_SCOPE_WHERE } from "./scope";
+import { EN_ONLY_SCOPE, JP_SCOPE_WHERE } from "./scope";
 import { STATUS_EVENT_TYPES, TBD_EVENT_TYPES, dedupeItems, sortByEventDate, type ItemStatus, type ItemWhen } from "./itemFilter";
 
 // 絞り込みの純粋ロジック・定数・型は prisma 非依存の itemFilter.ts に集約し、
@@ -115,6 +115,29 @@ export async function getItems(filter: ItemFilter) {
   // 日付順の面だけ並べ直す。応募先を持つ商品の表示日は dedupeItems の中で today 基準に
   // 作り直されるので、SQL の並びはその行だけ古い。新着順(RSS)はここを通さない。
   return filter.sort === "recent" ? deduped : sortByEventDate(deduped);
+}
+
+/**
+ * EN専用カタログ（`/en/catalog`）の行。**scope="en" だけ**を返す＝JP面とは母集団が交わらない。
+ *
+ * 何を並べているか: 公式ストアの一覧に**今も載っている**が、日本の読者にとっては新着ではない
+ * 在庫品（[[Projects/sedori_radar_en]] Phase 3）。
+ *
+ * 並び順は **店に並んだ日の新しい順**（`storeListedAt`）。`id`（＝こちらが初めて見た順）で
+ * 並べてはいけない: 実測 2026-08-22、初回取り込みは店の新着順に挿入されるので `id` 降順が
+ * **公開の古い順**になり、カタログの先頭が2021年の商品で埋まった。しかも窓の外から後で
+ * 落ちてくる行は必ず後の id を持つので、どちら向きに並べても店の順序は復元できない。
+ *
+ * 掲載の整理（重複解消・非商品投稿の除外）は一覧と同じ `dedupeItems` を通す。**ここで自前の
+ * 絞り込みを書かない**＝表示範囲の定義を1か所に揃える（src/lib/pages.ts のコメントと同じ理由）。
+ */
+export async function getEnCatalogItems(take = 2000) {
+  const rows = await prisma.item.findMany({
+    where: { scope: EN_ONLY_SCOPE },
+    orderBy: [{ storeListedAt: { sort: "desc", nulls: "last" } }, { id: "desc" }],
+    take,
+  });
+  return dedupeItems(rows);
 }
 
 /** 最終更新時刻（最新の scrapedAt）だけを返す。

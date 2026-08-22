@@ -21,9 +21,15 @@ type Props = {
   onChange: (patch: Partial<FilterValues>) => void;
   onClear: () => void;
   locale?: Locale;
+  /**
+   * カタログ面（/en/catalog）。**日付を持たない行だけ**が並ぶので、種別（予約/抽選/発売）・
+   * 時期（今週/今月）・「日付未定を隠す」は押しても必ず0件になる＝押せる空約束になる。
+   * 出さない（0件のジャンルチップを押せなくしているのと同じ理由）。
+   */
+  catalog?: boolean;
 };
 
-export function FilterBar({ genres, values, onChange, onClear, locale = "ja" }: Props) {
+export function FilterBar({ genres, values, onChange, onClear, locale = "ja", catalog = false }: Props) {
   // タブの value（フィルタの語彙）は言語に依らず同じ。文言だけ i18n の1箇所に置く。
   const t = UI[locale];
   const { genre, status, when, datedOnly } = values;
@@ -115,6 +121,7 @@ export function FilterBar({ genres, values, onChange, onClear, locale = "ja" }: 
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
+        {!catalog && (
         <div className="flex items-center gap-1.5">
           <span className="text-neutral-600 dark:text-neutral-400">{t.statusLabel}</span>
           {t.statusTabs.map((tab) => (
@@ -127,6 +134,8 @@ export function FilterBar({ genres, values, onChange, onClear, locale = "ja" }: 
             </button>
           ))}
         </div>
+        )}
+        {!catalog && (
         <div className="flex items-center gap-1.5">
           <span className="text-neutral-600 dark:text-neutral-400">{t.whenLabel}</span>
           {t.whenTabs.map((tab) => (
@@ -139,12 +148,15 @@ export function FilterBar({ genres, values, onChange, onClear, locale = "ja" }: 
             </button>
           ))}
         </div>
+        )}
+        {!catalog && (
         <button
           onClick={() => onChange({ datedOnly: !datedOnly })}
           className={pillClass(datedOnly, false)}
         >
           {t.hideUndated}
         </button>
+        )}
         {anyActive && (
           <button
             onClick={onClear}

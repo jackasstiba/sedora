@@ -84,6 +84,15 @@ export default async function HomeEn() {
             How to buy from Japan →
           </a>
         </p>
+        {/* このページは「締切のあるもの」だけ。日本の店に普通に並んでいる（＝日本人には
+            新着でない）Japan-only 品は別ページに分けてある（Phase 3b）。 */}
+        <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+          This page lists what is coming up. For Japan-only merch that is not a new release but
+          was still listed on the official store at our last check,{" "}
+          <a href="/en/catalog" className="font-semibold text-rose-600 hover:underline dark:text-rose-400">
+            browse Japan&apos;s official stores →
+          </a>
+        </p>
       </header>
 
       <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} locale="en" />

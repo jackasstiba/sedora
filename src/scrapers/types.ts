@@ -31,4 +31,15 @@ export type ScrapedItem = {
   salesChannel?: string | null; // 取扱店の平文（URLなし。ichibanKuji の「■取扱店：…」）
   prizes?: string | null; // 一番くじの各等賞ラインナップ（JSON配列文字列。ichibanKuji のみ）
   stores?: string | null; // 受付中の公式ストア一覧（JSON配列文字列。nyuka_now のみ＝家電・ゲーム機抽選）
+  /**
+   * 掲載スコープ（Phase 3b）。未設定＝日英両方（既存の全スクレイパーはこれ）。
+   * "en" は「公式ストアに今も並んでいるが日本の読者には新着でない」カタログ行だけに付ける
+   *（src/lib/scope.ts）。**毎回の巡回で付け直す**＝窓の内外を跨いだ行はその回に切り替わる。
+   */
+  scope?: string | null;
+  /**
+   * その出品が**収集元の店に並んだ日**（Shopify の published_at 等）。イベント日ではない
+   * （画面の日付欄には出さない）。EN専用カタログを新着順に並べるために使う。
+   */
+  storeListedAt?: Date | null;
 };

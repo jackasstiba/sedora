@@ -16,6 +16,7 @@ const DEFAULT_FILES = [
   "prisma/alter_market_price.sql",
   "prisma/alter_sales_channel.sql",
   "prisma/alter_scope.sql",
+  "prisma/alter_store_listed_at.sql",
 ];
 
 type Alter = { table: string; column: string; stmt: string };

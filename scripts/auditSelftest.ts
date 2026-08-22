@@ -31,7 +31,8 @@ import {
 } from "../src/lib/date";
 import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
 import { isOnlineItem } from "../src/lib/channel";
-import { enScopeLeaks, isJpScope } from "../src/lib/scope";
+import { EN_ONLY_PAGES, enScopeLeaks, isJpScope, oldestSeenAt, seenOnStoreEn } from "../src/lib/scope";
+import { holoPlacement, isHoloDigitalListing } from "../src/scrapers/hololiveShop";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
   lastDeadline,
@@ -1377,6 +1378,11 @@ const cases: Case[] = [
   { name: "宙ぶらりん判定: 「〜しまむら通販で」は鳴る", fn: () => looksTruncatedTitle("グローグー 刺しゅうTシャツ しまむら通販で"), want: true },
   // 鳴らない側: 「〜もの」は名詞語尾（実測 #118039・楽天165件で実在を裏取りした正規商品名）
   { name: "宙ぶらりん判定: 「名状しがたきもの」は鳴らない", fn: () => looksTruncatedTitle("30MM DAEMON X MACHINA TS 名状しがたきもの"), want: false },
+  // ── 2026-08-22 追加（Phase 3b）: 助詞の字で終わる固有名詞（タレント名）は鳴らさない ──
+  // 鳴らない側: 実測4件（hololive公式ショップのカタログ取り込みで一斉に発火した形）
+  { name: "宙ぶらりん判定: タレント名「風真いろは」で終わる商品名は鳴らない", fn: () => looksTruncatedTitle("hololive friends with u 風真いろは"), want: false },
+  // 鳴る側: 例外を足しても、同じ「は」で終わる本物の切れ残りは鳴り続ける（例外で網を殺していない）
+  { name: "宙ぶらりん判定: 「〜の予約は」は鳴る（例外を足しても本物は捕まえる）", fn: () => looksTruncatedTitle("ねんどろいど 予約は"), want: true },
   // ── 2026-08-21 追加: チャネル句＋日付告知の一括除去（#117298 の表示修正） ──
   {
     name: "日付直前の「〇〇通販で」も告知と一緒に落とす",
@@ -4332,6 +4338,90 @@ const cases: Case[] = [
     name: "ENスコープ: isJpScope は null/未設定/both=true・en=false（NULLをSQLのnotで落とさない境界と同じ意味論）",
     fn: () => `${isJpScope(null)}|${isJpScope(undefined)}|${isJpScope("both")}|${isJpScope("en")}`,
     want: "true|true|true|false",
+  },
+  {
+    name: "ENスコープ: /en/catalog は EN_ONLY_PAGES に登録されている（pages.ts と対）",
+    fn: () => EN_ONLY_PAGES.has("/en/catalog"),
+    want: true,
+  },
+  // ── Phase 3b: hololive カタログの掲載判定（窓の内外・締切・デジタル・在庫）──
+  {
+    name: "holo掲載: 窓の内側は従来どおりJP（在庫の有無はここでは決めない）",
+    fn: () =>
+      holoPlacement({ publishedMs: 1000, cutoffMs: 500, tags: [], available: false, hasFutureDeadline: false }),
+    want: "jp",
+  },
+  {
+    name: "holo掲載: 窓の外でも締切が未来ならJP（逃すと買えない行を落とさない＝観点D）",
+    fn: () =>
+      holoPlacement({ publishedMs: 100, cutoffMs: 500, tags: ["受注生産商品"], available: true, hasFutureDeadline: true }),
+    want: "jp",
+  },
+  {
+    name: "holo掲載: 窓の外・在庫あり・締切なし＝EN専用カタログ",
+    fn: () =>
+      holoPlacement({ publishedMs: 100, cutoffMs: 500, tags: ["Recommended_MERCH"], available: true, hasFutureDeadline: false }),
+    want: "en-only",
+  },
+  {
+    name: "holo掲載: 窓の外で売り切れは載せない（押した先が行き止まりになる）",
+    fn: () =>
+      holoPlacement({ publishedMs: 100, cutoffMs: 500, tags: ["Recommended_MERCH"], available: false, hasFutureDeadline: false }),
+    want: "skip",
+  },
+  {
+    name: "holo掲載: 窓の外の「デジタルのみ」は載せない（発送物が無い＝代行の経路が成立しない）",
+    fn: () =>
+      holoPlacement({ publishedMs: 100, cutoffMs: 500, tags: ["デジタルのみ", "Recommended_MERCH"], available: true, hasFutureDeadline: false }),
+    want: "skip",
+  },
+  {
+    // 実測の再現: 2021年の誕生日記念（ダウンロード販売・MERCHタグ付き・デジタルのみタグ無し）が
+    // 「売り切れない在庫」としてカタログ先頭を埋めていた形。
+    name: "holo掲載: 「デジタルコンテンツ」だけが付いた記念セットも載せない（デジタルは売り切れない）",
+    fn: () =>
+      holoPlacement({
+        publishedMs: 100,
+        cutoffMs: 500,
+        tags: ["Recommended_MERCH", "Recommended_デジタルコンテンツ", "デジタルコンテンツ"],
+        available: true,
+        hasFutureDeadline: false,
+      }),
+    want: "skip",
+  },
+  {
+    name: "holo掲載: published_at が読めない行は載せない（日付の代わりに既定値を作らない）",
+    fn: () =>
+      holoPlacement({ publishedMs: Number.NaN, cutoffMs: 500, tags: [], available: true, hasFutureDeadline: false }),
+    want: "skip",
+  },
+  {
+    name: "holoデジタル判定: デジタル系タグは全部拾う／物だけの出品は拾わない",
+    fn: () =>
+      `${isHoloDigitalListing(["デジタルコンテンツ"])}|${isHoloDigitalListing(["デジタルのみ"])}` +
+      `|${isHoloDigitalListing(["Recommended_デジタルコンテンツ"])}|${isHoloDigitalListing(["Recommended_MERCH", "Talent_AZKi"])}`,
+    want: "true|true|true|false",
+  },
+  {
+    name: "カタログの確認日: scrapedAt を日本時間の暦日で綴る（月は綴り・年を出す・曜日は付けない）",
+    // 2026-08-22 00:30 JST ＝ 8/21 15:30Z。UTCのまま読むと前日になる境界。
+    fn: () => seenOnStoreEn(new Date("2026-08-21T15:30:00.000Z")),
+    want: "Aug 22, 2026",
+  },
+  {
+    name: "カタログの確認日: 全行に当てはまるのは**最も古い**確認時刻（そこだけが嘘にならない）",
+    fn: () =>
+      oldestSeenAt([
+        { scrapedAt: "2026-08-22T01:00:00.000Z" },
+        { scrapedAt: "2026-08-20T01:00:00.000Z" },
+        { scrapedAt: "2026-08-21T01:00:00.000Z" },
+      ])?.toISOString(),
+    want: "2026-08-20T01:00:00.000Z",
+  },
+  {
+    name: "カタログの確認日: 行が無ければ null（0件のときに今日を代わりに出さない）",
+    fn: () => oldestSeenAt([]),
+    want: null,
   },
 ];
 

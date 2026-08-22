@@ -22,6 +22,13 @@
 //                          「招待をリクエスト」を実ページで確認）。**同じホストに検索結果URLも
 //                          載りうる**ので、Amazonだけはパスが /dp/ のときに限る（ホスト決め打ちにしない）。
 //                          表示中の該当67件が全件 /dp/ であることも確認済み。
+//
+// 裏取りの記録（2026-08-22 追加・Phase 3b）:
+//  ・shop.hololivepro.com … hololive production OFFICIAL SHOP（Shopify）。新着4商品の
+//                          商品ページを実際に取得し、全件に注文フォーム `action="/cart/add"` が
+//                          あることを確認した。※このテーマは「カートに入れる」「売り切れ」の
+//                          **両方の文言をHTMLに常に含む**ので、文言では在庫を判定しない
+//                          （在庫は products.json の variants[].available が唯一の根拠）。
 
 const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   chiikawa_market: new Set(["chiikawamarket.jp"]),
@@ -33,6 +40,7 @@ const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   nike_snkrs: new Set(["nike.com"]),
   nyuka_now: new Set(["amazon.co.jp"]),
   card_chusen: new Set(["amazon.co.jp"]),
+  hololive_shop: new Set(["shop.hololivepro.com"]),
 };
 
 /** ホスト一致だけでは「注文ページ」と言えないホストの追加条件。 */

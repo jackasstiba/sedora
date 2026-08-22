@@ -18,12 +18,30 @@ type Props = {
   initialShow: number;
   /** 表示言語。フィルタの値（ジャンル等）はJP語彙のままで、文言と URL の起点だけ替わる。 */
   locale?: Locale;
+  /**
+   * カタログ面（/en/catalog）。並ぶのは**日付を持たない在庫カタログ行**だけなので:
+   *  ・日付でグループ分けしない（全行が "Date TBD" の1グループになり、「日付が未定の予定品」
+   *    という**事実でない意味**を見出しが足してしまう＝既定値に語らせない）
+   *  ・種別/時期タブを出さない（FilterBar 側。押しても必ず0件）
+   */
+  catalog?: boolean;
+  /** 絞り込みURLの同期先。既定は locale から決まる（/en か /）。 */
+  basePath?: string;
 };
 
-export function ItemBrowser({ items, genres, initial, initialShow, locale = "ja" }: Props) {
+export function ItemBrowser({
+  items,
+  genres,
+  initial,
+  initialShow,
+  locale = "ja",
+  catalog = false,
+  basePath: basePathProp,
+}: Props) {
   const t = UI[locale];
   // 絞り込みURLの起点。/en は /en?genre=… に同期する（"/" に書くと言語が切り替わってしまう）。
-  const basePath = locale === "en" ? "/en" : "/";
+  // 別ページで使うときは basePath を渡す（渡さないと /en/catalog の絞り込みが /en に飛ぶ）。
+  const basePath = basePathProp ?? (locale === "en" ? "/en" : "/");
   const [values, setValues] = useState<FilterValues>(initial);
   const [show, setShow] = useState(initialShow);
 
@@ -131,7 +149,7 @@ export function ItemBrowser({ items, genres, initial, initialShow, locale = "ja"
   return (
     <>
       <div className="mb-6">
-        <FilterBar genres={genresWithCount} values={values} onChange={onChange} onClear={onClear} locale={locale} />
+        <FilterBar genres={genresWithCount} values={values} onChange={onChange} onClear={onClear} locale={locale} catalog={catalog} />
       </div>
 
       {anyFilter && (
@@ -159,6 +177,13 @@ export function ItemBrowser({ items, genres, initial, initialShow, locale = "ja"
           >
             {t.resetFilters}
           </button>
+        </div>
+      ) : catalog ? (
+        // カタログは日付を持たないので、日付の見出しを付けずに1つのグリッドで並べる。
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+          {visible.map((item) => (
+            <ItemCard key={item.id} item={item} locale={locale} />
+          ))}
         </div>
       ) : (
         <div className="flex flex-col gap-8">

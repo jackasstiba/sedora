@@ -27,8 +27,41 @@ export const JP_SCOPE_WHERE: Prisma.ItemWhereInput = {
   OR: [{ scope: null }, { scope: { not: EN_ONLY_SCOPE } }],
 };
 
-/** scope="en" の行を出してよいページ（Phase 3b で "/en/catalog" を足す）。 */
-export const EN_ONLY_PAGES: ReadonlySet<string> = new Set<string>([]);
+/** scope="en" の行を出してよいページ。 */
+export const EN_ONLY_PAGES: ReadonlySet<string> = new Set<string>(["/en/catalog"]);
+
+/**
+ * カタログ行について画面が言ってよい**唯一の事実**＝「この日、まだ公式ストアの一覧にあった」。
+ *
+ * 在庫・海外購入の可否・入手容易さは約束しない（[[UIラベルは裏取り済みのみ約束]]）。
+ * 引数は行の `scrapedAt`（巡回でその行を実際に見た瞬間）。`todayJst()` を読まない＝
+ * **暦が進むだけで表示が変わらない**（audit:tomorrow / audit:clock で鳴らない側を実測する）。
+ *
+ * 月は必ず綴り、年も必ず出す（"8/22" は米英で読みが割れる／古いカタログを今年と誤読させない）。
+ * 曜日は付けない: カウントダウンと突き合わせる相手ではないので、画面監査の日付突合に
+ * 拾わせる意味が無い（拾わせると「バッジの無い日付」を毎回説明することになる）。
+ */
+const MONTHS_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+export function seenOnStoreEn(scrapedAt: Date | string): string {
+  // 日本時間の暦日に直す（保存値は瞬間。UTCのまま読むと JST 早朝の巡回が前日になる）。
+  const j = new Date(new Date(scrapedAt).getTime() + 9 * 60 * 60 * 1000);
+  return `${MONTHS_EN[j.getUTCMonth()]} ${j.getUTCDate()}, ${j.getUTCFullYear()}`;
+}
+
+/**
+ * 一覧に並ぶ行のうち**最も古い**確認時刻。ページ全体で1回だけ「いつ確認したか」を書くとき、
+ * 全行に等しく当てはまる（＝嘘にならない）のは最も古い側。
+ */
+export function oldestSeenAt<T extends { scrapedAt: Date | string }>(rows: T[]): Date | null {
+  let oldest: number | null = null;
+  for (const r of rows) {
+    const ms = new Date(r.scrapedAt).getTime();
+    if (!Number.isFinite(ms)) continue;
+    if (oldest === null || ms < oldest) oldest = ms;
+  }
+  return oldest === null ? null : new Date(oldest);
+}
 
 /**
  * 監査用の純関数: 表示ページ一覧の中で、EN専用行が許可ページ以外に出ている箇所を列挙する。

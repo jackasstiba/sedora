@@ -352,7 +352,7 @@ async function main() {
     //     タグは「裏取り済みの組」だけに出す約束なので、多くても少なくても嘘になる
     //     （多い＝約束していない行に出ている／少ない＝表示が壊れて母数が消えている）。
     //     脚注の説明文にも同じ文字列が出るので、span 要素の完全一致だけを数える。
-    if (p.name === "/en") {
+    if (p.name === "/en" || p.name === "/en/catalog") {
       const expectedShown = p.rows.slice(0, titles.length).filter((r) => isOnlineItem(r)).length;
       const chips = $("span")
         .filter((_, el) => $(el).text().trim() === ONLINE_TAG_EN)

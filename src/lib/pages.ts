@@ -13,7 +13,7 @@
  *   - scripts/auditRendered.ts … 描画結果（このページ一覧を実際に取得して検査）
  *   - scripts/reenrichCollabo.ts … 再エンリッチの対象
  */
-import { getItems } from "./items";
+import { getEnCatalogItems, getItems } from "./items";
 import {
   getItemsByGenre,
   getItemsByMonth,
@@ -34,6 +34,9 @@ export async function loadDisplayedPages(): Promise<DisplayedPage[]> {
   // ここに載せることで audit:page が /en も取得して検査する（広告表示・収集元リーク・
   // 件数突合・日付突合の英語書式は auditRendered 側が両言語を読む）。
   pages.push({ name: "/en", rows: home });
+  // EN専用カタログ（Phase 3b）。**唯一 scope="en" を出してよいページ**（src/lib/scope.ts の
+  // EN_ONLY_PAGES と対。ここに足したらあちらにも足す＝ズレたら audit `en_scope_leak` が鳴る）。
+  pages.push({ name: "/en/catalog", rows: await getEnCatalogItems() });
   // /premium（相場・プレ値ランキング）は 2026-08-10 に表示を取り下げた（getPremiumItems の
   // コメント参照）。ページが無い＝表示範囲にも無い。復活させるならここに1行戻す。
   pages.push({ name: "/lottery", rows: await getLotteryItems() });
