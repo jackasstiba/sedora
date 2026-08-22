@@ -29,7 +29,21 @@ import {
   monthPrecisionFromTitle,
   plannedDateFromText,
 } from "../src/lib/date";
-import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
+import {
+  countdownLabelEn,
+  dateHeadingEn,
+  eventTypeLabel,
+  genreLabel,
+  goodsLabel,
+  groupLabel,
+  hasGoodsLabelEn,
+} from "../src/lib/i18n";
+import {
+  GOODS_NOUNS,
+  buildHighlights,
+  parseHighlights,
+  summarizeHighlightsEn,
+} from "../src/lib/collabHighlights";
 import { isOnlineItem } from "../src/lib/channel";
 import { EN_ONLY_PAGES, enScopeLeaks, isJpScope, oldestSeenAt, seenOnStoreEn } from "../src/lib/scope";
 import {
@@ -4381,6 +4395,80 @@ const cases: Case[] = [
     name: "ENカタログ: 未知の slug では店を返さない（存在しないページを作らない）",
     fn: () => enCatalogStoreBySlug("no-such-store"),
     want: null,
+  },
+  // ── Phase 3c: コラボ要約の書式（組み立て↔読み解き）と英語化 ──
+  {
+    // **組み立てと読み解きが同じ定義から来ていること**を往復で固定する。
+    // 実データ #14159（ホロライブ×極楽湯）の形をそのまま使う。
+    name: "コラボ要約: 実データの書式を構造に戻せる（仕組み・グッズ・価格つき販売）",
+    fn: () => {
+      const p = parseHighlights(
+        "抽選・くじあり ｜ 登場グッズ: マフラータオル / ポストカード ｜ 公式販売: アクリルスタンド¥880〜¥1,540 / 缶バッジ¥550"
+      );
+      return `${p?.mechanism}|${p?.goods.join(",")}|${p?.sale.map((s) => `${s.noun}=${s.price}`).join(",")}`;
+    },
+    want: "lottery|マフラータオル,ポストカード|アクリルスタンド=¥880〜¥1,540,缶バッジ=¥550",
+  },
+  {
+    name: "コラボ要約: 組み立て→読み解きの往復で同じ構造に戻る",
+    fn: () => {
+      const built = buildHighlights({ mechanism: "random", goods: ["ぬいぐるみ", "缶バッジ"] });
+      const p = parseHighlights(built);
+      return `${built}||${p?.mechanism}|${p?.goods.join(",")}`;
+    },
+    want: "ランダム(ブラインド)封入 ｜ 登場グッズ: ぬいぐるみ / 缶バッジ||random|ぬいぐるみ,缶バッジ",
+  },
+  {
+    // 他ソースの highlights（受付中ストア・各賞）を**コラボの書式として読み解かない**。
+    name: "コラボ要約: 別の書式（受付中ストア／各賞）は読み解かない＝原文のまま出させる",
+    fn: () =>
+      `${parseHighlights("受付中ストア：Amazon / ヨドバシ")}|${parseHighlights("A賞：フィギュア")}|${parseHighlights(null)}`,
+    want: "null|null|null",
+  },
+  {
+    name: "コラボ要約: 仕組みだけの行も読み解ける（グッズ名が本文に無かった行）",
+    fn: () => {
+      const p = parseHighlights("数量限定・受注");
+      return `${p?.mechanism}|${p?.goods.length}|${p?.sale.length}`;
+    },
+    want: "scarcity|0|0",
+  },
+  {
+    name: "グッズ種別の英語: 対応表にある語は訳す・無い語は日本語のまま（断定を足さない）",
+    fn: () =>
+      `${goodsLabel("アクリルスタンド", "en")}|${goodsLabel("缶バッジ", "en")}` +
+      `|${goodsLabel("知らないグッズ", "en")}|${hasGoodsLabelEn("知らないグッズ")}`,
+    want: "Acrylic stand|Can badge|知らないグッズ|false",
+  },
+  {
+    name: "グッズ種別の英語: 日本語ロケールでは訳さない",
+    fn: () => goodsLabel("アクリルスタンド", "ja"),
+    want: "アクリルスタンド",
+  },
+  {
+    name: "コラボ要約: カードの1行英語（価格つきが取れていればそちらを優先）",
+    fn: () =>
+      summarizeHighlightsEn(
+        "抽選・くじあり ｜ 登場グッズ: マフラータオル ｜ 公式販売: アクリルスタンド¥880〜¥1,540 / 缶バッジ¥550"
+      ),
+    want: "Lottery / kuji — Acrylic stand ¥880〜¥1,540 · Can badge ¥550",
+  },
+  {
+    name: "コラボ要約: カードの1行英語（価格が無ければグッズ名だけ）",
+    fn: () => summarizeHighlightsEn("ランダム(ブラインド)封入 ｜ 登場グッズ: ぬいぐるみ / 缶バッジ"),
+    want: "Blind box — Plush · Can badge",
+  },
+  {
+    name: "コラボ要約: 読み解けない書式では null（呼び出し側が原文を出す）",
+    fn: () => summarizeHighlightsEn("受付中ストア：Amazon"),
+    want: null,
+  },
+  {
+    // 語彙の取りこぼし防止: 収集元が拾う名詞は全部、英語の対応表を持っていること。
+    // 片方に足してもう片方を忘れると、英語版にだけ日本語が混ざる。
+    name: "グッズ種別の英語: GOODS_NOUNS 全語に英語ラベルがある（表の取りこぼしを機械で見張る）",
+    fn: () => GOODS_NOUNS.filter((n) => !hasGoodsLabelEn(n)).join(","),
+    want: "",
   },
   {
     // 宙ぶらりん助詞の検査を当てる面の線引き。店の構造化フィールド由来の商品名は途中で

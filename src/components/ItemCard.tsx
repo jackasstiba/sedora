@@ -4,6 +4,7 @@ import { formatPriceDisplay } from "@/lib/margin";
 import { displaySubGenre } from "@/lib/title";
 import { countdownLabelEn, eventTypeLabel, genreLabel, type Locale } from "@/lib/i18n";
 import { ONLINE_TAG_EN } from "@/lib/channel";
+import { summarizeHighlightsEn } from "@/lib/collabHighlights";
 import { NoImage } from "./NoImage";
 import type { CardItem } from "@/lib/cardItem";
 
@@ -62,6 +63,8 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
   // 予定日が過ぎたものを「予定」と書かない（登場予定 → 登場済み）。色はJPの語彙で決め、
   // 表示だけを locale で替える（対応表に無い語は日本語のまま出す＝勝手な断定を足さない）。
   const eventLabel = displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst());
+  // カード用の1行英語要約（コラボの決まった書式が読み解けたときだけ。null＝原文のまま出す）。
+  const highlightsEn = en ? summarizeHighlightsEn(item.highlights) : null;
 
   return (
     <Link
@@ -128,10 +131,12 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
           <div className="flex-1" aria-hidden />
         )}
 
-        {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。 */}
+        {/* コラボ記事本文から抽出した注目賞品（抽選/ランダムの高額品＝せどりの本命）。
+            英語版では**書式が読み解けたときだけ**英語に組み直す（種別名のみ訳す）。
+            読み解けない書式は原文のまま lang="ja" で出す＝勝手な言い換えをしない。 */}
         {item.highlights && (
           <p
-            lang={en ? "ja" : undefined}
+            lang={en && !highlightsEn ? "ja" : undefined}
             className={`line-clamp-2 rounded px-1.5 py-1 text-xs leading-snug ${
               item.hasLottery
                 ? "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-200"
@@ -139,7 +144,7 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
             }`}
           >
             {item.hasLottery ? "🎯 " : "🛍 "}
-            {item.highlights}
+            {highlightsEn ?? item.highlights}
           </p>
         )}
 

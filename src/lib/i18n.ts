@@ -33,6 +33,72 @@ export function genreLabel(genre: string, locale: Locale): string {
   return GENRE_EN[genre] ?? genre; // 未知のジャンルは訳さない（勝手な言い換えをしない）
 }
 
+/**
+ * コラボの「登場グッズ」の**種別名**の英語（src/lib/collabHighlights.ts の GOODS_NOUNS と対）。
+ *
+ * ここは訳してよい: これらは**一般名詞のグッズ種別**であって固有名詞ではなく、しかも
+ * 語彙が閉じている（30語）。英語圏のファンの間で確立した呼び方がある語（acrylic stand /
+ * can badge / shikishi / nendoroid / bromide）はその形を使う＝こちらで新語を作らない。
+ * **表に無い語は日本語のまま出す**（＝知らない語に断定を足さない。ジャンル・種別と同じ原則）。
+ *
+ * ※ 商品名そのもの（固有名詞）は訳さない。訳すのは種別だけ。
+ */
+const GOODS_LABELS_EN: Record<string, string> = {
+  マフラータオル: "Muffler towel",
+  フェイスタオル: "Face towel",
+  バスタオル: "Bath towel",
+  タオル: "Towel",
+  アクリルスタンド: "Acrylic stand",
+  アクリルキーホルダー: "Acrylic keychain",
+  アクスタ: "Acrylic stand",
+  トレーディングカード: "Trading card",
+  ブロマイド: "Bromide photo",
+  ポストカード: "Postcard",
+  ポスター: "Poster",
+  ぬいぐるみ: "Plush",
+  フィギュア: "Figure",
+  ねんどろいど: "Nendoroid",
+  缶バッジ: "Can badge",
+  ピンバッジ: "Pin badge",
+  バッジ: "Badge",
+  ラバーストラップ: "Rubber strap",
+  アクリルチャーム: "Acrylic charm",
+  チャーム: "Charm",
+  キーホルダー: "Keychain",
+  クリアファイル: "Clear file",
+  ステッカー: "Sticker",
+  シール: "Sticker",
+  コースター: "Coaster",
+  タペストリー: "Tapestry",
+  色紙: "Shikishi board",
+  マグカップ: "Mug",
+  グラス: "Glass",
+  ポーチ: "Pouch",
+  巾着: "Drawstring pouch",
+  トレカ: "Trading card",
+  カード: "Card",
+};
+
+export function goodsLabel(noun: string, locale: Locale): string {
+  if (locale === "ja") return noun;
+  return GOODS_LABELS_EN[noun] ?? noun;
+}
+
+/** その種別名を英語に訳せるか（訳せない語は lang="ja" を付けて出すため表示側が見る）。 */
+export function hasGoodsLabelEn(noun: string): boolean {
+  return noun in GOODS_LABELS_EN;
+}
+
+/**
+ * コラボの「仕組み」の英語（collabHighlights の COLLAB_MECHANISMS と対）。
+ * **入手性についての事実**だけを言う（買えるかどうか・当たるかどうかは約束しない）。
+ */
+export const COLLAB_MECHANISM_EN: Record<string, string> = {
+  lottery: "Includes a lottery or kuji draw",
+  random: "Blind / random assortment",
+  scarcity: "Limited quantity or made-to-order",
+};
+
 /** eventType（表示ラベル）の英語。displayEventType が返しうる語だけを対応表に持ち、
  *  **表に無い語は日本語のまま出す**（知らない種類に断定を足さない＝JPと同じ原則）。 */
 const EVENT_LABEL_EN: Record<string, string> = {

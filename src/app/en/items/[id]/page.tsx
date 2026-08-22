@@ -13,7 +13,16 @@ import { countdown, displayEventType, eventDateLabelEn, eventPeriodText, isEvent
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { absoluteImageUrl, proxiedImageUrl } from "@/lib/imageProxy";
-import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel } from "@/lib/i18n";
+import {
+  COLLAB_MECHANISM_EN,
+  countdownLabelEn,
+  dateHeadingEn,
+  eventTypeLabel,
+  genreLabel,
+  goodsLabel,
+  hasGoodsLabelEn,
+} from "@/lib/i18n";
+import { parseHighlights } from "@/lib/collabHighlights";
 import { ONLINE_TAG_EN, isOnlineItem } from "@/lib/channel";
 // 計測に収集元を載せるが、名前そのものは送らない（符号化してから渡す）。
 import { sourceCode } from "@/lib/sourceCode";
@@ -103,6 +112,8 @@ export default async function ItemPageEn({ params }: Props) {
     hasSearchableTitle(item.source) || (!isOfficialUrl(item.source) && !item.officialUrl);
   const prizeGallery = parsePrizesJson(item.prizes);
   const lineup = prizeGallery ? null : parseKujiLineup(item.highlights);
+  // コラボ要約（決まった書式）を構造に戻す。書式が違えば null＝原文のまま出す。
+  const collab = parseHighlights(item.highlights);
   const prizesGraded = prizeGallery?.some((p) => /賞$/.test(p.label)) ?? false;
   const storeList = parseStoresJson(item.stores);
   const storeSplit = storeList ? splitStoresByDeadline(storeList, todayJst()) : null;
@@ -278,8 +289,55 @@ export default async function ItemPageEn({ params }: Props) {
                     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
                 }`}
               >
-                <span className="font-semibold">{item.hasLottery ? "🎯 Featured prizes" : "🛍 Featured goods"}</span>
-                <span lang="ja" className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
+                <span className="font-semibold">{item.hasLottery ? "🎯 Featured prizes" : "🛍 Merch lineup"}</span>
+                {/* コラボの要約は**書式が決まっている**（src/lib/collabHighlights.ts が組み立てと
+                    読み解きの唯一の定義）ので、英語の枠に組み直して出す。訳すのはグッズの
+                    **種別名**だけで、対応表に無い語は日本語のまま（lang="ja"）＝断定を足さない。
+                    読み解けない書式（他ソースの highlights）は従来どおり原文のまま出す。 */}
+                {collab ? (
+                  <div className="mt-1 flex flex-col gap-1.5">
+                    {collab.mechanism && (
+                      <p className="text-xs font-medium">
+                        {COLLAB_MECHANISM_EN[collab.mechanism]}
+                      </p>
+                    )}
+                    {collab.goods.length > 0 && (
+                      <p className="text-xs">
+                        <span className="opacity-70">Merch mentioned in the announcement: </span>
+                        {collab.goods.map((noun, i) => (
+                          <span key={noun}>
+                            {i > 0 && " · "}
+                            <span lang={hasGoodsLabelEn(noun) ? undefined : "ja"}>
+                              {goodsLabel(noun, "en")}
+                            </span>
+                          </span>
+                        ))}
+                      </p>
+                    )}
+                    {collab.sale.length > 0 && (
+                      <div className="text-xs">
+                        <span className="opacity-70">Listed on the official page: </span>
+                        <ul className="mt-0.5 flex flex-wrap gap-x-3 gap-y-0.5">
+                          {collab.sale.map((s) => (
+                            <li key={`${s.noun}${s.price}`}>
+                              <span lang={hasGoodsLabelEn(s.noun) ? undefined : "ja"}>
+                                {goodsLabel(s.noun, "en")}
+                              </span>
+                              <span className="ml-1 font-medium">{s.price}</span>
+                            </li>
+                          ))}
+                        </ul>
+                        {/* 価格は公式ページから取った定価。買えることも在庫も約束しない。 */}
+                        <p className="mt-0.5 opacity-70">
+                          Prices are the official listed prices in Japan, excluding any shipping or
+                          proxy fees.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <span lang="ja" className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
+                )}
                 {item.hasLottery && (
                   <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
                     Includes prizes decided by lottery or random draw — you cannot pick a specific prize.

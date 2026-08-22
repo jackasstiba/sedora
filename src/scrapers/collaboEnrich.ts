@@ -1,5 +1,11 @@
 import { matchFranchises } from "../lib/franchise";
 import { normalizeForSearch } from "../lib/itemFilter";
+import {
+  GOODS_NOUNS,
+  OFFICIAL_SALE_PREFIX,
+  buildHighlights,
+  type CollabMechanism,
+} from "../lib/collabHighlights";
 import { cleanStoreUrl } from "./aggregatorUtil";
 
 // コラボイベント記事の「本文」から、せどらーが最も欲しい情報＝抽選/ランダム/数量限定の
@@ -259,19 +265,8 @@ const RANDOM_RE = /ランダム|トレーディング|ブラインド|ランダ�
 // 数量限定・先着・受注など「入手性が低い」を示す語（抽選ではないが希少）。
 const SCARCITY_RE = /数量限定|先着|限定生産|受注(生産|販売)?|完全受注|予約限定|会場限定|店舗限定/;
 
-// せどらーが狙う注目賞品の名詞。長い複合語を先に並べ、短い語（タオル/カード/バッジ）が
-// 複合語（マフラータオル/ポストカード/缶バッジ）に内包される場合は複合語を優先する。
-const GOODS_NOUNS = [
-  "マフラータオル", "フェイスタオル", "バスタオル", "タオル",
-  "アクリルスタンド", "アクリルキーホルダー", "アクスタ",
-  "トレーディングカード", "ブロマイド", "ポストカード", "ポスター",
-  "ぬいぐるみ", "フィギュア", "ねんどろいど",
-  "缶バッジ", "ピンバッジ", "バッジ",
-  "ラバーストラップ", "アクリルチャーム", "チャーム", "キーホルダー",
-  "クリアファイル", "ステッカー", "シール", "コースター",
-  "タペストリー", "色紙", "マグカップ", "グラス",
-  "ポーチ", "巾着", "トレカ", "カード",
-];
+// 注目グッズの名詞と要約の書式は src/lib/collabHighlights.ts が唯一の定義
+// （**組み立てと読み解きを1箇所に閉じる**＝英語版が同じ定義で読み解くため）。
 
 export type CollabEnrichment = {
   hasLottery: boolean; // 真の抽選/くじ/ラストワン等（抽選タブで拾う）
@@ -310,16 +305,16 @@ export function analyzeCollab(bodyText: string, subGenre?: string | null): Colla
   }
 
   // 仕組みの見出し（検証可能な事実のみ）。抽選>ランダム>数量限定の優先で1つ。
-  const mechanism = hasLottery
-    ? "抽選・くじあり"
+  // 文言と組み立ては src/lib/collabHighlights.ts に一本化（英語版が同じ定義で読み解く）。
+  const mechanism: CollabMechanism | null = hasLottery
+    ? "lottery"
     : hasRandom
-      ? "ランダム(ブラインド)封入"
+      ? "random"
       : hasScarcity
-        ? "数量限定・受注"
+        ? "scarcity"
         : null;
   // グッズ名は「登場グッズ」＝本文に出てくる商品名（賞品とは断定しない中立表現）。
-  const goods = nouns.length ? `登場グッズ: ${nouns.join(" / ")}` : null;
-  const highlights = [mechanism, goods].filter(Boolean).join(" ｜ ") || null;
+  const highlights = buildHighlights({ mechanism, goods: nouns });
   return { hasLottery, hasRandom, hasScarcity, highlights };
 }
 
@@ -374,7 +369,7 @@ export function formatOfficialItems(items: { name: string; price: number }[]): s
   const parts = [...buckets.entries()]
     .slice(0, 6)
     .map(([k, b]) => `${k}${b.min === b.max ? yen(b.min) : `${yen(b.min)}〜${yen(b.max)}`}`);
-  return `公式販売: ${parts.join(" / ")}`;
+  return `${OFFICIAL_SALE_PREFIX}${parts.join(" / ")}`;
 }
 
 // ── 開催店舗・地図（「どこへ行けば買えるか」） ────────────────────────────────
