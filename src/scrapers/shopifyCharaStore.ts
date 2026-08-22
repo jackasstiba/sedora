@@ -1,6 +1,8 @@
 import { ScrapedItem } from "./types";
 import { fetchHtml, fetchShopifyProducts, sleep, type ShopifyProduct } from "./util";
+import { crawlPages } from "./crawl";
 import { calendarDate, todayJst } from "../lib/date";
+import { EN_ONLY_SCOPE } from "../lib/scope";
 
 // 「日付別コレクション」方式の Shopify キャラクターグッズ公式ストアの共通実装。
 //
@@ -83,6 +85,7 @@ export type CharaStoreConfig = {
 function toItem(cfg: CharaStoreConfig, p: ShopifyProduct, kind: "発売" | "予約" | "再販", date: Date | null): ScrapedItem {
   const [title, shipping] = splitCharaStoreTitle(p.title);
   const yen = Number(p.variants?.[0]?.price ?? 0);
+  const listed = p.published_at ? Date.parse(p.published_at) : NaN;
   return {
     source: cfg.source,
     sourceId: p.handle,
@@ -95,7 +98,25 @@ function toItem(cfg: CharaStoreConfig, p: ShopifyProduct, kind: "発売" | "予�
     price: yen ? `${yen.toLocaleString()}円` : null,
     url: `${cfg.store}/products/${p.handle}`,
     imageUrl: p.images?.[0]?.src ?? null,
+    // 店に並んだ日（イベント日ではない）。EN専用カタログの並び順に使う。
+    storeListedAt: Number.isFinite(listed) ? new Date(listed) : null,
   };
+}
+
+/**
+ * EN専用カタログ行（Phase 3b'）＝ **日付別コレクションにも新着にも入っていないが、
+ * 店のカタログに今も在庫がある**商品。日本の読者には新着でないので日本語面には出さないが、
+ * 海外の読者には「日本の店にしか無い物」として価値が残る（[[Projects/sedori_radar_en]] Phase 3）。
+ *
+ * 日付は持たせない（発売はとうに済んでいる＝「予定」ではない）。画面に出すのは
+ * 「この日にまだ店の一覧にあった」＝ scrapedAt から作る事実だけで、在庫の継続・海外購入の
+ * 可否は約束しない（[[UIラベルは裏取り済みのみ約束]]）。バッジは hololive と同じ「登場済み」
+ * （"発売/Release" だと、とうに出ている在庫品が「これから発売」と読める）。
+ */
+export const CATALOG_EVENT_TYPE = "登場済み";
+
+function toCatalogItem(cfg: CharaStoreConfig, p: ShopifyProduct): ScrapedItem {
+  return { ...toItem(cfg, p, "発売", null), eventType: CATALOG_EVENT_TYPE, eventDateText: null, scope: EN_ONLY_SCOPE };
 }
 
 export async function scrapeCharaShopifyStore(cfg: CharaStoreConfig): Promise<ScrapedItem[]> {
@@ -153,5 +174,40 @@ export async function scrapeCharaShopifyStore(cfg: CharaStoreConfig): Promise<Sc
     }
   }
 
+  // ③ 店のカタログ全体（Phase 3b'）。①②が拾わなかった＝日本語面には出さない行のうち、
+  //    **在庫があるもの**を EN専用カタログとして拾う。ここで初めて店の全在庫を見るので、
+  //    ①②で拾った行の「まだ店にあるか」も同時に裏取りされる。
+  //    実測 2026-08-22 の在庫あり件数: ちいかわ2932 / ナガノ484 / mofusand2043（デジタルは0件）。
+  for (const p of await fetchStoreCatalog(cfg.store)) {
+    if (byId.has(p.handle)) continue;
+    if (!p.variants?.some((v) => v.available)) continue; // 売り切れは載せない（押した先が行き止まり）
+    byId.set(p.handle, toCatalogItem(cfg, p));
+  }
+
   return [...byId.values()];
+}
+
+/**
+ * 店レベルの公開商品JSON（`/products.json`）を**終端まで**辿る。
+ *
+ * ページ送りは crawlPages に寄せる規約（src/scrapers/crawl.ts）に従う。足切り（isPageOld）は
+ * 渡さない＝カタログ全体が対象。上限は実測（mofusand 22ページ/5112件が最大）に対する安全弁。
+ */
+async function fetchStoreCatalog(store: string): Promise<ShopifyProduct[]> {
+  const products = await crawlPages<ShopifyProduct>({
+    label: `${store}/catalog`,
+    urlOf: (page) => `${store}/products.json?limit=250&page=${page}`,
+    parse: (body) => (JSON.parse(body) as { products?: ShopifyProduct[] }).products ?? [],
+    keyOf: (p) => p.handle,
+    maxPages: 50,
+    sleepMs: 300,
+  });
+  // 🔴 **0件は握りつぶさず例外にする。** ここで空配列を返すと巡回は「成功」のまま
+  // EN専用行が1件も返らず、scrape.ts の突き合わせ削除（RECONCILE_UNDATED_SOURCES）が
+  // **既存のカタログ行を全部消す**。巡回を失敗させれば upsert も削除も走らないので
+  // 前回のデータがそのまま残り、3日後に audit の source_stale が赤くする。
+  if (products.length === 0) {
+    throw new Error(`${store}: products.json が0件（カタログ取得の失敗・API仕様の変化を疑う）`);
+  }
+  return products;
 }

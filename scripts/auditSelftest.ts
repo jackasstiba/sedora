@@ -32,6 +32,13 @@ import {
 import { countdownLabelEn, dateHeadingEn, eventTypeLabel, genreLabel, groupLabel } from "../src/lib/i18n";
 import { isOnlineItem } from "../src/lib/channel";
 import { EN_ONLY_PAGES, enScopeLeaks, isJpScope, oldestSeenAt, seenOnStoreEn } from "../src/lib/scope";
+import {
+  EN_CATALOG_STORES,
+  enCatalogPath,
+  enCatalogStoreBySlug,
+  enCatalogStoresAreOfficial,
+  hasStoreProvidedTitle,
+} from "../src/lib/enCatalog";
 import { holoPlacement, isHoloDigitalListing } from "../src/scrapers/hololiveShop";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
@@ -4310,6 +4317,15 @@ const cases: Case[] = [
     want: "true|View official page →|View on Premium Bandai →",
   },
   {
+    // Phase 3b' で追加した2店（実ページで cart/add フォームを確認済み）。ホストが違えば出さない。
+    name: "入手経路: ナガノ/mofusand の商品ページは online・別ホストには出さない",
+    fn: () =>
+      `${isOnlineItem({ source: "nagano_market", url: "https://nagano-market.jp/products/x" })}` +
+      `|${isOnlineItem({ source: "mofusand_market", url: "https://mofusand-mofumofu-market.jp/products/y" })}` +
+      `|${isOnlineItem({ source: "mofusand_market", url: "https://example.com/products/y" })}`,
+    want: "true|true|false",
+  },
+  {
     name: "入手経路: Amazonでも /dp/ 以外（検索結果URL）には出さない",
     fn: () =>
       isOnlineItem({
@@ -4343,6 +4359,37 @@ const cases: Case[] = [
     name: "ENスコープ: /en/catalog は EN_ONLY_PAGES に登録されている（pages.ts と対）",
     fn: () => EN_ONLY_PAGES.has("/en/catalog"),
     want: true,
+  },
+  {
+    name: "ENスコープ: 店別カタログページも EN_ONLY_PAGES に入る（登録簿から導出＝書き漏れない）",
+    fn: () => EN_CATALOG_STORES.every((s) => EN_ONLY_PAGES.has(enCatalogPath(s.slug))),
+    want: true,
+  },
+  {
+    // 店名を画面に出すので、**まとめ記事・アグリゲータが紛れ込んだら収集元が割れる**。
+    // 文章の約束（「公式ストアだけ足すこと」）ではなく機械で見張る。
+    name: "ENカタログ: 登録簿の店は全部「公式ページと表記してよい」ソース（収集元非公開の対象外）",
+    fn: () => enCatalogStoresAreOfficial(),
+    want: true,
+  },
+  {
+    name: "ENカタログ: slug は一意（/en/catalog/<slug> が衝突しない）",
+    fn: () => new Set(EN_CATALOG_STORES.map((s) => s.slug)).size === EN_CATALOG_STORES.length,
+    want: true,
+  },
+  {
+    name: "ENカタログ: 未知の slug では店を返さない（存在しないページを作らない）",
+    fn: () => enCatalogStoreBySlug("no-such-store"),
+    want: null,
+  },
+  {
+    // 宙ぶらりん助詞の検査を当てる面の線引き。店の構造化フィールド由来の商品名は途中で
+    // 切れようがない（実測の誤検知5件は全部この面だった）。記事から切り出す面には当て続ける。
+    name: "検査の面: 店の商品名フィールド由来のソースだけを宙ぶらりん検査から外す",
+    fn: () =>
+      `${hasStoreProvidedTitle("mofusand_market")}|${hasStoreProvidedTitle("hololive_shop")}` +
+      `|${hasStoreProvidedTitle("collabo_cafe")}|${hasStoreProvidedTitle("channeltono")}`,
+    want: "true|true|false|false",
   },
   // ── Phase 3b: hololive カタログの掲載判定（窓の内外・締切・デジタル・在庫）──
   {

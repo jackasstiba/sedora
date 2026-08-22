@@ -22,6 +22,10 @@ import {
 } from "./seo";
 import { getItemsByTcgTitle, getTcgTitleCounts } from "./tcg";
 import { GENRE_ORDER } from "./itemFilter";
+import { EN_CATALOG_HUB_PATH, EN_CATALOG_STORES, enCatalogPath } from "./enCatalog";
+
+/** ハブ（/en/catalog）が店ごとに並べる先頭の枚数。ページ側と共有する（ズレると監査が鳴る）。 */
+export const EN_CATALOG_PREVIEW = 12;
 
 export type DisplayedPage = { name: string; rows: Awaited<ReturnType<typeof getItems>> };
 
@@ -34,9 +38,18 @@ export async function loadDisplayedPages(): Promise<DisplayedPage[]> {
   // ここに載せることで audit:page が /en も取得して検査する（広告表示・収集元リーク・
   // 件数突合・日付突合の英語書式は auditRendered 側が両言語を読む）。
   pages.push({ name: "/en", rows: home });
-  // EN専用カタログ（Phase 3b）。**唯一 scope="en" を出してよいページ**（src/lib/scope.ts の
-  // EN_ONLY_PAGES と対。ここに足したらあちらにも足す＝ズレたら audit `en_scope_leak` が鳴る）。
-  pages.push({ name: "/en/catalog", rows: await getEnCatalogItems() });
+  // EN専用カタログ（Phase 3b/3b'）。**ここだけが scope="en" を出してよい面**（src/lib/scope.ts の
+  // EN_ONLY_PAGES と対。両方とも src/lib/enCatalog.ts の登録簿から導出するのでズレようがない）。
+  // ハブは店ごとの先頭 EN_CATALOG_PREVIEW 件だけを描くので、**描く分だけを登録する**
+  // （全件を登録すると audit:page の「描画枚数の食い違い」が必ず鳴る）。
+  const hubRows: DisplayedPage["rows"] = [];
+  for (const store of EN_CATALOG_STORES) {
+    const rows = await getEnCatalogItems(store.source);
+    if (!rows.length) continue;
+    hubRows.push(...rows.slice(0, EN_CATALOG_PREVIEW));
+    pages.push({ name: enCatalogPath(store.slug), rows });
+  }
+  pages.push({ name: EN_CATALOG_HUB_PATH, rows: hubRows });
   // /premium（相場・プレ値ランキング）は 2026-08-10 に表示を取り下げた（getPremiumItems の
   // コメント参照）。ページが無い＝表示範囲にも無い。復活させるならここに1行戻す。
   pages.push({ name: "/lottery", rows: await getLotteryItems() });

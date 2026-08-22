@@ -29,6 +29,9 @@
 //                          あることを確認した。※このテーマは「カートに入れる」「売り切れ」の
 //                          **両方の文言をHTMLに常に含む**ので、文言では在庫を判定しない
 //                          （在庫は products.json の variants[].available が唯一の根拠）。
+//  ・nagano-market.jp / mofusand-mofumofu-market.jp … Phase 3b' で各3商品の商品ページを実際に
+//                          取得し、全件に `action="/cart/add"` と「カートに入れる」があることを確認。
+//                          ちいかわマーケット（既出）と同じ Shopify の姉妹店。
 
 const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   chiikawa_market: new Set(["chiikawamarket.jp"]),
@@ -41,6 +44,8 @@ const VERIFIED_ONLINE_PAIRS: Record<string, ReadonlySet<string>> = {
   nyuka_now: new Set(["amazon.co.jp"]),
   card_chusen: new Set(["amazon.co.jp"]),
   hololive_shop: new Set(["shop.hololivepro.com"]),
+  nagano_market: new Set(["nagano-market.jp"]),
+  mofusand_market: new Set(["mofusand-mofumofu-market.jp"]),
 };
 
 /** ホスト一致だけでは「注文ページ」と言えないホストの追加条件。 */

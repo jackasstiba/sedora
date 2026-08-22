@@ -131,13 +131,30 @@ export async function getItems(filter: ItemFilter) {
  * 掲載の整理（重複解消・非商品投稿の除外）は一覧と同じ `dedupeItems` を通す。**ここで自前の
  * 絞り込みを書かない**＝表示範囲の定義を1か所に揃える（src/lib/pages.ts のコメントと同じ理由）。
  */
-export async function getEnCatalogItems(take = 2000) {
+export async function getEnCatalogItems(source?: string, take = 4000) {
   const rows = await prisma.item.findMany({
-    where: { scope: EN_ONLY_SCOPE },
+    where: source ? { scope: EN_ONLY_SCOPE, source } : { scope: EN_ONLY_SCOPE },
     orderBy: [{ storeListedAt: { sort: "desc", nulls: "last" } }, { id: "desc" }],
     take,
   });
   return dedupeItems(rows);
+}
+
+/**
+ * EN専用カタログのハブ用: 店ごとの件数と「最後に確認した時刻」。
+ *
+ * 件数は `groupBy` で数える（全行を取ってから数えない＝1店2,900件×4店を毎回メモリに載せない）。
+ * ⚠️ この件数は **dedupeItems を通す前**の値なので、店ページの表示件数と1〜数件ずれうる。
+ * 画面ではハブに件数を書かない（＝嘘の数字を出さない）で、リンク先の見出しで実数を出す。
+ */
+export async function getEnCatalogStoreStats(): Promise<Map<string, { count: number; oldestSeenAt: Date | null }>> {
+  const rows = await prisma.item.groupBy({
+    by: ["source"],
+    where: { scope: EN_ONLY_SCOPE },
+    _count: { _all: true },
+    _min: { scrapedAt: true },
+  });
+  return new Map(rows.map((r) => [r.source, { count: r._count._all, oldestSeenAt: r._min.scrapedAt ?? null }]));
 }
 
 /** 最終更新時刻（最新の scrapedAt）だけを返す。

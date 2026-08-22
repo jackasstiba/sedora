@@ -2,6 +2,7 @@ import type { MetadataRoute } from "next";
 import { getSitemapItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
 import { getTcgTitleCounts } from "@/lib/tcg";
 import { nowInstant } from "@/lib/date";
+import { enCatalogPagePaths } from "@/lib/enCatalog";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -28,9 +29,15 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${base}/en/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     // 英語版の固定ガイド（海外読者の入口ページ）。
     { url: `${base}/en/how-to-buy`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
-    // EN専用カタログ（Phase 3b）。日本語版に対応ページが無い＝英語だけの独自コンテンツなので、
-    // /en/items/* と違って「薄い翻訳ページ」にはならない。載せる。
-    { url: `${base}/en/catalog`, lastModified: now, changeFrequency: "daily", priority: 0.7 },
+    // EN専用カタログ（Phase 3b/3b'）。日本語版に対応ページが無い＝英語だけの独自コンテンツなので、
+    // /en/items/* と違って「薄い翻訳ページ」にはならない。ハブと店別ページを載せる
+    // （登録簿から導出＝店を足したら sitemap にも自動で載る）。
+    ...enCatalogPagePaths().map((p) => ({
+      url: `${base}${p}`,
+      lastModified: now,
+      changeFrequency: "daily" as const,
+      priority: 0.7,
+    })),
     // ※ /en/items/* は sitemap に載せない（v1判断）: 本文の大半が日本語原文のまま＝
     //   薄い英語ページを2千件申告しない。hreflang は日英の items ページが双方向で宣言済みなので、
     //   検索エンジンへの対応付けはそちらで足りる。EN詳細の英語化が進んだら追加を再検討。

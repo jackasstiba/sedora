@@ -9,6 +9,7 @@
 //    適用漏れ（新しいページ関数がフィルタを忘れる型）は audit `en_scope_leak` が ERROR で落とす。
 //  ・"jp"（JP専用）は必要になるまで作らない（要らない値を先に作ると分岐だけ増える）。
 import type { Prisma } from "@/generated/prisma/client";
+import { enCatalogPagePaths } from "./enCatalog";
 
 /** EN専用行の scope 値。 */
 export const EN_ONLY_SCOPE = "en";
@@ -27,8 +28,8 @@ export const JP_SCOPE_WHERE: Prisma.ItemWhereInput = {
   OR: [{ scope: null }, { scope: { not: EN_ONLY_SCOPE } }],
 };
 
-/** scope="en" の行を出してよいページ。 */
-export const EN_ONLY_PAGES: ReadonlySet<string> = new Set<string>(["/en/catalog"]);
+/** scope="en" の行を出してよいページ（登録簿から導出＝ページを増やしても書き漏れない）。 */
+export const EN_ONLY_PAGES: ReadonlySet<string> = new Set<string>(enCatalogPagePaths());
 
 /**
  * カタログ行について画面が言ってよい**唯一の事実**＝「この日、まだ公式ストアの一覧にあった」。

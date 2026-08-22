@@ -58,6 +58,35 @@ const ONLY = process.argv
   .filter((a) => a.startsWith("--only="))
   .flatMap((a) => a.slice("--only=".length).split(",").map((s) => s.trim()).filter(Boolean));
 
+/**
+ * 今回の巡回に**出てこなかった行**を消す（突き合わせ削除）。
+ *
+ * 🔴 `sourceId: { notIn: liveIds }` を直接 deleteMany に渡してはいけない。
+ * 実測 2026-08-22（Phase 3b' でキャラ3店をフルカタログ化した回）: ちいかわの liveIds が
+ * 約3,000件になった瞬間に **P2029「The query parameter limit supported by your database is
+ * exceeded」で巡回が落ちた**（SQLのバインド変数の上限）。件数が少ないうちは何年でも動くので、
+ * 収集元が育った日に初めて壊れる型＝ページ送りの固定上限と同じ壊れ方をする。
+ *
+ * → 生存IDの集合はJS側で持ち、**消す id をチャンクに切って**削除する。
+ */
+async function deleteMissing(
+  source: string,
+  liveIds: string[],
+  extraWhere: { eventDate?: null }
+): Promise<number> {
+  const live = new Set(liveIds);
+  const existing = await prisma.item.findMany({
+    where: { source, ...extraWhere },
+    select: { id: true, sourceId: true },
+  });
+  const doomed = existing.filter((r) => !live.has(r.sourceId)).map((r) => r.id);
+  const CHUNK = 200; // 上限に余裕を持たせた大きさ（1回のクエリのバインド変数の数）
+  for (let i = 0; i < doomed.length; i += CHUNK) {
+    await prisma.item.deleteMany({ where: { id: { in: doomed.slice(i, i + CHUNK) } } });
+  }
+  return doomed.length;
+}
+
 async function main() {
   if (ONLY.length) {
     const unknown = ONLY.filter((s) => !SCRAPER_SOURCES.includes(s));
@@ -155,21 +184,15 @@ async function main() {
     // 見つからなくなった＝受付終了した行を消す（過去の抽選が居座らないように）。
     // 巡回失敗(error)時はここに来ないので、取りこぼしで全消しする事故は起きない。
     if (RECONCILE_SOURCES.has(source)) {
-      const liveIds = items.map((i) => i.sourceId);
-      const del = await prisma.item.deleteMany({
-        where: { source, sourceId: { notIn: liveIds } },
-      });
-      if (del.count > 0) console.log(`[${source}] 受付終了 ${del.count}件を削除`);
+      const n = await deleteMissing(source, items.map((i) => i.sourceId), {});
+      if (n > 0) console.log(`[${source}] 受付終了 ${n}件を削除`);
     }
 
     // 日付なしの行だけ突き合わせる（在庫連動の一次ストア）。上と同じく、巡回失敗時は
     // `if (error) continue` でここに来ないので、取りこぼしで全消しする事故は起きない。
     if (RECONCILE_UNDATED_SOURCES.has(source)) {
-      const liveIds = items.map((i) => i.sourceId);
-      const del = await prisma.item.deleteMany({
-        where: { source, eventDate: null, sourceId: { notIn: liveIds } },
-      });
-      if (del.count > 0) console.log(`[${source}] 在庫切れ/一覧落ち ${del.count}件を削除`);
+      const n = await deleteMissing(source, items.map((i) => i.sourceId), { eventDate: null });
+      if (n > 0) console.log(`[${source}] 在庫切れ/一覧落ち ${n}件を削除`);
     }
 
     // pokemon_goods は「直近30日の新着」だけを載せる設計（pokemonGoods.ts のコメント）。

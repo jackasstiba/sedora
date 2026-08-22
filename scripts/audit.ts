@@ -41,6 +41,7 @@ import { GENRE_TO_GOOGLE_CATEGORY } from "../src/lib/productCategory";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { enScopeLeaks } from "../src/lib/scope";
+import { hasStoreProvidedTitle } from "../src/lib/enCatalog";
 import { countWatchlist } from "../src/lib/watchlist";
 import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
@@ -570,13 +571,24 @@ async function main() {
   }
 
   // (9) タイトル末尾の宙ぶらりん助詞（文が途中で切れた痕跡）
+  //     対象は**こちらが文章から商品名を切り出している収集元だけ**。店の構造化フィールドから
+  //     そのまま来る商品名は途中で切れようがなく、当てると誤検知しか出ない
+  //     （実測 2026-08-22: 「風真いろは」4件・「なでなでなでなで」1件＝全部が店の正規商品名）。
   {
+    const targets = shown.filter((r) => !hasStoreProvidedTitle(r.source));
     const bad: string[] = [];
-    for (const r of shown) {
+    for (const r of targets) {
       const c = cleanListTitle(r.source, r.title);
       if (looksTruncatedTitle(c)) bad.push(`[${r.source} #${r.id}] ${c}`);
     }
-    report("dangling_particle", "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）", "warn", bad, baseline);
+    report(
+      "dangling_particle",
+      "タイトル末尾が宙ぶらりん助詞（文の途中で切れた痕跡）",
+      "warn",
+      bad,
+      baseline,
+      targets.length
+    );
   }
 
   // (9c) 年が推測で入った疑いのある遠い未来の日付。
