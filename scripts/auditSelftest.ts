@@ -27,6 +27,7 @@ import {
   isStalePlan,
   jstCalDate,
   monthPrecisionFromTitle,
+  pastNotice,
   plannedDateFromText,
 } from "../src/lib/date";
 import {
@@ -37,6 +38,7 @@ import {
   goodsLabel,
   groupLabel,
   hasGoodsLabelEn,
+  pastNoticeEn,
 } from "../src/lib/i18n";
 import {
   GOODS_NOUNS,
@@ -418,6 +420,34 @@ const cases: Case[] = [
   // 約束でないラベルは対象外（発売済みは相場の価値がある＝落としても書き換えてもいけない）
   { name: "発売・過去 → 鳴らない", fn: () => isStalePromise("発売", null, PAST, today), want: false },
   { name: "開催・過去 → 鳴らない", fn: () => isStalePromise("開催", null, PAST, today), want: false },
+
+  // ── 過去の行に出す「これは過去の情報です」表示（pastNotice） ──────────
+  // 「日付が過ぎた」＝「終わった」ではない。**言い切れるものだけ ended に入れる。**
+  // 鳴る側だけでなく、**終わったと書いてはいけない側**を同じ数だけ固定する
+  // （誤って「終了しました」と出す方が、出さないより取り返しがつかない）。
+  //
+  // 鳴らない側: 未来・当月の行には何も出さない
+  { name: "pastNotice: 未来の行 → 何も出さない", fn: () => pastNotice({ eventType: "開催", eventDate: null, eventDateText: FUTURE }, today), want: null },
+  { name: "pastNotice: 当月の行 → 何も出さない（月末に倒す）", fn: () => pastNotice({ eventType: "抽選", eventDate: null, eventDateText: THIS_MONTH }, today), want: null },
+  { name: "pastNotice: 未来の抽選 → 何も出さない", fn: () => pastNotice({ eventType: "抽選", eventDate: new Date(Date.UTC(2026, 8, 1)), eventDateText: null }, today), want: null },
+  // ended: 過ぎた日付が締切だと言い切れる種別だけ
+  { name: "pastNotice: 過ぎた抽選 → ended", fn: () => pastNotice({ eventType: "抽選", eventDate: null, eventDateText: PAST }, today)?.kind, want: "ended" },
+  { name: "pastNotice: 過ぎた予約 → ended", fn: () => pastNotice({ eventType: "予約", eventDate: null, eventDateText: PAST }, today)?.kind, want: "ended" },
+  // passed: 過ぎても「もう買えない」とは言えない種別。**ended にしてはいけない**
+  { name: "pastNotice: 過ぎた発売 → passed（終了と書かない）", fn: () => pastNotice({ eventType: "発売", eventDate: null, eventDateText: PAST }, today)?.kind, want: "passed" },
+  { name: "pastNotice: 過ぎた登場予定 → passed", fn: () => pastNotice({ eventType: "登場予定", eventDate: null, eventDateText: PAST }, today)?.kind, want: "passed" },
+  { name: "pastNotice: 過ぎた再販 → passed", fn: () => pastNotice({ eventType: "再販", eventDate: null, eventDateText: PAST }, today)?.kind, want: "passed" },
+  { name: "pastNotice: 過ぎた予約開始 → passed（受付が始まった、の意味）", fn: () => pastNotice({ eventType: "予約開始", eventDate: null, eventDateText: PAST }, today)?.kind, want: "passed" },
+  // unknown: 終了日を持っていない種別・知らない語彙は断定しない
+  { name: "pastNotice: 過ぎた開催 → unknown（終了日を持っていない）", fn: () => pastNotice({ eventType: "開催", eventDate: null, eventDateText: PAST }, today)?.kind, want: "unknown" },
+  { name: "pastNotice: 未知『エントリー受付中』 → unknown", fn: () => pastNotice({ eventType: "エントリー受付中", eventDate: null, eventDateText: PAST }, today)?.kind, want: "unknown" },
+  // 文言そのものの約束: ended 以外は「終了」と書かない（表示層スキャンと同じ思想を関数側でも固定）
+  { name: "pastNotice: passed の文に『終了』を入れない", fn: () => /終了/.test(pastNotice({ eventType: "発売", eventDate: null, eventDateText: PAST }, today)!.headline), want: false },
+  { name: "pastNotice: unknown の文に『終了しました』を入れない", fn: () => /終了しました/.test(pastNotice({ eventType: "開催", eventDate: null, eventDateText: PAST }, today)!.headline), want: false },
+  // 英語は同じ主張の言い換えに留める（翻訳で断定を1段強くしない）
+  { name: "pastNoticeEn: unknown に has ended と書かない", fn: () => /has ended/.test(pastNoticeEn("unknown").headline), want: false },
+  { name: "pastNoticeEn: passed に has ended と書かない", fn: () => /has ended/.test(pastNoticeEn("passed").headline), want: false },
+  { name: "pastNoticeEn: ended は閉じたと書く", fn: () => pastNoticeEn("ended").headline, want: "Entries have closed" },
 
   // ── 日付の読み方（過去に2回誤読した書式を固定する） ──────────
   { name: "「2026年08月下旬」は月末に倒す", fn: () => plannedDateFromText("2026年08月下旬登場予定")?.toISOString().slice(0, 10), want: "2026-08-31" },

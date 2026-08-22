@@ -9,7 +9,8 @@ import { formatPriceDisplay } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabelEn, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
-import { countdown, displayEventType, eventDateLabelEn, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabelEn, eventPeriodText, isEventPast, isMonthPrecision, pastNotice, todayJst } from "@/lib/date";
+import { PastNoticeBoxEn } from "@/components/PastNotice";
 import { cleanListTitle, displaySubGenre } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { absoluteImageUrl, proxiedImageUrl } from "@/lib/imageProxy";
@@ -21,6 +22,7 @@ import {
   genreLabel,
   goodsLabel,
   hasGoodsLabelEn,
+  pastNoticeEn,
 } from "@/lib/i18n";
 import { parseHighlights } from "@/lib/collabHighlights";
 import { ONLINE_TAG_EN, isOnlineItem } from "@/lib/channel";
@@ -130,6 +132,15 @@ export default async function ItemPageEn({ params }: Props) {
   // バッジは日本語の語彙で決めて表示だけ英語（対応表に無い語は日本語のまま＝断定を足さない）。
   const eventLabelJa = displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst());
   const eventLabelEn = eventTypeLabel(eventLabelJa, "en");
+  // 期限が過ぎた行は「過去のものだ」と画面で言う。判定(kind)は日本語版と**同じ純関数**を
+  // 使い、英語にするのは文言だけ＝翻訳で断定の強さが変わらないようにする。
+  const pastInfo = pastNotice(item, todayJst());
+  const pastEn = pastInfo ? pastNoticeEn(pastInfo.kind) : null;
+  // 受付が終わった行の主導線を赤（＝今すぐ動ける色）で出さない。リンク自体は残す。
+  const primaryBtn =
+    pastInfo?.kind === "ended"
+      ? "inline-flex items-center justify-center rounded-lg bg-neutral-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-800 dark:bg-neutral-600 dark:hover:bg-neutral-500"
+      : "inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700";
 
   // 構造化データはパンくずのみ（英語版v1）。Product/Offer は日本語詳細が正規に申告している。
   const jsonLd = {
@@ -170,6 +181,15 @@ export default async function ItemPageEn({ params }: Props) {
           日本語
         </Link>
       </nav>
+
+      {pastInfo && pastEn && (
+        <PastNoticeBoxEn
+          kind={pastInfo.kind}
+          headline={pastEn.headline}
+          detail={pastEn.detail}
+          dateLabel={dateLabel}
+        />
+      )}
 
       <div className="grid gap-6 sm:grid-cols-2">
         <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800">
@@ -355,7 +375,7 @@ export default async function ItemPageEn({ params }: Props) {
                 kind="official"
                 source={sourceCode(item.source)}
                 itemId={item.id}
-                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                className={primaryBtn}
               >
                 View official page →
               </OutboundLink>
@@ -366,7 +386,7 @@ export default async function ItemPageEn({ params }: Props) {
                 kind="official_secondary"
                 source={sourceCode(item.source)}
                 itemId={item.id}
-                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                className={primaryBtn}
               >
                 {officialUrlLabelEn(item.highlights, item.source)}
               </OutboundLink>
@@ -383,9 +403,12 @@ export default async function ItemPageEn({ params }: Props) {
               </OutboundLink>
             )}
           </div>
+          {/* 受付が終わった行に「最新の在庫・価格・応募条件を確認して」と書くと、
+              まだ買えるように読める。言えることに合わせて注記を差し替える。 */}
           <p className="text-xs text-neutral-600 dark:text-neutral-400">
-            Linked pages are in Japanese. Check the latest stock, price and entry conditions there.
-            All dates are JST.
+            {pastInfo?.kind === "ended"
+              ? "This listing is in the past. Linked pages are in Japanese; check there for any restock or reopening. All dates are JST."
+              : "Linked pages are in Japanese. Check the latest stock, price and entry conditions there. All dates are JST."}
           </p>
           <p className="text-xs">
             <Link href="/en/how-to-buy" className="text-rose-600 hover:underline dark:text-rose-400">

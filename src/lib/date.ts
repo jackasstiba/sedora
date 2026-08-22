@@ -443,6 +443,83 @@ export function displayEventType(
   return PAST_TENSE_LABELS[eventType] ?? eventType;
 }
 
+/**
+ * 期限が過ぎた行の「これは過去の情報です」表示。**言い切れることだけを書く。**
+ *
+ * 「終わったものを消さずに残す」ための表示側の実装（サウナイキタイの【閉店】表示に倣う。
+ * あちらは閉店した施設を消さず、冠と告知ブロックと情報源リンクを付けて残している）。
+ * ハツコレは既に**過去行のページを 200 で残しており**（getItemById は日付で絞らない）、
+ * sitemap も直近60日ぶんを申告している。欠けているのは**残っているページが過去だと言わない**こと。
+ *
+ * 実測 2026-08-22（本番 /items/14159・開催日 8/6 の16日後）: バッジ「開催」／「開催日 2026年8月6日(木)」／
+ * 赤い「公式で販売内容を見る →」／「※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件を
+ * ご確認ください。」。画面のどこにも過去のものだと書いていない＝**現在進行形の嘘**。
+ * この状態のページが本番に 1,643件（うち 1,207件が sitemap 申告中）ある。
+ *
+ * **「日付が過ぎた」＝「終わった」ではない。** 種別ごとに言えることが違うので3つに分ける
+ * （本番の eventType 語彙10種を数えた上での対応表。表に無いものは断定しない側に倒す）:
+ *
+ *  ・ended   … 過ぎた日付が**締切**なので、受付が終わったと言い切れる。抽選(69件)/予約(191件)。
+ *              PAST_TENSE_LABELS が既にバッジで「予約終了」と書いている行と同じ判断に揃える。
+ *  ・passed  … 過ぎても買えなくなったとは言えない（むしろ今買える）。発売(387)/登場予定(428)/
+ *              再販(36)/予約開始(27)/販売開始(16)。「終了しました」と書いてはいけない側。
+ *  ・unknown … 終わったか分からない。開催(464)/情報(25)/未知の語彙。**eventDate は開始日で、
+ *              終了日を持つ列が無い**ので、まだやっているかもしれない。分からないと書く。
+ *
+ * 終了日を eventDateText の範囲表記から読み取って ended に格上げする案は採らない:
+ * 自由文の範囲末尾を当てにいくと、外した時に「終了しました」という**取り返しのつかない断定**を
+ * 出すことになる（既定値に語らせない／知っているものだけ書き換える）。
+ *
+ * この関数は時計を読まない（today を受け取る）。
+ */
+export type PastNoticeKind = "ended" | "passed" | "unknown";
+export type PastNotice = { kind: PastNoticeKind; headline: string; detail: string };
+
+/** 過ぎた日付が締切だと言い切れる種別 → 見出し。 */
+const ENDED_NOTICE: Record<string, string> = {
+  抽選: "応募の受付は終了しました",
+  予約: "予約の受付は終了しました",
+  予約受付中: "予約の受付は終了しました",
+};
+
+/** 日付は過ぎたが「もう買えない」とは言えない種別 → 見出し。 */
+const PASSED_NOTICE: Record<string, string> = {
+  発売: "発売日は過ぎています",
+  再販: "再販日は過ぎています",
+  販売開始: "販売開始日は過ぎています",
+  予約開始: "予約の開始日は過ぎています",
+  登場予定: "登場日は過ぎています",
+};
+
+export function pastNotice(
+  item: { eventType: string; eventDate: Date | string | null; eventDateText: string | null },
+  today: Date
+): PastNotice | null {
+  if (!isEventPast(item.eventDate, item.eventDateText, today)) return null;
+  const ended = ENDED_NOTICE[item.eventType];
+  if (ended) {
+    return {
+      kind: "ended",
+      headline: ended,
+      detail: "掲載している締切は過ぎています。再受付・再販があるかどうかは、このページでは確認できていません。",
+    };
+  }
+  const passed = PASSED_NOTICE[item.eventType];
+  if (passed) {
+    return {
+      kind: "passed",
+      headline: passed,
+      detail: "今も購入できるかどうかは確認できていません。リンク先の公式ページでご確認ください。",
+    };
+  }
+  // 「開催」と未知の語彙。開始日しか持っていないので、終わったとは書かない。
+  return {
+    kind: "unknown",
+    headline: "掲載している日付は過ぎています",
+    detail: "終了しているかどうかは確認できていません。最新の状況はリンク先の公式ページでご確認ください。",
+  };
+}
+
 export function isStalePromise(
   eventType: string | null,
   eventDate: Date | string | null,

@@ -18,7 +18,9 @@
 import * as cheerio from "cheerio";
 import { prisma } from "../src/lib/prisma";
 import { loadDisplayedPages } from "../src/lib/pages";
-import { countdownBadgeProblem, parseDisplayedDate, renderedDateProblems, todayJst } from "../src/lib/date";
+import { countdownBadgeProblem, parseDisplayedDate, pastNotice, renderedDateProblems, todayJst } from "../src/lib/date";
+import { withLiveStoreDeadline } from "../src/lib/itemFilter";
+import { JP_SCOPE_WHERE } from "../src/lib/scope";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import { AD_DISCLOSURE, AD_DISCLOSURE_EN, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
 import { ONLINE_TAG_EN, isOnlineItem } from "../src/lib/channel";
@@ -247,6 +249,8 @@ async function main() {
   // 「受付中ストア」節の行を何行見たか。stores を持つ商品があるのに0行なら空振り。
   let storeRowsSeen = 0;
   let storeItemsCount = 0;
+  let pastItemsSeen = 0;   // 過ぎた日付の詳細を何ページ見たか（0件の意味を決める母数）
+  let pastNoticeSeen = 0;  // そのうち「これは過去の情報です」が出ていた数
   // 楽天アフィリリンクを何本見たか。本番に出ていなければ収益は0なので、0本で終わったら
   // 「きれいだから0件」ではなく検査の空振り（＝収益導線が消えていても気付けない状態）。
   let rakutenLinksSeen = 0;
@@ -469,6 +473,77 @@ async function main() {
     }
   }
 
+  // 過ぎた日付の商品詳細＝**表示範囲(loadDisplayedPages)に1件も入っていない面**。
+  // 上の詳細ループは表示中の行しか回らないので、この型は原理的に母数0で、
+  // 「指摘0件」が“見た上での0”にならない（[[System/rules_hatsukore]] 母数の規約）。
+  //
+  // 見に行く相手は **sitemap が今 Google に申告している行**＝直近60日で過ぎた行
+  // （getSitemapItemRefs と同じ窓）。ここが現在形のまま残っていたのが 2026-08-22 の実測
+  // （/items/14159・開催日の16日後にバッジ「開催」と赤い購入導線）。
+  {
+    const grace = new Date(today);
+    grace.setUTCDate(grace.getUTCDate() - 60);
+    const rows = await prisma.item.findMany({
+      where: { AND: [{ eventDate: { gte: grace, lt: today } }, JP_SCOPE_WHERE] },
+      select: {
+        id: true, source: true, title: true, url: true, price: true, imageUrl: true,
+        eventType: true, eventDate: true, eventDateText: true, stores: true,
+      },
+      orderBy: { eventDate: "desc" },
+    });
+    // 種別ごとに最大4件ずつ抜き取る＝ended / passed / unknown の**全分岐を必ず通す**
+    // （新着順に取ると本番で件数の多い「発売」だけを見て、開催・抽選を1件も見ない)。
+    const perType = new Map<string, number>();
+    const sample = rows.filter((r) => {
+      const n = perType.get(r.eventType) ?? 0;
+      if (n >= 4) return false;
+      perType.set(r.eventType, n + 1);
+      return true;
+    });
+    for (const r of sample) {
+      // 応募先を持つ行の表示日は「まだ締切前の最短」に作り直される＝画面はまだ未来かもしれない。
+      // 画面と同じ値で期待値を作る（DBの eventDate だけを見ると誤報になる）。
+      const shown = withLiveStoreDeadline({ ...r, url: r.url ?? null }, today);
+      const want = pastNotice({ ...r, eventDate: shown.eventDate }, today);
+      const page = `/items/${r.id}`;
+      const html = await fetchPage(`${BASE}${page}`);
+      if (html === null) {
+        flag(page, "取得失敗", "過去アイテムの詳細ページを取得できない");
+        continue;
+      }
+      checked++;
+      const $ = cheerio.load(html);
+      $("script, style, noscript").remove();
+      const text = $("main").text().replace(/\s+/g, " ").trim();
+      const box = $("[data-past-notice]");
+      const got = box.first().attr("data-past-notice") ?? null;
+      if (!want) {
+        // 画面上はまだ未来（受付中の店が残っている）行。告知を出していたら逆に誤り。
+        if (got) flag(page, "過去の告知の食い違い", `まだ締切前なのに「過去の情報です」を出している（${got}）`);
+        continue;
+      }
+      pastItemsSeen++;
+      if (!got) {
+        flag(
+          page,
+          "過去の情報を現在形で出している",
+          `${r.eventType}／${new Date(r.eventDate!).toISOString().slice(0, 10)} は過ぎているのに「これは過去の情報です」の告知が無い`
+        );
+        continue;
+      }
+      pastNoticeSeen++;
+      if (got !== want.kind)
+        flag(page, "過去の告知の食い違い", `判定は ${want.kind} なのに画面は ${got}`);
+      // **言い切っていない行を「終了しました」と書いていないか。** 誤って終了と断定する方が、
+      // 出さないより取り返しがつかない（開催中のイベントを終わったことにする）。
+      if (got !== "ended" && /終了しました/.test(box.text()))
+        flag(page, "過去の告知の食い違い", `${got} の行に「終了しました」と書いている`);
+      // 受付が終わった行に、まだ買えるかのような注記が残っていないか。
+      if (got === "ended" && text.includes("予約・購入は各リンク先で最新の在庫"))
+        flag(page, "過去の告知の食い違い", "受付終了の行に「最新の在庫・価格・抽選条件をご確認ください」が残っている");
+    }
+  }
+
   // 英語の固定ガイド（/en/how-to-buy）。カードは無いが、配信物の検査
   // （収集元リーク・広告表示・未定義値の露出）は同じ網に入れる。
   {
@@ -493,7 +568,8 @@ async function main() {
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
       `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / ` +
-      `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚 / EN詳細 ${enDetailChecked}ページ`
+      `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚 / EN詳細 ${enDetailChecked}ページ / ` +
+      `過ぎた日付の詳細 ${pastItemsSeen}ページ（過去の告知 ${pastNoticeSeen}件）`
   );
   // 隠すべきホストが1つも作れていないなら、この検査は何も守っていない。
   if (checked > 0 && hiddenHosts.length === 0) {
@@ -514,6 +590,11 @@ async function main() {
   // それは「きれいだから0件」ではなく「何も見ていない0件」（セレクタ・見出し文言の変更）。
   if (storeItemsCount > 0 && storeRowsSeen === 0) {
     flag("(全体)", "検査が空振り", "「受付中ストア」の行を1行も検出できていない（締切の突合が動いていない）");
+  }
+  // 過ぎた日付の行は本番に千件単位である。1ページも見ていないなら、それは
+  // 「過去の告知が全部出ている」ではなく「この検査が何も見ていない」（抽出条件が壊れた）。
+  if (checked > 0 && pastItemsSeen === 0) {
+    flag("(全体)", "検査が空振り", "過ぎた日付の商品詳細を1ページも検査していない（過去の告知の検査が動いていない）");
   }
   if (checked > 0 && cardsSeen === 0) {
     flag("(全体)", "検査が空振り", "商品カードを1枚も検出できていない（セレクタが壊れた疑い）");

@@ -226,3 +226,26 @@ export const UI = {
 } as const;
 
 export type UiDict = (typeof UI)[Locale];
+
+/**
+ * 過去日の行に出す「これは過去の情報です」表示の英語（src/lib/date.ts の pastNotice と対）。
+ *
+ * **同じ主張の言い換えに留める。** 日本語側が「終わったと言い切れない」と書いている行を
+ * 英語で "has ended" にすると、翻訳で断定が1段強くなる（この面で一番やってはいけない種類の差）。
+ */
+export function pastNoticeEn(kind: "ended" | "passed" | "unknown"): { headline: string; detail: string } {
+  if (kind === "ended")
+    return {
+      headline: "Entries have closed",
+      detail: "The listed deadline has passed. We have not confirmed whether it will reopen or restock.",
+    };
+  if (kind === "passed")
+    return {
+      headline: "The listed date has passed",
+      detail: "We have not confirmed whether it is still available. Please check the linked official page.",
+    };
+  return {
+    headline: "The listed date has passed",
+    detail: "We have not confirmed whether it has ended. Please check the linked official page for the latest status.",
+  };
+}

@@ -9,7 +9,8 @@ import { formatPriceDisplay, isPerDrawFee, parseYen } from "@/lib/margin";
 import { hasSearchableTitle, isOfficialUrl, officialUrlLabel, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
-import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, todayJst } from "@/lib/date";
+import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPast, isMonthPrecision, pastNotice, todayJst } from "@/lib/date";
+import { PastNoticeBox } from "@/components/PastNotice";
 import { cleanListTitle, displaySubGenre, itemPageTitle, venueForTitle } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
 import { productCategoryValue } from "@/lib/productCategory";
@@ -160,6 +161,15 @@ export default async function ItemPage({ params }: Props) {
   const lotteryCtx = { source: item.source, eventDate: item.eventDate, stores: item.stores };
   // 節の見出し・説明・ボタン文言は中身に合わせる（コラボに「応募ページ」と書かない）。
   const storeCopy = storeSectionCopy(item.source);
+  // 期限が過ぎた行は「過去のものだ」と画面で言う（消さずに残すが、現在形で嘘をつかない）。
+  // 判定・文言は date.ts に置く＝ここでは種別ごとの言い分けを書かない。
+  const past = pastNotice(item, todayJst());
+  // 受付が終わった行の主導線を赤（＝今すぐ動ける色）で出さない。リンク自体は残す
+  // ＝ページを行き止まりにせず、再販・次回の確認先として使えるようにする。
+  const primaryBtn =
+    past?.kind === "ended"
+      ? "inline-flex items-center justify-center rounded-lg bg-neutral-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-neutral-800 dark:bg-neutral-600 dark:hover:bg-neutral-500"
+      : "inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700";
 
   // Product構造化データの必須要件はoffers/review/aggregateRatingのいずれかをGoogleが要求する。
   // レビュー・評価は実データが無いので付けない（推測値は約束しない方針）。定価(price)は裏取り済みの
@@ -239,6 +249,8 @@ export default async function ItemPage({ params }: Props) {
           {item.genre}
         </Link>
       </nav>
+
+      {past && <PastNoticeBox notice={past} dateLabel={dateLabel} />}
 
       <div className="grid gap-6 sm:grid-cols-2">
         <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800">
@@ -385,7 +397,7 @@ export default async function ItemPage({ params }: Props) {
                 kind="official"
                 source={sourceCode(item.source)}
                 itemId={item.id}
-                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                className={primaryBtn}
               >
                 公式ページで見る →
               </OutboundLink>
@@ -399,7 +411,7 @@ export default async function ItemPage({ params }: Props) {
                 kind="official_secondary"
                 source={sourceCode(item.source)}
                 itemId={item.id}
-                className="inline-flex items-center justify-center rounded-lg bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-rose-700"
+                className={primaryBtn}
               >
                 {officialUrlLabel(item.highlights, item.source)}
               </OutboundLink>
@@ -420,8 +432,12 @@ export default async function ItemPage({ params }: Props) {
               </OutboundLink>
             )}
           </div>
+          {/* 受付が終わったと言い切れる行に「最新の在庫・価格・抽選条件をご確認ください」と
+              書くと、まだ買えるかのように読める。言えることに合わせて注記を差し替える。 */}
           <p className="text-xs text-neutral-600 dark:text-neutral-400">
-            ※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。
+            {past?.kind === "ended"
+              ? "※ この情報は過去のものです。再販・再受付の有無は各リンク先でご確認ください。"
+              : "※ 予約・購入は各リンク先で最新の在庫・価格・抽選条件をご確認ください。"}
           </p>
         </div>
       </div>
