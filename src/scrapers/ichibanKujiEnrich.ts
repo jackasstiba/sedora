@@ -7,9 +7,27 @@
 //   <div class="itemColList">
 //     <h4 class="name sp">A賞 別班饅頭クッション</h4> ...（pc用にもう1つ同名）
 //     <img ... src="https://assets.1kuji.com/.../xxx.webp">
-// これを賞ラベル＋賞品名（＋画像）に構造化する。
+//     <ul class="data"><li>■全10種（選べる）</li><li>■サイズ：約4.5cm</li></ul>
+// これを賞ラベル＋賞品名（＋画像＋全N種/選べる/サイズ）に構造化する。
+//
+// **「全N種（選べる）」は、この商品で最も判断を分ける事実**（狙って手に入れられるか、
+// 引くまで分からないか）なのに、賞品名しか取っていなかったので画面に出せていなかった。
+// 実測 2026-08-22（/products/onep104）: 11賞のうち 4賞が「（選べる）」、
+// ラストワン賞だけ全N種の行そのものが無い＝**「選べない」ではなく「書いていない」**。
+// 書いていないものを false にしない（＝undefined のまま出さない）。
 
-export type KujiPrize = { label: string; name: string; image: string | null };
+export type KujiPrize = {
+  label: string;
+  name: string;
+  image: string | null;
+  /** 「■全10種」の N。読めなければ **付けない**（0や1で埋めない＝既定値に語らせない）。 */
+  variants?: number;
+  /** 「■全10種（選べる）」の有無。**全N種の行を読めた賞だけ** true/false が入る。
+   *  行そのものが無い賞（ラストワン賞など）は undefined＝「選べるかどうか不明」。 */
+  choosable?: boolean;
+  /** 「■サイズ：約7.5cm」の右側。**収集元の文言のまま**（単位も表記も揃えない）。 */
+  size?: string;
+};
 
 function decodeEntities(s: string): string {
   return s
@@ -39,6 +57,34 @@ function splitPrize(raw: string): { label: string; name: string } {
 }
 
 /**
+ * 1つの賞ブロックから `<ul class="data">` の仕様行を読む（全N種／選べる／サイズ）。
+ *
+ * **読めた行だけを返す。** 行が無い賞に false や 0 を入れると、画面が
+ * 「選べません」と断定してしまう（収集元は何も言っていない）。
+ */
+function prizeSpec(block: string): Pick<KujiPrize, "variants" | "choosable" | "size"> {
+  const ul = block.match(/<ul class="data">([\s\S]*?)<\/ul>/)?.[1];
+  if (!ul) return {};
+  const items = [...ul.matchAll(/<li>([^<]*)<\/li>/g)].map((m) => decodeEntities(m[1]));
+  const out: Pick<KujiPrize, "variants" | "choosable" | "size"> = {};
+  for (const raw of items) {
+    // 先頭の「■」は収集元の飾り。値の一部ではないので落とす。
+    const line = raw.replace(/^[■●・\s]+/, "").trim();
+    const all = line.match(/^全(\d+)種/);
+    if (all) {
+      out.variants = Number(all[1]);
+      // 「（選べる）」と書いてある賞だけ true。書いていない賞は false（＝この行は読めた上で
+      // 選べると書いていない）。行ごと無い賞は undefined のまま＝上の if で弾かれる。
+      out.choosable = /[（(]\s*選べる\s*[）)]/.test(line);
+      continue;
+    }
+    const size = line.match(/^サイズ[：:]\s*(.+)$/);
+    if (size && size[1].trim()) out.size = size[1].trim();
+  }
+  return out;
+}
+
+/**
  * 詳細ページHTMLから各等賞のラインナップを抽出する。
  * itemColList ブロック単位で賞名(sp表記=pcと重複するので sp のみ採用)と代表画像を取る。
  * listCol が無い/賞が取れないページでは空配列（＝深掘り失敗、呼び出し側は既存情報を活かす）。
@@ -59,7 +105,7 @@ export function extractKujiPrizes(html: string): KujiPrize[] {
       b.match(/<img[^>]+src="(https:\/\/assets\.1kuji\.com\/[^"]+)"/)?.[1] ??
       b.match(/data-src="(https:\/\/assets\.1kuji\.com\/[^"]+)"/)?.[1] ??
       null;
-    out.push({ label, name, image: img });
+    out.push({ label, name, image: img, ...prizeSpec(b) });
   }
   return out;
 }

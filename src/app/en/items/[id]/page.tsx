@@ -593,6 +593,29 @@ export default async function ItemPageEn({ params }: Props) {
                     <p lang="ja" className="line-clamp-3 flex-1 text-sm leading-snug text-neutral-800 dark:text-neutral-100">
                       {p.name}
                     </p>
+                    {/* 「選べる」＝狙って手に入るか。英語でも同じ事実だけを出す。
+                        サイズは収集元の日本語表記そのままなので lang="ja" を付ける。 */}
+                    {(p.variants || p.size) && (
+                      <div className="flex flex-wrap items-center gap-1 text-[11px] leading-tight">
+                        {p.variants && (
+                          <span
+                            className={`rounded px-1.5 py-0.5 font-bold ${
+                              p.choosable
+                                ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-100"
+                                : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                            }`}
+                          >
+                            {p.variants} type{p.variants > 1 ? "s" : ""}
+                            {p.choosable ? " · you pick" : ""}
+                          </span>
+                        )}
+                        {p.size && (
+                          <span lang="ja" className="text-neutral-600 dark:text-neutral-400">
+                            {p.size}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               );

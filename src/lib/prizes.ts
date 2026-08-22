@@ -33,6 +33,11 @@ export type PrizeFull = {
   label: string;
   name: string;
   image: string | null;
+  // 収集元の詳細ページが賞ごとに書いている仕様（src/scrapers/ichibanKujiEnrich.ts の prizeSpec）。
+  // **書いてある賞にだけ入る。** 無い賞を 0/false で埋めない（画面が「選べません」と断定する）。
+  variants?: number; // 「■全10種」の N
+  choosable?: boolean; // 「（選べる）」と書いてあるか（全N種の行を読めた賞だけ true/false）
+  size?: string; // 「■サイズ：約4.5cm」の右側。収集元の文言のまま
   resalePrice?: number; // 二次相場（円）
   resaleText?: string; // 表示用（例: "中古 ¥15,500"）
   resaleUrl?: string; // 相場元の商品ページ
@@ -52,6 +57,11 @@ export function parsePrizesJson(json: string | null | undefined): PrizeFull[] | 
           label: p.label,
           name: typeof p.name === "string" ? p.name : "",
           image: typeof p.image === "string" ? p.image : null,
+          // 数値・真偽値として書かれているものだけ通す（"10" のような文字列は採らない＝
+          // 型が違うものを読み替えると、壊れたJSONを黙って正しいことにしてしまう）。
+          variants: typeof p.variants === "number" && p.variants > 0 ? p.variants : undefined,
+          choosable: typeof p.choosable === "boolean" ? p.choosable : undefined,
+          size: typeof p.size === "string" && p.size.trim() ? p.size : undefined,
           resalePrice: typeof p.resalePrice === "number" ? p.resalePrice : undefined,
           resaleText: typeof p.resaleText === "string" ? p.resaleText : undefined,
           resaleUrl: typeof p.resaleUrl === "string" ? p.resaleUrl : undefined,

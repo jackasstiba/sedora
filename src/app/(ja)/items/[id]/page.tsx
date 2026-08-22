@@ -573,7 +573,10 @@ export default async function ItemPage({ params }: Props) {
       {prizeGallery && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
-            🎯 {prizesGraded ? "各賞ラインナップ" : "賞品ラインナップ"}（全{prizeGallery.length}種・くじ）
+            {/* 等級賞は「賞の数」。賞ごとの「全N種」（＝その賞の中の種類数）と同じ
+                「種」で数えると、G賞 全2種 の隣に 全11種 と出て別の意味に読める。 */}
+            🎯 {prizesGraded ? "各賞ラインナップ" : "賞品ラインナップ"}（全{prizeGallery.length}
+            {prizesGraded ? "賞" : "種"}・くじ）
           </h2>
           <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
             くじ（抽選）で当たる賞品です。
@@ -625,6 +628,27 @@ export default async function ItemPage({ params }: Props) {
                   <p className="line-clamp-3 flex-1 text-sm leading-snug text-neutral-800 dark:text-neutral-100">
                     {p.name}
                   </p>
+                  {/* 収集元が賞ごとに書いている仕様。**この商品で最も判断を分けるのは
+                      「選べる」かどうか**（狙って手に入るのか、引くまで分からないのか）。
+                      書いていない賞には何も出さない＝「選べません」と勝手に断定しない。 */}
+                  {(p.variants || p.size) && (
+                    <div className="flex flex-wrap items-center gap-1 text-[11px] leading-tight">
+                      {p.variants && (
+                        <span
+                          className={`rounded px-1.5 py-0.5 font-bold ${
+                            p.choosable
+                              ? "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-100"
+                              : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300"
+                          }`}
+                        >
+                          全{p.variants}種{p.choosable ? "・選べる" : ""}
+                        </span>
+                      )}
+                      {p.size && (
+                        <span className="text-neutral-600 dark:text-neutral-400">{p.size}</span>
+                      )}
+                    </div>
+                  )}
                   {/* ※ 賞ごとの「相場 ¥…」バッジも同じ理由で撤去（2026-08-10）。 */}
                 </div>
               </div>
