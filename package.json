@@ -35,6 +35,8 @@
     "gsc": "node --env-file-if-exists=.env --import tsx scripts/gsc.ts",
     "turso:setup": "node --env-file-if-exists=.env --import tsx scripts/turso-setup.ts",
     "migrate:events": "node --env-file-if-exists=.env --import tsx scripts/migrateEvents.ts",
+    "migrate:snapshots": "node --env-file-if-exists=.env --import tsx scripts/migrateSnapshots.ts",
+    "snapshot": "node --env-file-if-exists=.env --import tsx scripts/snapshot.ts",
     "migrate:genre": "node --env-file-if-exists=.env --import tsx scripts/migrateGenreVocab.ts",
     "db:alter": "node --env-file-if-exists=.env --import tsx scripts/applyAlter.ts",
     "db:deploy": "prisma migrate deploy",

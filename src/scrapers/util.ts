@@ -12,6 +12,22 @@ export async function fetchHtml(url: string): Promise<string> {
 }
 
 /**
+ * **飛ばされた先のURLも返す** fetch。入場ゲート（仮想待機室）は本文ではなくリダイレクト先に出る。
+ *
+ * 実測 2026-08-24: ポケセンは全ページを `wr.pokemoncenter-online.com` へ302で飛ばしており、
+ * 返ってくる本文は cookie を試すだけの2.5KBのシェルで **`queue-it` の文字が1つも無い**。
+ * 本文だけを見る判定は「タイルが0件」としか言えず、3日間「マークアップ変更の疑い」という
+ * **誤った診断**を記録し続けていた。飛ばされた先を見れば1行で分かる。
+ */
+export async function fetchHtmlWithFinalUrl(url: string): Promise<{ html: string; finalUrl: string }> {
+  const res = await fetch(url, { headers: { "User-Agent": USER_AGENT } });
+  if (!res.ok) {
+    throw new Error(`fetch failed: ${url} (${res.status})`);
+  }
+  return { html: await res.text(), finalUrl: res.url || url };
+}
+
+/**
  * 文字コードを見てから復号する fetch。**Shift_JIS で配信している一次ストア用**。
  *
  * `res.text()` は Content-Type に charset が無いと UTF-8 と決め打ちするので、

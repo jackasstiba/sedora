@@ -12,6 +12,7 @@ import { cleanupTakaraTomyEnded } from "./cleanupTakaraTomyEnded";
 import { refreshRafflePeriods } from "./refreshRafflePeriods";
 import { runImageBackfill } from "./backfillImages";
 import { runDeadImagePrune } from "./pruneDeadImages";
+import { describeSnapshot, writeDailySnapshot } from "./snapshot";
 import { monthPrecisionFromTitle, todayJst } from "../src/lib/date";
 import { nowInstant } from "../src/lib/date";
 
@@ -244,6 +245,16 @@ async function main() {
   // 更新の一部として回す。別コマンドに分けると「人が覚えている」に依存する（画像の後付けで一度踏んだ型）。
   console.log("\n== 死んだ画像の掃除 ==");
   await runDeadImagePrune();
+
+  // **その日の在籍状況を1行ずつ残す**（2026-08-22 新設）。トレンドを語るための唯一の材料で、
+  // ここを回さなかった日は**二度と埋められない**（在籍数は「今」しか読めず、過去の日を後から
+  // 数え直す材料がDBに無い）。別コマンドに分けない理由は scripts/snapshot.ts の先頭に書いた
+  // （画像の後付けで一度踏んだ型。audit `scrape_skips_snapshot` が外れたら落とす）。
+  //
+  // 巡回が一部失敗していても書く: 数えるのは**DBの在籍数**であって取得できた件数ではないので、
+  // 失敗した回に飛ばすと「その日は無かった」のか「測れなかった」のか後から区別できなくなる。
+  console.log("\n== 日次スナップショット ==");
+  console.log(describeSnapshot(await writeDailySnapshot(prisma)));
 
   checkHealth(results);
 

@@ -94,6 +94,13 @@ export default async function HomeEn() {
             browse Japan&apos;s official stores →
           </Link>
         </p>
+        {/* 今週その店たちが並べた分。トップは「これから」の面なので、「もう並んだ」側は別に出す。 */}
+        <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+          To see what those stores put up for sale in the last 7 days,{" "}
+          <Link href="/en/trends" className="font-semibold text-rose-600 hover:underline dark:text-rose-400">
+            check what went up this week →
+          </Link>
+        </p>
       </header>
 
       <ItemBrowser items={items} genres={genreCounts} initial={initial} initialShow={PAGE_SIZE} locale="en" />

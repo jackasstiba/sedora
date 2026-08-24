@@ -69,6 +69,21 @@ export function enCatalogPagePaths(): string[] {
 }
 
 /**
+ * `/en/trends`（今週その店たちが並べた分）のページ名。**中身は src/lib/trends.ts。**
+ *
+ * 名前だけここに置く理由: `src/lib/scope.ts` が「EN専用行を出してよいページ」を組み立てるのに
+ * この名前を要るが、trends.ts は prisma を読む。scope.ts から trends.ts を import すると
+ * **表示範囲の定義に DB クライアントが付いてくる**（scope.ts は表示層からも使う）。
+ * 登録簿であるこのファイルはどちらからも安全に読めるので、名前の置き場はここにする。
+ */
+export const EN_TRENDS_PATH = "/en/trends";
+
+/** EN専用行（scope="en"）を出してよいページ全部。**ページを増やしたらここに足す。** */
+export function enOnlyPagePaths(): string[] {
+  return [...enCatalogPagePaths(), EN_TRENDS_PATH];
+}
+
+/**
  * 登録簿の店が全部「公式ページと表記してよい」ソースか（＝店名を出しても収集元が割れない）。
  * audit:selftest がこれを固定する。**文章の約束ではなく機械の判定で守る。**
  */

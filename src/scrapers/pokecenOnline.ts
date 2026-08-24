@@ -1,5 +1,5 @@
 import { ScrapedItem } from "./types";
-import { fetchHtml } from "./util";
+import { fetchHtmlWithFinalUrl } from "./util";
 
 // ポケモンセンターオンライン（pokemoncenter-online.com）＝**ポケモングッズ通販の一次情報**。
 //
@@ -50,19 +50,30 @@ export function pokecenGenre(title: string): { genre: string; subGenre: string }
 
 /** Queue-it（仮想待機室）のページか。高需要時にポケセンが有効化し、商品HTMLの代わりに返る。
  *  実測 2026-08-21 22時の待機室ページに `<meta id="queue-it_log">` があった。通常ページにも
- *  導入スクリプトが載る可能性があるので、この判定は**タイルが0件のときだけ**使う。 */
-export function isQueueItPage(html: string): boolean {
-  return /queue-?it/i.test(html);
+ *  導入スクリプトが載る可能性があるので、この判定は**タイルが0件のときだけ**使う。
+ *
+ *  ⚠️ **本文だけでは名指しできない形がある**（実測 2026-08-24）。ポケセンは全ページを
+ *  `wr.pokemoncenter-online.com` へ302で飛ばすようになり、返る本文は cookie を試すだけの
+ *  2.5KBのシェルで **`queue-it` の文字が1つも入っていない**。そのため 8/21〜8/23 の3日間、
+ *  巡回は「新商品タイルが0件（マークアップ変更を疑う）」と**誤った診断**を出し続け、
+ *  その誤診断がそのまま作業記録に転記されていた。→ **飛ばされた先のURL**も判定材料にする。 */
+export function isQueueItPage(html: string, finalUrl?: string): boolean {
+  if (/queue-?it/i.test(html)) return true;
+  if (!finalUrl) return false;
+  // 入口の形: https://wr.<店のドメイン>/?c=<店>&e=wr20260821ec&…（e= が待機室のイベントID）
+  return /^https?:\/\/wr\.[^/]+\//i.test(finalUrl) && /[?&]e=wr\d{6,}/i.test(finalUrl);
 }
 
 export async function scrapePokecenOnline(): Promise<ScrapedItem[]> {
-  const html = await fetchHtml(LIST_URL);
+  const { html, finalUrl } = await fetchHtmlWithFinalUrl(LIST_URL);
   const tiles = parsePokecenTiles(html);
   // 0件は「新商品が無い」ではない。実測 2026-08-21 22時: 一覧の代わりに Queue-it 待機室
   // （40KB・noindex）が返っていた＝一時ゲート。それ以外の0件はマークアップ変更を疑って赤くする
   // （巡回失敗なら前回データが残り、3日で source_stale が知らせる）。
-  if (tiles.length === 0 && isQueueItPage(html)) {
-    throw new Error("pokecen_online: Queue-it待機室が有効（一時的な入場制限）。時間を置けば直る型");
+  if (tiles.length === 0 && isQueueItPage(html, finalUrl)) {
+    throw new Error(
+      `pokecen_online: 仮想待機室（Queue-it）に飛ばされた＝店側の入場制限。素の取得では中に入れない。飛ばされた先=${finalUrl}`
+    );
   }
   if (tiles.length === 0) throw new Error("pokecen_online: 新商品タイルが0件（マークアップ変更を疑う）");
 

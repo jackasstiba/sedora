@@ -1,3 +1,4 @@
+import { titleEventDates } from "../lib/date";
 import { matchFranchises } from "../lib/franchise";
 import { normalizeForSearch } from "../lib/itemFilter";
 import {
@@ -49,40 +50,62 @@ export function extractArticleBody(html: string): string {
 // 開催期間・告知・タイトルはいずれも「8月8日〜8月16日」。発売日/開催日が本サイトの中核価値
 // なので、記事側に**ラベル付きの完全な日付**があるときはそれを正とする（[[裏取り済みのみ約束]]）。
 // 記事末尾の関連記事ブロックは他イベントの期間を含むため、必ず切り落とした本文だけを見る。
-const PERIOD_LABEL = /(?:開催期間|開催日程|開催日|販売期間|実施期間|開催スケジュール)/;
+// **ラベルは1記事に何度も出る**（2026-08-24 実測）。記事自身の期間・記事内の広告ブロック・
+// 切り落とし切れなかった関連記事が、同じ本文の中に並ぶ。だから「最初の1つ」を見る作りは、
+// 記事自身の期間を**取り逃した上で、別のイベントの期間を記事の期間だと思う**ことができる。
+// 実測 #17417「ゼンレスゾーンゼロ × ウェンディーズ」: 本文には
+//   [702]「期間 : 2026年8月5日〜9月23日」   ← 記事自身（タイトル「8月5日より」と一致）
+//   [1268]「開催期間 2026年8月4日〜9月23日」 ← 別ブロックに残った古い告知
+//   [1390/1505/1638]「期間 : …」            ← 明治／スシロー／松屋浅草＝**別のコラボ**
+// があり、最初の1つ（1268）だけを見てタイトルと突き合わせて不一致→訂正せず、
+// **一次情報（店の公式X 7/28「8/5（水）より全国店舗で開催！」）と食い違う 8/4 を出し続けていた**。
+// → ラベルを**全部**拾い、採用の条件（タイトル一致 / 年だけの打ち間違い）は変えない。
+//    条件が門番なので、候補を増やしても「推測で日付を動かさない」は保たれる。
+const PERIOD_LABEL_G = /(?:開催期間|開催日程|開催日|販売期間|実施期間|開催スケジュール|期間)\s*[:：]?/g;
 const FULL_DATE = /(\d{4})\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/;
+
+/** 本文に現れる「期間」ラベルつきの日付を**すべて**、本文中の位置つきで返す（前から順）。 */
+export function extractEventPeriods(
+  bodyText: string
+): { date: Date; text: string; at: number }[] {
+  const out: { date: Date; text: string; at: number }[] = [];
+  for (const m of bodyText.matchAll(PERIOD_LABEL_G)) {
+    const start = (m.index ?? 0) + m[0].length;
+    const after = bodyText.slice(start, start + 40);
+    const d = after.match(FULL_DATE);
+    if (!d || d.index === undefined) continue;
+    const [y, mo, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
+    if (mo < 1 || mo > 12 || day < 1 || day > 31) continue;
+    // 終了日「〜8月16日」「～2026年8月16日」が続くなら表示テキストに含める。
+    const tail = after
+      .slice(d.index + d[0].length)
+      .match(/^\s*[〜~～\-–—]\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
+    const text = tail
+      ? `${y}年${mo}月${day}日〜${tail[2]}月${tail[3]}日`
+      : `${y}年${mo}月${day}日`;
+    out.push({ date: new Date(Date.UTC(y, mo - 1, day)), text, at: m.index ?? 0 });
+  }
+  return out;
+}
 
 /**
  * 記事本文の「開催期間: 2026年8月8日〜8月16日」からイベント開始日と表示テキストを取り出す。
  * ラベル直後（40字以内）に西暦つきの完全な日付がある場合のみ返す＝推測しない。
+ * **先頭の1つ**を返す（複数の候補が要るときは `extractEventPeriods`）。
  */
 export function extractEventPeriod(
   bodyText: string
 ): { date: Date; text: string } | null {
-  const m = bodyText.match(PERIOD_LABEL);
-  if (!m || m.index === undefined) return null;
-  const after = bodyText.slice(m.index + m[0].length, m.index + m[0].length + 40);
-  const d = after.match(FULL_DATE);
-  if (!d || d.index === undefined) return null;
-  const [y, mo, day] = [Number(d[1]), Number(d[2]), Number(d[3])];
-  if (mo < 1 || mo > 12 || day < 1 || day > 31) return null;
-  // 終了日「〜8月16日」「～2026年8月16日」が続くなら表示テキストに含める。
-  const tail = after
-    .slice(d.index + d[0].length)
-    .match(/^\s*[〜~～\-–—]\s*(?:(\d{4})\s*年\s*)?(\d{1,2})\s*月\s*(\d{1,2})\s*日/);
-  const text = tail
-    ? `${y}年${mo}月${day}日〜${tail[2]}月${tail[3]}日`
-    : `${y}年${mo}月${day}日`;
-  return { date: new Date(Date.UTC(y, mo - 1, day)), text };
+  const first = extractEventPeriods(bodyText)[0];
+  return first ? { date: first.date, text: first.text } : null;
 }
 
 // タイトル中の日付トークン（「8月8日」「2026.8.11」「8.11」）を月日で拾う。
-const TITLE_DATE_RE = /(?:\d{4}\s*[年.．]\s*)?(\d{1,2})\s*[月.．]\s*(\d{1,2})\s*日?/g;
-
+// **終了日（〜まで）と先行販売日は落とす**＝規約は src/lib/date.ts の titleEventDates に1本化。
+// ここに素朴な正規表現を書き直すと、監査が知っている除外を訂正側が知らない状態に戻る
+// （2026-08-24 にそれで正しい2件を壊した。理由は titleEventDates のコメント）。
 function titleMonthDays(title: string): { mm: number; dd: number }[] {
-  return [...title.matchAll(TITLE_DATE_RE)]
-    .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
-    .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
+  return titleEventDates(title, { dotted: true });
 }
 
 /**
@@ -97,19 +120,29 @@ function titleMonthDays(title: string): { mm: number; dd: number }[] {
 export function pickVerifiedEventDate(
   bodyText: string,
   title: string,
-  current: Date | null
+  current: Date | null,
+  today?: Date
 ): { date: Date; text: string } | null {
-  const p = extractEventPeriod(bodyText);
-  if (!p) return null;
-  const mm = p.date.getUTCMonth() + 1;
-  const dd = p.date.getUTCDate();
-  const byTitle = titleMonthDays(title).some((t) => t.mm === mm && t.dd === dd);
-  const byYearTypo =
-    current !== null &&
-    current.getUTCMonth() + 1 === mm &&
-    current.getUTCDate() === dd &&
-    current.getUTCFullYear() !== p.date.getUTCFullYear();
-  return byTitle || byYearTypo ? p : null;
+  const titleDays = titleMonthDays(title);
+  // 候補は**本文に出てくる順**。同じ条件を満たすものが複数あれば前のほうを採る
+  // （記事自身の期間は本文の先頭側にあり、関連記事・広告ブロックは後ろに来るため）。
+  for (const p of extractEventPeriods(bodyText)) {
+    // 切り落とし切れなかった関連記事には**何年も前の期間**が並ぶ（実測: 同じ本文に
+    // 2017年の記事が7件）。月日だけが偶然タイトルと一致すると、9年前の日付を
+    // 「裏取りできた」と言ってしまう。基準日をもらえた回はそれを門にする。
+    // 既定値に「今日」を書かない（省略された瞬間に壁時計が紛れ込む＝時計は date.ts だけ）。
+    if (today && p.date.getTime() < today.getTime() - 400 * 86_400_000) continue;
+    const mm = p.date.getUTCMonth() + 1;
+    const dd = p.date.getUTCDate();
+    const byTitle = titleDays.some((t) => t.mm === mm && t.dd === dd);
+    const byYearTypo =
+      current !== null &&
+      current.getUTCMonth() + 1 === mm &&
+      current.getUTCDate() === dd &&
+      current.getUTCFullYear() !== p.date.getUTCFullYear();
+    if (byTitle || byYearTypo) return { date: p.date, text: p.text };
+  }
+  return null;
 }
 
 // SNS・URL短縮・アフィリエイト転送は「何が売られるか」の一次情報ではないので公式候補から除外する。

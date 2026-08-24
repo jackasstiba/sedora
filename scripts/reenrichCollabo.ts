@@ -7,6 +7,7 @@
  * 表示スコープの collabo 全件を再取得して作り直す。冪等・非破壊（highlights/hasLottery のみ更新）。
  */
 import { prisma } from "../src/lib/prisma";
+import { todayJst } from "../src/lib/date";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { fetchHtml, sleep } from "../src/scrapers/util";
 import {
@@ -64,7 +65,7 @@ async function main() {
 
       // 開催日の裏取り: 一覧の「期間 :」は収集元側で誤っていることがあるため、記事本文の
       // 「開催期間」とタイトルの日付が一致した場合だけ日付を正す（推測では動かさない）。
-      const verified = pickVerifiedEventDate(body, it.title, it.eventDate);
+      const verified = pickVerifiedEventDate(body, it.title, it.eventDate, todayJst());
       if (verified && verified.date.getTime() !== (it.eventDate?.getTime() ?? -1)) {
         await prisma.item.update({
           where: { id: it.id },

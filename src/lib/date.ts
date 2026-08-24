@@ -630,7 +630,58 @@ export function eventDateLabelEn(
 ): string | null {
   if (eventDate && isMonthPrecision(eventDateText)) return formatMonthEn(eventDate);
   if (eventDate) return formatShortEn(eventDate);
-  return displayEventDateText(eventDateText);
+  const text = displayEventDateText(eventDateText);
+  if (!text) return null;
+  // **自分たちが組み立てたラベルだけ**を英語にする（下の ownDateTextEn）。訳せないものは
+  // 収集元の文言のまま出す＝言い換えて精度を足さない、という既存の方針は変えていない。
+  return ownDateTextEn(text) ?? text;
+}
+
+/**
+ * `eventDateText` のうち、**収集元の文言ではなく、こちらのコードが組み立てた定型ラベル**を
+ * 英語にする。訳せないものは null（＝呼び出し側が原文のまま出す）。
+ *
+ * なぜ必要か（2026-08-23 実測）: 英語版の日付欄に日本語が出ていた。表示中 8,075件のうち
+ * **332件が「日付なし＋文言あり」**で、その中身の大半はこちらが作った文字列だった
+ * （`登場 8/21` / `在庫あり・再販中` / `受付終了（直近 8/21）` / `2026年9月発売予定`）。
+ *
+ * ここを「収集元の文言だから訳さない」で片付けてはいけない。**書いたのは自分たちで、
+ * 意味は生成箇所を読めば確定する**（hololiveShop.ts＝店に並んだ日 / nyukaNow.ts＝抽選の受付終了と
+ * 直近実施日・在庫あり再販中 / gashapon.ts＝発売予定の月）。意味が確定するものだけをここに書く。
+ *
+ * **自由文は1つも訳さない。** 収集元が書いた「2026年9月下旬登場予定」等は対象外＝原文のまま。
+ * 訳し始めると、こちらの解釈が事実の顔をして英語面に出る（[[UIラベルは裏取り済みのみ約束]]）。
+ */
+export function ownDateTextEn(eventDateText: string): string | null {
+  const t = eventDateText.trim();
+  const md = (mo: number, d: number) =>
+    mo >= 1 && mo <= 12 && d >= 1 && d <= 31 ? `${MONTHS_EN[mo - 1]} ${d}` : null;
+
+  // hololiveShop: 在庫販売の新着＝**店に並んだ日**（publishedMs 由来。発売日ではない）。
+  const appeared = t.match(/^登場\s*(\d{1,2})\/(\d{1,2})$/);
+  if (appeared) {
+    const label = md(Number(appeared[1]), Number(appeared[2]));
+    return label && `Listed ${label}`;
+  }
+
+  // gashapon: 発売予定の**月**（日は作っていない）。年も必ず出す（古い予定を今年と誤読させない）。
+  const planned = t.match(/^(\d{4})年(\d{1,2})月発売予定$/);
+  if (planned) {
+    const mo = Number(planned[2]);
+    return mo >= 1 && mo <= 12 ? `Planned for ${MONTHS_EN[mo - 1]} ${planned[1]}` : null;
+  }
+
+  // nyukaNow: 抽選の受付は終了していて、直近の実施日はこの日、という行。
+  const closed = t.match(/^受付終了（直近\s*(\d{1,2})\/(\d{1,2})）$/);
+  if (closed) {
+    const label = md(Number(closed[1]), Number(closed[2]));
+    return label && `Applications closed (latest ${label})`;
+  }
+
+  // nyukaNow: 在庫があって再販が続いている行。
+  if (t === "在庫あり・再販中") return "In stock (restocked)";
+
+  return null;
 }
 
 export function displayEventDateText(eventDateText: string | null): string | null {
@@ -664,4 +715,42 @@ export function eventPeriodText(
   const hasDeadline = /締切|期間|受付|応募|先着/.test(eventDateText);
   if (!hasTime && !hasRange && !hasDeadline) return null;
   return eventDateText.trim();
+}
+
+/**
+ * **タイトルに書かれている日付のうち、「開催日・発売日そのもの」だけ**を拾う。
+ *
+ * ここは「タイトルと突き合わせて日付を裏取りする」全ての面が共有する規約にする。
+ * 実測 2026-08-24 に**同じ規約が2箇所に書かれていなかったせいで事故った**:
+ * 監査（`date_title_mismatch`）は下の2つを最初から除外していたのに、**訂正する側**
+ * （collaboEnrich の裏取り）は素朴に「タイトルの M月D日」を全部拾っていた。その結果、
+ * 収集元の記事から期間を拾い直す改善を入れた瞬間に、**正しかった2件を壊した**:
+ *   ・#35299「…8月8日**まで**仙台七夕まつりに掲出!」→ 開催 8/6〜8/8 なのに 8/8 に化けた
+ *   ・#57152「…8月13日より**セブンで先行販売**!」→ 一般 8/24 なのに先行日 8/13 に化けた
+ *     （しかも拾った期間は記事内の**別イベント**「ちいかわベーカリー京都 8/13〜9/9」のもの）
+ *
+ * 除外する2種（どちらも「日付は正しいが、開催日ではない」）:
+ *   ・**終了日** … 直後が「まで/迄」
+ *   ・**先行販売日** … 直後14字以内に「先行」
+ *
+ * `dotted` は「2026.8.11」「8.11」形式も拾うか。監査は拾わない（プラモの縮尺 1/144 等と
+ * 区別できず誤検知になるため）。収集元の記事タイトルを見る側だけが true にする。
+ */
+export function titleEventDates(
+  title: string,
+  opts: { dotted?: boolean } = {}
+): { mm: number; dd: number }[] {
+  const re = opts.dotted
+    ? /(?:\d{4}\s*[年.．]\s*)?(\d{1,2})\s*[月.．]\s*(\d{1,2})\s*日?/g
+    : /(\d{1,2})\s*月\s*(\d{1,2})\s*日/g;
+  const out: { mm: number; dd: number }[] = [];
+  for (const m of title.matchAll(re)) {
+    const after = title.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 14);
+    if (/^\s*(?:まで|迄)/.test(after)) continue;
+    if (/先行/.test(after)) continue;
+    const mm = Number(m[1]);
+    const dd = Number(m[2]);
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) out.push({ mm, dd });
+  }
+  return out;
 }

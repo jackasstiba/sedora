@@ -19,7 +19,13 @@ echo ========================================= >> %LOG%
 echo [%date% %time%] run start >> %LOG%
 
 rem --- 1. data update ---
-call :step "scrape"            "npm run scrape"             || exit /b 1
+rem The daily snapshot must be recorded even if the crawl failed: it counts what is in
+rem the DB (not what the crawl fetched), and a missed day can never be filled in later.
+rem So keep the crawl exit code, take the snapshot either way, then fail. See run_scrape.md.
+call :step "scrape"            "npm run scrape"
+set SCRAPE_RC=%errorlevel%
+call :step "snapshot"          "npm run snapshot"           || exit /b 1
+if not "%SCRAPE_RC%"=="0" exit /b 1
 call :step "backfill images"   "npm run scrape:images"      || exit /b 1
 call :step "reenrich collabo"  "npm run reenrich:collabo"   || exit /b 1
 rem Market-price steps (scrape:prices / prices:recheck / scrape:kuji:prices) are ON HOLD

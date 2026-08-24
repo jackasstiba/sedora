@@ -30,10 +30,35 @@ cmd.exe は .bat を「実行しながらバイト位置で読み直す」ため
 
 現在は以下2つのタスクを登録済み:
 
-| タスク名 | 実行時刻 |
-| --- | --- |
-| `HatsukoreScrape_AM` | 毎日 08:00 |
-| `HatsukoreScrape_PM` | 毎日 20:00 |
+| タスク名 | 実行時刻 | 状態 |
+| --- | --- | --- |
+| `HatsukoreScrape_AM` | 毎日 08:00 | **有効**（2026-08-22 に再開） |
+| `HatsukoreScrape_PM` | 毎日 20:00 | **無効のまま** |
+
+### 2026-08-18 に止めて、2026-08-22 に片方だけ戻した経緯
+
+「毎日自動で複数回起動しようとするから全部止めて」という指示で AM/PM 両方を Disabled に
+した（削除はしていない）。データが古いのは故障ではなく、この停止のためだった。
+
+2026-08-22 に日次スナップショット（下記）を入れたので、**AM だけ**を戻した。
+スナップショットは1日1行なので、履歴を欠かさないために必要なのは1日1回。起動回数は
+止める前の半分になる。PM は無効のままなので、鮮度が要る日は手で `run_scrape.bat` を叩く。
+
+さらに、止めた理由そのもの（黒い窓が前面に出る）を潰すため、タスクは
+**`run_scrape_hidden.vbs` 経由**で起動する:
+
+```
+wscript.exe "C:\Users\user\Documents\kurodo\sedori_site\run_scrape_hidden.vbs"
+```
+
+`WScript.Shell.Run(..., 0, True)` はウィンドウを出さずに bat を待ち、**終了コードをそのまま
+返す**ので、失敗はこれまで通り `LastTaskResult` に残る（＝隠したせいで失敗が見えなくなる、
+にはならない）。この .vbs も **ASCII 限定**（bat と同じ理由）。
+
+戻す/止めるとき:
+- 1日2回に戻す: `Enable-ScheduledTask -TaskName HatsukoreScrape_PM`
+  （PM も非表示にするなら、AM と同じく Action を wscript.exe 経由に変えてから）
+- 全部止める: `Disable-ScheduledTask -TaskName Hatsukore*`
 
 確認: `schtasks /query /tn HatsukoreScrape_AM /v /fo LIST`
 削除: `schtasks /delete /tn HatsukoreScrape_AM /f`（PM も同様）
@@ -62,6 +87,26 @@ cmd.exe は .bat を「実行しながらバイト位置で読み直す」ため
    巡回窓から流れた行は二度と上書きされないので、スクレイパーを直しても既存行には届かない。
    ここで「保存された相対日付（〜明日 22:00）の凍結解除」と「商品名に書いてある月精度の補完」を
    毎回かけ直す（2026-08-16 新設）。
+1b. **日次スナップショット** — `npm run snapshot`（`scripts/snapshot.ts`）。
+   その日の在籍状況を `DailySnapshot` に1日1組だけ書く（total / 収集元 / ジャンル / 作品 / scope）。
+
+   **なぜ要るか**: このDBは過去を持っていない。`Item.scrapedAt` は巡回のたびに上書きされ、
+   一覧から落ちた行は削除される。つまり「先週と比べて何が増えたか」は**貯め始めない限り
+   永久に計算できない**。歴史は後から作れない唯一のもので、**回さなかった日は二度と埋まらない**。
+   意味と、画面や投稿に出すときの約束（在籍件数であって表示件数ではない／`newCount=null` は
+   「不明」であって 0 ではない）は `src/lib/snapshot.ts` の先頭に書いてある。
+
+   実体は **`npm run scrape` の中で回る**（`scrape.ts` の最後で `writeDailySnapshot()`）。
+   画像の後付けと同じ型で、別コマンドに分けると「人が覚えている」に依存するため。
+   外れたら監査 `scrape_skips_snapshot` が ERROR で落とす。
+
+   この bat の `snapshot` 行は**巡回が失敗した回のための保険**で、`scrape` の終了コードを
+   持ったまま先に撮り、その後で失敗させる。数えるのはDBの在籍数であって取得できた件数では
+   ないので、失敗した回に飛ばすと「その日は無かった」のか「測れなかった」のか区別できなくなる。
+   同じ日に何度走っても行は増えない（day+dim+key で上書き）。
+
+   本番Tursoに表を作るのは1回だけ: `npm run migrate:snapshots`（追加のみ・冪等）。
+
 2. **チェック** — `audit:selftest`（監査自身が鳴るべき入力で鳴るか。検査は本番を壊さないので
    壊れていても咎められず「0件」と報告してしまう）→ `audit`（表示品質の常設監査。ERROR が
    あれば「きれい」と言えない）→ `audit:facts`（一次情報との突合）。

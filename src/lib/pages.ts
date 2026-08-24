@@ -23,6 +23,7 @@ import {
 import { getItemsByTcgTitle, getTcgTitleCounts } from "./tcg";
 import { GENRE_ORDER } from "./itemFilter";
 import { EN_CATALOG_HUB_PATH, EN_CATALOG_STORES, enCatalogPath } from "./enCatalog";
+import { EN_TRENDS_PATH, getTrendItems, getTrendsLastCheckedAt, trendWindow } from "./trends";
 
 /** ハブ（/en/catalog）が店ごとに並べる先頭の枚数。ページ側と共有する（ズレると監査が鳴る）。 */
 export const EN_CATALOG_PREVIEW = 12;
@@ -50,6 +51,14 @@ export async function loadDisplayedPages(): Promise<DisplayedPage[]> {
     pages.push({ name: enCatalogPath(store.slug), rows });
   }
   pages.push({ name: EN_CATALOG_HUB_PATH, rows: hubRows });
+  // 今週その店たちが並べた分（/en/trends）。**表示範囲に登録する**＝監査（en_scope_leak /
+  // 画像・タイトル・日付の各検査 / audit:page の描画突合）がこの面も見る。登録し忘れた面は
+  // 「検査が0件と報告するのに実は誰も見ていない」状態になる（src/lib/pages.ts の存在理由）。
+  const trendsWin = trendWindow(await getTrendsLastCheckedAt());
+  if (trendsWin) {
+    const trendRows = await getTrendItems(trendsWin);
+    if (trendRows.length) pages.push({ name: EN_TRENDS_PATH, rows: trendRows });
+  }
   // /premium（相場・プレ値ランキング）は 2026-08-10 に表示を取り下げた（getPremiumItems の
   // コメント参照）。ページが無い＝表示範囲にも無い。復活させるならここに1行戻す。
   pages.push({ name: "/lottery", rows: await getLotteryItems() });

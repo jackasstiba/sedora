@@ -27,6 +27,7 @@ import {
   isStalePlan,
   jstCalDate,
   monthPrecisionFromTitle,
+  ownDateTextEn,
   pastNotice,
   plannedDateFromText,
 } from "../src/lib/date";
@@ -110,13 +111,14 @@ const ANDROID_UA =
 const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
 import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, officialUrlLabelEn, rakutenSearchUrl } from "../src/lib/outbound";
-import { extractKujiFee, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
+import { extractKujiFee, extractKujiPrizes, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import {
   extractMapUrl,
   extractOfficialUrl,
   formatOfficialItems,
   isSingleProductUrl,
   parseShopifyOfficialItems,
+  pickVerifiedEventDate,
   shopifyJsonUrl,
 } from "../src/scrapers/collaboEnrich";
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
@@ -176,6 +178,8 @@ import {
   relativeLuminance,
 } from "../src/lib/contrast";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
+import { buildSnapshotRows, type SnapshotInput } from "../src/lib/snapshot";
+import { countByStore, trendWindow, trendsHeadlineEn, trendsIsStale } from "../src/lib/trends";
 
 // 観点H用: パレットは**実ファイルから読む**。ここに値をコピーすると、CSSを戻したときに
 // 検査だけが古い値で緑を出す（＝「誤りを正解として固定する」型・2026-08-16 に踏んだ）。
@@ -401,6 +405,61 @@ function unsearchableSourceFiles(): string[] {
 }
 
 type Case = { name: string; fn: () => unknown; want: unknown };
+
+/** 日次スナップショットの検査用の行。既定は「作品名の付かない、日付なしの普通の発売品」。 */
+function snapItem(id: number, o: Partial<SnapshotInput> = {}): SnapshotInput {
+  return { id, source: "src_a", genre: "フィギュア", eventType: "発売", title: "何かの箱", eventDate: null, hasLottery: null, scope: null, ...o };
+}
+/** 集計結果から1つの数を取り出す（見つからない＝その行が無いことを null で区別する）。 */
+function snapCell(rows: ReturnType<typeof buildSnapshotRows>, dim: string, key: string, field: "count" | "newCount" | "lotteryCount" | "datedCount" | "maxItemId"): number | null | undefined {
+  const r = rows.find((x) => x.dim === dim && x.key === key);
+  return r === undefined ? undefined : r[field];
+}
+
+/**
+ * **prizes 列に書き込むスクリプトが mergePrizeEnrichment を通しているか**を、ソースを読んで確かめる。
+ *
+ * 由来 2026-08-22: `scripts/scrape.ts` は通していたのに、一番くじだけを回す
+ * `scripts/scrapeKuji.ts` は `prizes: item.prizes ?? null` と直に上書きしていた
+ * ＝相場を付けた直後に差分更新を1回回すだけで消える経路が、修正済みの事故の隣に残っていた。
+ * 文章のルール（[[System/rules_hatsukore]]「後付けした値は次の巡回で消えていないか疑う」）は
+ * 一度守られてから破られたので、**機械に落とすまで守れていない**。
+ */
+function prizeWritersWithoutMerge(): string[] {
+  const dir = "scripts";
+  const bad: string[] = [];
+  for (const f of readdirSync(dir)) {
+    if (!f.endsWith(".ts") || f === "auditSelftest.ts") continue;
+    const src = readFileSync(`${dir}/${f}`, "utf8");
+    // **危険な形だけを見る**＝スクレイプ結果の prizes をそのまま書き込む形（prizes: item.prizes）。
+    // `prizes: true`（select のフラグ）や、既存行から組み直す `prizes: JSON.stringify(...)`
+    // は対象外。ここを広く取ると正しいスクリプトが鳴り続け、いずれ黙らせる場所になる。
+    if (!/\bprizes:\s*\w+\.prizes\b/.test(src)) continue;
+    if (!src.includes("mergePrizeEnrichment")) bad.push(f);
+  }
+  return bad.sort();
+}
+
+/** 実測 2026-08-22 /products/onep104 の各賞ブロック構造（<ul class="data"> に仕様が入る）。
+ *  ①選べる ②選べると書いていない ③全N種の行ごと無い（ラストワン賞）の3通りを1つに畳んである。 */
+const KUJI_SPEC_HTML = [
+  '<section class="listCol">',
+  '<div class="itemColList"><h4 class="name sp">G賞 永久指針アクリルスタンド</h4>',
+  '<img src="https://assets.1kuji.com/uploads/product_item/image/1/a.webp" />',
+  '<ul class="data"><li>■全2種（選べる）</li><li>■サイズ：約7.5cm</li></ul></div>',
+  '<div class="itemColList"><h4 class="name sp">I賞 エルバフアクリルチャーム</h4>',
+  '<img src="https://assets.1kuji.com/uploads/product_item/image/2/b.webp" />',
+  '<ul class="data"><li>■全10種</li><li>■サイズ：約4.5cm</li></ul></div>',
+  '<div class="itemColList"><h4 class="name sp">ラストワン賞 軍子宮 MASTERLISE EXPIECE</h4>',
+  '<img src="https://assets.1kuji.com/uploads/product_item/image/3/c.webp" />',
+  '<ul class="data"><li>■サイズ：約19cm</li></ul></div>',
+  '</section>',
+].join("");
+
+/** 仕様欄（ul.data）を持たない旧構造。賞名・画像は今までどおり取れること。 */
+const KUJI_NOSPEC_HTML =
+  '<section class="listCol"><div class="itemColList"><h4 class="name sp">F賞 エルバフタオル</h4>' +
+  '<img src="https://assets.1kuji.com/uploads/product_item/image/4/d.webp" /></div></section>';
 
 const cases: Case[] = [
   // ── 期限切れの約束ラベル ────────────────────────────────
@@ -1358,6 +1417,25 @@ const cases: Case[] = [
   },
   { name: "取扱店が無ければ捏造しない", fn: () => extractKujiStores('<div class="detail glBox"><ul><li>■発売日：8月29日</li></ul></div>'), want: null },
 
+  // (e2) 賞ごとの「全N種（選べる）／サイズ」。**この商品で最も判断を分けるのが「選べる」か**
+  //      （狙って手に入るのか、引くまで分からないのか）。実測 2026-08-22 の /products/onep104 の
+  //      構造をそのまま合成し、**書いていないものを false/0 で埋めない**ことを固定する。
+  { name: "賞の『全2種（選べる）』を読む", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[0]?.variants, want: 2 },
+  { name: "賞の『（選べる）』を拾う", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[0]?.choosable, want: true },
+  { name: "賞のサイズは収集元の文言のまま", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[0]?.size, want: "約7.5cm" },
+  // 全N種の行はあるが「（選べる）」が無い賞 → **読めた上で選べると書いていない**＝false
+  { name: "『選べる』と書いていない賞は false", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[1]?.choosable, want: false },
+  { name: "『選べる』が無くても全N種は読む", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[1]?.variants, want: 10 },
+  // 全N種の行そのものが無い賞（ラストワン賞）→ **undefined。false にしない**
+  { name: "全N種の行が無い賞は choosable を作らない", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[2]?.choosable, want: undefined },
+  { name: "全N種の行が無い賞は variants を作らない", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[2]?.variants, want: undefined },
+  { name: "全N種が無くてもサイズは読む", fn: () => extractKujiPrizes(KUJI_SPEC_HTML)[2]?.size, want: "約19cm" },
+  // prizes を書くスクリプトは必ず mergePrizeEnrichment を通す（後付けの相場を消さない）
+  { name: "prizes を直に上書きするスクリプトが無い", fn: () => prizeWritersWithoutMerge().join(","), want: "" },
+  // data の ul が無い旧構造でも、賞名・画像は今までどおり取れる（後方互換）
+  { name: "仕様欄が無くても賞名は取れる", fn: () => extractKujiPrizes(KUJI_NOSPEC_HTML)[0]?.name, want: "エルバフタオル" },
+  { name: "仕様欄が無い賞に size を作らない", fn: () => extractKujiPrizes(KUJI_NOSPEC_HTML)[0]?.size, want: undefined },
+
   // (f) 公式リンクの選び方（2026-08-10 実測の誤誘導）。
   //     イベント記事の本文末尾には無関係な通販商品リンクが並ぶので、URL の見た目だけで
   //     選ぶと「ウマ娘 × KFC」→ ¥23,100 のフィギュア商品ページ、が起きる。
@@ -1414,6 +1492,24 @@ const cases: Case[] = [
     want: "LEGO レゴ アイデア The X-Files",
   },
   {
+    // 2026-08-24 実測 #147021。相場の実況が**商品タグに密着**していて、節を割っても
+    // 商品名と同じ節に残る＝節の分類では落ちず、画面に「ヤフオクめちゃ高騰していた」が出た。
+    // 相場・転売の実況を出さない、が掲載方針そのもの（[[ハツコレの立ち位置]]）。
+    name: "商品タグに密着した相場の実況（ヤフオク◯◯高騰していた【…】）を落とす",
+    fn: () =>
+      cleanListTitle(
+        "channeltono",
+        "本日8月24日完全締切です！ヤフオクめちゃ高騰していた【特典】東方ぬいぐるみシリーズ 56 宇佐見蓮子 ふもふもれんこ。など5種！かなり高騰してたのでお早めに！"
+      ),
+    want: "【特典】東方ぬいぐるみシリーズ 56 宇佐見蓮子 ふもふもれんこ。など5種",
+  },
+  {
+    // 落とす側に転びすぎない確認: 市場語を含まない普通の商品名は1文字も削らない。
+    name: "市場語を含まない商品名は削らない",
+    fn: () => cleanListTitle("channeltono", "【特典】東方ぬいぐるみシリーズ 56 宇佐見蓮子 ふもふもれんこ。など5種"),
+    want: "【特典】東方ぬいぐるみシリーズ 56 宇佐見蓮子 ふもふもれんこ。など5種",
+  },
+  {
     name: "公式URLの &amp; をデコードして保存する",
     fn: () =>
       extractOfficialUrl(
@@ -1456,6 +1552,118 @@ const cases: Case[] = [
   // ── 2026-08-21 追加: ポケセンの Queue-it 待機室判定（実測 22時に一覧の代わりに返った） ──
   { name: "Queue-it待機室ページを名指しできる", fn: () => isQueueItPage('<meta id="queue-it_log" data-proxyurl="https://logging-x.queue-it.net/">'), want: true },
   { name: "通常HTMLはQueue-it扱いしない", fn: () => isQueueItPage('<div class="product-tile" data-pid="4521329371234">'), want: false },
+  // ── 2026-08-24 追加: 待機室が「本文に名前を書かない」形（実測。8/21〜8/23 の3日間、
+  //    巡回は「マークアップ変更の疑い」と誤診断し続けていた）。判定材料は飛ばされた先のURLだけ ──
+  {
+    name: "本文にqueue-itが無くても、飛ばされた先が待機室なら名指しできる",
+    fn: () =>
+      isQueueItPage(
+        '<!DOCTYPE html><html><head><script>var cookieEnabled = navigator.cookieEnabled;</script></head><body></body></html>',
+        "https://wr.pokemoncenter-online.com/?c=pol&e=wr20260821ec&ver=v3-javascript-3.7.10&man=pol-prd-rule-sfcc"
+      ),
+    want: true,
+  },
+  {
+    name: "飛ばされていない（本来のホストのまま）なら待機室扱いしない",
+    fn: () =>
+      isQueueItPage(
+        '<li class="product" data-pid="4521329371234">',
+        "https://www.pokemoncenter-online.com/search/?prefn1=releaseType&prefv1=1&srule=top-new-product&sz=100"
+      ),
+    want: false,
+  },
+  {
+    // wr. でも待機室のイベントID（e=wr…）が無ければ別物＝勝手に断定しない
+    name: "wr.ホストでも待機室IDが無ければ待機室扱いしない",
+    fn: () => isQueueItPage("<html></html>", "https://wr.example.com/?c=pol"),
+    want: false,
+  },
+  // ── 2026-08-24 追加: 記事本文の「期間」ラベルは1記事に何度も出る（実測 #17417）──
+  //    記事自身の期間・古い告知・別コラボの期間が並ぶので、**全部拾ってから**
+  //    タイトル一致で選ぶ。門番（タイトル一致）は変えていないので推測は増えない。
+  {
+    name: "コラボ: 記事自身の期間（「期間 :」ラベル）をタイトルで裏取りして採る",
+    fn: () => {
+      const body =
+        "期間 : 2026年8月5日〜9月23日 コラボ開催の詳細はこちら " +
+        "開催期間 2026年8月4日〜9月23日 人気作品のキャラクターグッズ " +
+        "期間 : 2026年7月28日〜 別のコラボキャンペーン";
+      const v = pickVerifiedEventDate(body, "ゼンレスゾーンゼロ × ウェンディーズ 8月5日よりコラボ開催!", new Date(Date.UTC(2026, 7, 4)));
+      return v ? `${v.date.toISOString().slice(0, 10)}|${v.text}` : "null";
+    },
+    want: "2026-08-05|2026年8月5日〜9月23日",
+  },
+  {
+    name: "コラボ: 先頭の候補がタイトルと違えば飛ばして、一致する候補を採る",
+    fn: () => {
+      const body =
+        "開催期間 2026年8月4日〜9月23日 別ブロックに残った古い告知 " +
+        "期間 : 2026年8月5日〜9月23日 記事本文の開催期間";
+      const v = pickVerifiedEventDate(body, "テストコラボ 8月5日より開催!", null);
+      return v ? v.date.toISOString().slice(0, 10) : "null";
+    },
+    want: "2026-08-05",
+  },
+  // ── 2026-08-24 追加: 上の「全部拾う」を入れた回に**正しかった2件を壊した**（本番実測）。
+  //    どちらも監査側は最初から除外していた型で、訂正側だけが知らなかった。
+  //    規約は src/lib/date.ts の titleEventDates に1本化し、両方がそれを通る。
+  {
+    name: "コラボ: タイトルの「◯月◯日まで」は終了日なので開催日にしない（#35299）",
+    fn: () => {
+      // 実データ: 記事の仕様表は「期間 2026年8月6日(木)〜8月8日(土)」＝開催は 8/6。
+      // 本文には「期間は2026年8月8日まで!」という**終了日の文**もある。
+      const body = "期間は2026年8月8日まで! 期間 2026年8月6日〜8月8日 掲出場所 仙台市内";
+      const v = pickVerifiedEventDate(
+        body,
+        "『薬屋のひとりごと』七夕飾り 8月8日まで仙台七夕まつりに掲出!",
+        new Date(Date.UTC(2026, 7, 6)),
+        new Date(Date.UTC(2026, 7, 24))
+      );
+      return v ? v.date.toISOString().slice(0, 10) : "null";
+    },
+    want: "null",
+  },
+  {
+    name: "コラボ: タイトルの「◯月◯日より先行販売」は先行日なので開催日にしない（#57152）",
+    fn: () => {
+      // 実データ: 記事内に並んでいた「期間 : 2026年8月13日〜9月9日」は**別イベント**
+      // （ちいかわベーカリー京都）のもの。一般発売は 8/24。
+      const body = "期間 : 2026年8月13日〜9月9日 「ちいかわベーカリー KYOTO POP UP SHOP」が…";
+      const v = pickVerifiedEventDate(
+        body,
+        "映画ちいかわ うま辛カレースナック 8月13日よりセブンで先行販売!",
+        new Date(Date.UTC(2026, 7, 24)),
+        new Date(Date.UTC(2026, 7, 24))
+      );
+      return v ? v.date.toISOString().slice(0, 10) : "null";
+    },
+    want: "null",
+  },
+  {
+    name: "コラボ: 切り落とし切れなかった何年も前の関連記事は採らない",
+    fn: () => {
+      const body = "期間 : 2017年8月2日〜8月14日 「僕のヒーローアカデミア」…";
+      const v = pickVerifiedEventDate(
+        body,
+        "テストコラボ 8月2日より開催!",
+        null,
+        new Date(Date.UTC(2026, 7, 24))
+      );
+      return v ? v.date.toISOString().slice(0, 10) : "null";
+    },
+    want: "null",
+  },
+  {
+    name: "コラボ: どの候補もタイトルに無ければ日付を動かさない（推測しない）",
+    fn: () => {
+      const body =
+        "期間 : 2026年7月28日〜8月11日 別のコラボ " +
+        "開催期間 2026年6月24日〜7月12日 さらに別のコラボ";
+      const v = pickVerifiedEventDate(body, "テストコラボ 8月5日より開催!", null);
+      return v ? v.date.toISOString().slice(0, 10) : "null";
+    },
+    want: "null",
+  },
   { name: "個別商品ページの判定（/products/JAN）", fn: () => isSingleProductUrl("https://anime-store.jp/products/4934054076093"), want: true },
   { name: "個別商品ページの判定（/item/12345）", fn: () => isSingleProductUrl("https://bsp-prize.jp/item/2785343/"), want: true },
   // お知らせ配下の新商品紹介は商品ページではない（実測: これを商品ページ扱いすると
@@ -4671,6 +4879,193 @@ const cases: Case[] = [
     name: "カタログの確認日: 行が無ければ null（0件のときに今日を代わりに出さない）",
     fn: () => oldestSeenAt([]),
     want: null,
+  },
+
+  // ── 日次スナップショット（2026-08-22 新設）────────────────────────────────
+  // ここで固定するのは**数え方の約束**。値そのものより「不明を0と書かない」「延べと
+  // 実数を混ぜない」が守られているかを見る（後から作り直せないデータなので、
+  // 意味が1日でもズレると、その日のグラフが永久に嘘になる）。
+  {
+    // 初回は比較相手が無い。**全件を「今日の新着」と数えない**（貯め始めた日だけ巨大な山が立つ）。
+    name: "スナップショット: 初回の新着は不明（0でも全件でもない）",
+    fn: () => snapCell(buildSnapshotRows([snapItem(1), snapItem(2)], null), "total", "all", "newCount"),
+    want: null,
+  },
+  {
+    name: "スナップショット: 境界より後のidだけを新着に数える",
+    fn: () => snapCell(buildSnapshotRows([snapItem(1), snapItem(2), snapItem(3)], 1), "total", "all", "newCount"),
+    want: 2,
+  },
+  {
+    // 次回の境界。ここがズレると翌日の新着が二重に数えられる（または丸ごと落ちる）。
+    name: "スナップショット: 境界は在籍中の最大id",
+    fn: () => snapCell(buildSnapshotRows([snapItem(7), snapItem(3)], 1), "total", "all", "maxItemId"),
+    want: 7,
+  },
+  {
+    // 1件が複数作品に当たる（コラボ）。franchise は**延べ**＝合計は total と一致しない。
+    name: "スナップショット: コラボ1件は両方の作品に数える（延べ）",
+    fn: () => {
+      const rows = buildSnapshotRows([snapItem(1, { title: "ワンピース×鬼滅の刃 コラボ缶バッジ" })], null);
+      return `${snapCell(rows, "franchise", "ワンピース", "count")}|${snapCell(rows, "franchise", "鬼滅の刃", "count")}|${snapCell(rows, "total", "all", "count")}`;
+    },
+    want: "1|1|1",
+  },
+  {
+    // 「無い」と「判定できない」を混ぜない＝作品名の付かない行は franchise 次元に出さない。
+    name: "スナップショット: 作品名が付かない行は作品の行を作らない",
+    fn: () => buildSnapshotRows([snapItem(1)], null).filter((r) => r.dim === "franchise").length,
+    want: 0,
+  },
+  {
+    // scope=null は「日英両方に出す既存行」＝JP側（src/lib/scope.ts の規約と同じ読み）。
+    name: "スナップショット: scope未設定はJP側に数える",
+    fn: () => {
+      const rows = buildSnapshotRows([snapItem(1), snapItem(2, { scope: "en" })], null);
+      return `${snapCell(rows, "scope", "jp", "count")}|${snapCell(rows, "scope", "en", "count")}`;
+    },
+    want: "1|1",
+  },
+  {
+    // 抽選の物差しは表示層と同じ isLotteryItem（2つ持つと画面と数が食い違う）。
+    name: "スナップショット: 抽選の数え方は表示層と同じ",
+    fn: () =>
+      snapCell(
+        buildSnapshotRows(
+          [
+            snapItem(1, { eventType: "抽選" }),
+            snapItem(2, { hasLottery: true }),
+            snapItem(3, { title: "抽選販売のお知らせ" }),
+            snapItem(4),
+          ],
+          null
+        ),
+        "total",
+        "all",
+        "lotteryCount"
+      ),
+    want: 3,
+  },
+
+  // ── snkrdunk の先頭ラベル（2026-08-22・監査 title_pipe_residue が鳴った実物）──────
+  {
+    // 末尾ラベルだけ剥がす実装の穴。先頭の「8/22・23発売｜」が残っていた。
+    name: "先頭の日付告知ラベル＋パイプを剥がす（末尾ラベルと同時に）",
+    fn: () =>
+      cleanListTitle(
+        "snkrdunk",
+        "8/22・23発売｜Pharrell Williams × adidas Adistar Jellyfish \"Crystal Sand\"｜抽選/販売/定価情報"
+      ),
+    want: "Pharrell Williams × adidas Adistar Jellyfish \"Crystal Sand\"",
+  },
+  {
+    // 告知語を必須にしてある＝日付だけのラベルは剥がさない（商品名を削る側に転ばない）。
+    name: "日付だけ＋パイプは剥がさない（安全側）",
+    fn: () => cleanListTitle("snkrdunk", "8/22｜Nike Dunk Low Retro"),
+    want: "8/22｜Nike Dunk Low Retro",
+  },
+  {
+    // 商品名の中のスラッシュ（色名・サイズ）は日付ではない。パイプが無ければ何もしない。
+    name: "商品名のスラッシュは日付と読まない",
+    fn: () => cleanListTitle("snkrdunk", "Asics Gel-Kayano 14 \"White/Graphite Grey\"｜抽選/販売/定価情報"),
+    want: "Asics Gel-Kayano 14 \"White/Graphite Grey\"",
+  },
+
+  // ── /en/trends（2026-08-23 新設）────────────────────────────────────────
+  // 固定するのは**言葉の強さ**と**窓の作り方**。ここが緩むと、巡回が止まっている週に
+  // 「今週は3件でした」と、見ていないだけの空白を事実として語ることになる。
+  {
+    // 窓の終わりは**観測の端**（最後にその店を見た時刻）＝今日ではない。
+    name: "trends: 窓の終わりは最後に見た時刻（今日ではない）",
+    fn: () => {
+      const w = trendWindow(new Date("2026-08-20T00:00:00.000Z"));
+      return `${w?.from.toISOString().slice(0, 10)}..${w?.to.toISOString().slice(0, 10)}`;
+    },
+    want: "2026-08-13..2026-08-20",
+  },
+  {
+    // 一度も見ていなければ窓を作らない＝この面は何も言わない（0件と言わない）。
+    name: "trends: 観測が無ければ窓を作らない",
+    fn: () => trendWindow(null),
+    want: null,
+  },
+  {
+    // 2日空いたら画面で断る（1日は平常運転＝毎朝の巡回前は必ず前日になる）。
+    name: "trends: 1日前は平常運転／2日空いたら古いと断る",
+    fn: () => {
+      const w = trendWindow(new Date("2026-08-20T00:00:00.000Z"))!;
+      const a = trendsIsStale(w, new Date("2026-08-21T00:00:00.000Z"));
+      const b = trendsIsStale(w, new Date("2026-08-22T00:00:00.000Z"));
+      return `${a}|${b}`;
+    },
+    want: "false|true",
+  },
+  {
+    // 0件の店は出さない＝「無い」と「見ていない」を混ぜない。
+    name: "trends: 0件の店は行を作らない／多い順に並ぶ",
+    fn: () => {
+      const rows = [
+        { source: "chiikawa_market" },
+        { source: "mofusand_market" },
+        { source: "mofusand_market" },
+      ];
+      return countByStore(rows).map((x) => `${x.store.source}:${x.count}`).join(",");
+    },
+    want: "mofusand_market:2,chiikawa_market:1",
+  },
+  {
+    // 見出しは「並んだ」までしか言わない（人気・新発売・入手難度は裏が取れない）。
+    name: "trends: 見出しは「店に並んだ」以上を言わない",
+    fn: () => trendsHeadlineEn(96, 4),
+    want: "96 items went up across 4 official Japanese stores",
+  },
+  {
+    // 1件・1店でも英語として壊れない（単数形）。
+    name: "trends: 単数形",
+    fn: () => trendsHeadlineEn(1, 1),
+    want: "1 item went up across 1 official Japanese store",
+  },
+
+  // ── 英語版の日付欄に日本語が出ていた件（2026-08-23）──────────────────────
+  // 直すのは**こちらが組み立てたラベルだけ**。収集元の自由文は原文のまま＝
+  // 訳して解釈を足さない（鳴らない側をここで固定する）。
+  {
+    name: "EN日付: 自前ラベル「登場 M/D」を英語にする",
+    fn: () => eventDateLabelEn(null, "登場 8/21"),
+    want: "Listed Aug 21",
+  },
+  {
+    name: "EN日付: 自前ラベル「YYYY年M月発売予定」は年も出す",
+    fn: () => ownDateTextEn("2026年9月発売予定"),
+    want: "Planned for Sep 2026",
+  },
+  {
+    name: "EN日付: 自前ラベル「受付終了（直近 M/D）」",
+    fn: () => ownDateTextEn("受付終了（直近 8/21）"),
+    want: "Applications closed (latest Aug 21)",
+  },
+  {
+    name: "EN日付: 自前ラベル「在庫あり・再販中」",
+    fn: () => ownDateTextEn("在庫あり・再販中"),
+    want: "In stock (restocked)",
+  },
+  {
+    // 収集元が書いた自由文。**訳さない**＝こちらの解釈を英語面に出さない。
+    name: "EN日付: 収集元の自由文は訳さない",
+    fn: () => ownDateTextEn("2026年9月下旬登場予定"),
+    want: null,
+  },
+  {
+    // 壊れた月は英語にしない（原文のまま出る方が、間違った月を書くより良い）。
+    name: "EN日付: あり得ない月は訳さない",
+    fn: () => ownDateTextEn("登場 13/1"),
+    want: null,
+  },
+  {
+    // 日本語面の表示は1文字も変えない。
+    name: "EN日付: 日本語面は原文のまま",
+    fn: () => displayEventDateText("登場 8/21"),
+    want: "登場 8/21",
   },
 ];
 

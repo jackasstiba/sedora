@@ -30,6 +30,7 @@ import {
   isStalePromise,
   monthPrecisionFromTitle,
   todayJst,
+  titleEventDates,
 } from "../src/lib/date";
 import { dateTextConflict, extractDates } from "../src/lib/dateText";
 import { cleanListTitle, cutsMidWord, looksTruncatedTitle } from "../src/lib/title";
@@ -41,7 +42,7 @@ import { GENRE_TO_GOOGLE_CATEGORY } from "../src/lib/productCategory";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
 import { loadDisplayedPages, type DisplayedPage } from "../src/lib/pages";
 import { enScopeLeaks } from "../src/lib/scope";
-import { hasStoreProvidedTitle } from "../src/lib/enCatalog";
+import { EN_TRENDS_PATH, hasStoreProvidedTitle } from "../src/lib/enCatalog";
 import { countWatchlist } from "../src/lib/watchlist";
 import { classifyPageLoss, isReportableLoss, isReportableVanish, productMergeKeys } from "../src/lib/pageLoss";
 import { readPreviousPageIds, runDrift } from "./auditDrift";
@@ -479,7 +480,13 @@ async function main() {
   {
     const bad: string[] = [];
     for (const p of pages) {
-      if (p.name.startsWith("/release/") || p.name === "/premium") continue; // 過去も意図して載せるページ
+      // 過去も**意図して**載せるページ。
+      // /en/trends は「その店が直近7日に並べた分」＝窓の物差しが storeListedAt（店が並べた日）で、
+      // eventDate ではない。並んだ日が窓の中なら、その商品の発売日/締切が過ぎていてもこの面の
+      // 主張（"went up this week"）は正しい。実測 2026-08-24: `audit:tomorrow` の +7日で
+      // 「ハッピーバッグ2027」2件が過去日として鳴った＝**暦が進むだけで鳴る**型なので、
+      // /release/ と同じ理由でここに載せる（閾値を緩めるのではなく、面の性質で分ける）。
+      if (p.name.startsWith("/release/") || p.name === "/premium" || p.name === EN_TRENDS_PATH) continue;
       for (const r of p.rows) {
         if (!r.eventDate) continue;
         const d = new Date(r.eventDate);
@@ -498,17 +505,13 @@ async function main() {
     const offsets = new Map<number, number>();
     for (const r of shown) {
       if (!r.eventDate) continue;
-      // 「8月8日」型のみ。「8/8」型はプラモの縮尺（1/144 等）と区別できず誤検知になる。
-      // 「8月8日まで」は**終了日**であって開催日ではない。バッジ（開始日）と食い違って当然なので
-      // 突合の対象から外す（実測 #35299「8月8日まで仙台七夕まつりに掲出!」＝開催 8/6〜8/8）。
-      // 締切・終了を表す助詞が続く日付を比較すると、正しいデータを誤りとして鳴らし続ける。
-      const hits = [...r.title.matchAll(/(\d{1,2})\s*月\s*(\d{1,2})\s*日(?!\s*(?:まで|迄))/g)]
-        // 「8月13日よりセブンで先行販売!」の日付は**先行販売日**。バッジ（一般発売・開催日）と
-        // 異なるのが記事どおり（実測 #57152 ちいかわ: 先行8/13・一般8/24 の両方が記事の事実。
-        // 収集元で裏取り済み）。日付の直後に「先行」が続くものは突合の対象から外す。
-        .filter((m) => !/先行/.test(r.title.slice((m.index ?? 0) + m[0].length, (m.index ?? 0) + m[0].length + 14)))
-        .map((m) => ({ mm: Number(m[1]), dd: Number(m[2]) }))
-        .filter((x) => x.mm >= 1 && x.mm <= 12 && x.dd >= 1 && x.dd <= 31);
+      // 「8月8日」型のみ（「8/8」型はプラモの縮尺 1/144 等と区別できず誤検知になる）＋
+      // 終了日「8月8日まで」と先行販売日「8月13日より先行販売」を落とす。
+      // **この除外の規約は src/lib/date.ts の titleEventDates に1本化してある**。
+      // ここに規約を書き戻さないこと: 2026-08-24 に、同じ規約を知らない訂正側（collaboEnrich）が
+      // 正しい2件（#35299 / #57152。どちらもこのコメントが根拠として挙げていた実例そのもの）を
+      // 壊した。検査だけが知っている規約は、直す側では守られない。
+      const hits = titleEventDates(r.title);
       if (hits.length !== 1) continue;
       const { mm, dd } = hits[0];
       const d = new Date(r.eventDate);
@@ -1278,6 +1281,12 @@ async function main() {
         // ハツコレは手動更新なので、1週間更新しない期間が普通に起こる。窓の短いカレンダーは
         // その間に中身が全部過去になる＝**古い発売日を出し続けるより0件の方が正しい**。
         billys: "収集元のLAUNCHが約1週間先までしか出さない。更新が1週間空けば0件になるのが正しい",
+        // 2026-08-24 実測: 巡回は成功（3件・日付付与率100%）していて、DB5件の日付が
+        // 8/16・8/22・8/23＝**全部「もう過ぎた」**という理由だけで表示0件になっていた。
+        // 収集元は締切が数日先の受注/抽選しか出さないので、これは billys と同じ型
+        // （＝取れていないのではなく、今日ぶんが無い）。壊れて0件になった場合は
+        // EMPTY_BY_DESIGN_GRACE_DAYS を超えた時点で source_empty_too_long が ERROR にする。
+        sofvi: "収集元が数日先の受注/抽選しか出さない。今日ぶんが無い日は0件が正しい",
       };
       const zero: string[] = [];
       const zeroByDesign: string[] = [];
@@ -2029,6 +2038,15 @@ async function main() {
       ? []
       : ["scripts/scrape.ts が死んだ画像の掃除（runDeadImagePrune）を呼んでいない。取得できない画像が空白のまま並ぶ"];
     report("scrape_skips_image_prune", "更新の経路から死んだ画像の掃除が外れている", "error", bad, baseline, 1);
+
+    // **日次スナップショットが更新の経路から外れていないか**（同じ型の穴だが、被害はこれが一番重い）。
+    // 画像や締切は次の巡回で直る。スナップショットは**取り逃した日を二度と埋められない**——
+    // 在籍数は「今」しか読めず、過去の日を後から数え直す材料がDBに無い。外れていても画面は
+    // 何も変わらないので、気付く手立てはこれしか無い（意味は src/lib/snapshot.ts の先頭）。
+    const skipsSnapshot = /^\s*(?:console\.log\()?\s*describeSnapshot\(await\s+writeDailySnapshot\s*\(|^\s*await\s+writeDailySnapshot\s*\(/m.test(src)
+      ? []
+      : ["scripts/scrape.ts が日次スナップショット（writeDailySnapshot）を呼んでいない。回さなかった日の推移は二度と埋められない"];
+    report("scrape_skips_snapshot", "更新の経路から日次スナップショットが外れている", "error", skipsSnapshot, baseline, 1);
   }
   {
     // (17b) **「今日」を読む行が src/lib/date.ts の外に無いか**（＝日付事故の再発防止の本体）。

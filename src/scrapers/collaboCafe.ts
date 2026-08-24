@@ -216,7 +216,7 @@ export async function scrapeCollaboCafe(): Promise<ScrapedItem[]> {
       //   実測: 再エンリッチで 8/6→8/8 に直した #20308 が、次の通常スクレイプで
       //   一覧の誤った日付に上書きされ、監査のラチェットで再発が検出された。
       //   「一度直した正しい値が通常の更新で壊される」経路を塞ぐ。
-      const verified = pickVerifiedEventDate(body, item.title, item.eventDate ?? null);
+      const verified = pickVerifiedEventDate(body, item.title, item.eventDate ?? null, todayJst());
       if (verified) {
         item.eventDate = verified.date;
         item.eventDateText = verified.text;

@@ -2,7 +2,7 @@ import type { MetadataRoute } from "next";
 import { getSitemapItemRefs, getGenreList, getMonthsWithItems } from "@/lib/seo";
 import { getTcgTitleCounts } from "@/lib/tcg";
 import { nowInstant } from "@/lib/date";
-import { enCatalogPagePaths } from "@/lib/enCatalog";
+import { EN_TRENDS_PATH, enCatalogPagePaths } from "@/lib/enCatalog";
 
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
@@ -29,6 +29,9 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     { url: `${base}/en/privacy`, lastModified: now, changeFrequency: "yearly", priority: 0.3 },
     // 英語版の固定ガイド（海外読者の入口ページ）。
     { url: `${base}/en/how-to-buy`, lastModified: now, changeFrequency: "monthly", priority: 0.6 },
+    // 今週その公式ストアが並べた分（/en/trends）。日本語版に対応ページが無い独自コンテンツで、
+    // 中身は毎日入れ替わる。
+    { url: `${base}${EN_TRENDS_PATH}`, lastModified: now, changeFrequency: "daily", priority: 0.8 },
     // EN専用カタログ（Phase 3b/3b'）。日本語版に対応ページが無い＝英語だけの独自コンテンツなので、
     // /en/items/* と違って「薄い翻訳ページ」にはならない。ハブと店別ページを載せる
     // （登録簿から導出＝店を足したら sitemap にも自動で載る）。

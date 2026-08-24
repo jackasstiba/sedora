@@ -89,3 +89,31 @@ model Event {
 
   @@index([name, createdAt])
 }
+
+// 日次スナップショット（2026-08-22 新設）。**この先トレンドを語るための唯一の材料。**
+// Item は過去を持たない（scrapedAt は巡回のたび上書き・落ちた行は削除）ので、
+// 「先週と比べて何が増えたか」は貯め始めない限り永久に計算できない。意味と約束は
+// src/lib/snapshot.ts の先頭に書いてある（数えるのは在籍件数であって表示件数ではない）。
+model DailySnapshot {
+  id  Int      @id @default(autoincrement())
+  // 日本時間の暦日（UTC 0時固定）。todayJst() の値をそのまま入れる。
+  day DateTime
+  // 何で束ねたか: "total" | "source" | "genre" | "franchise" | "scope"
+  dim String
+  // 次元の値（total は "all"）。franchise だけは延べ＝合計は total と一致しない。
+  key String
+
+  count        Int
+  // null＝不明（初回で比較相手が無い）。**0 と混同しない**＝新着ゼロの日として描かない。
+  newCount     Int?
+  lotteryCount Int
+  datedCount   Int
+  // そのグループ内の最大 Item.id。total 行のこれが次回の「新着」の境界になる。
+  maxItemId    Int
+
+  createdAt DateTime @default(now())
+
+  // 1日2回巡回しても行は増えない（同じ日は上書き＝最後に見た姿が残る）。
+  @@unique([day, dim, key])
+  @@index([dim, key, day])
+}
