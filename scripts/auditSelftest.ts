@@ -129,7 +129,7 @@ import { buildRecentEndedItem, cleanProductName, cleanRestockName, parseEndedSto
 import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
-import { parseCardChusen, parseDue, productKey, splitSaleConditions } from "../src/scrapers/cardChusen";
+import { parseCardChusen, parseDue, productKey, splitSaleConditions, stripStrayMarks } from "../src/scrapers/cardChusen";
 import { buildSaleUnits, groupSaleUnits, isBundlePriced, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
 import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { parseTorecasokuList } from "../src/scrapers/torecasoku";
@@ -2130,6 +2130,14 @@ const cases: Case[] = [
   // **括弧を一律に落とすと壊れる**: 中身が「別商品の列挙」のことがある。
   { name: "cardchusen: 中身違い(御三家8種)は別商品のまま", fn: () => productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（フシギダネ・ヒトカゲ・ゼニガメ）") === productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（チコリータ・ヒノアラシ・ワニノコ）"), want: false },
   { name: "cardchusen: 外した条件は店のnoteに残す", fn: () => splitSaleConditions("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）").conds.join("・"), want: "5,760円税込・現金払いのみ・1BOX" },
+  // ── 単独の記号が identity を割る（2026-08-24 実測 #148429/#75416） ──────────
+  // productKey は語順ゆれを吸収するため文字ソートするので、名前の末尾に残った `=` が
+  // キーの先頭に回り "=エスダトムメラルー" に化けて、同じ商品が2行に割れて並んでいた。
+  // 鳴る側（落とす）と鳴らない側（途中の記号・別商品）を両方固定する。
+  { name: "cardchusen: 末尾の単独 = を落とす", fn: () => stripStrayMarks("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」 ="), want: "ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」" },
+  { name: "cardchusen: = の有無で同じ商品が割れない", fn: () => productKey(stripStrayMarks("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」 =")) === productKey(stripStrayMarks("ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」")), want: true },
+  { name: "cardchusen: 名前の途中の = は残す（勝手に書き換えない）", fn: () => stripStrayMarks("トレカ A=B スペシャルセット"), want: "トレカ A=B スペシャルセット" },
+  { name: "cardchusen: 記号を落としても別商品は別のまま", fn: () => productKey(stripStrayMarks("ポケモンカードゲーム MEGA 拡張パック「メガブレイブ」 =")) === productKey(stripStrayMarks("ポケモンカードゲーム MEGA 拡張パック「メガシンフォニア」")), want: false },
   { name: "cardchusen: 型番だけの括弧は弾名が残る時だけ落とす", fn: () => productKey("遊戯王OCGデュエルモンスターズ LIMITED PACK WORLD CHAMPIONSHIP 2026 [26LP]") === productKey("遊戯王OCG LIMITED PACK WORLD CHAMPIONSHIP 2026"), want: true },
   // 定型語を削ると3文字になる商品（151/100）を「短すぎ」で捨てると、受付中の抽選が
   // どのページにも出ない。束ねる時だけ語順ソートを使わないことで誤マージも避ける。

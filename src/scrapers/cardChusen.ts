@@ -99,6 +99,26 @@ function bulletChars(name: string, dropCode: boolean): string {
     .replace(/[「」『』【】\[\]()（）・、。！!？?\s©®™☆★-]/g, "");
 }
 
+/**
+ * 収集元の商品名に紛れ込んだ「単独で立っている記号」を落とす（純関数）。
+ *
+ * なぜ要るか（2026-08-24 実測）: 1店だけ商品名が
+ * 「ポケモンカードゲーム MEGA 拡張パック「ストームエメラルダ」 =」と `=` で終わっていた。
+ * `productKey` は語順ゆれを吸収するため**文字ソート**するので、この `=` が先頭に回り、
+ * キーが `=エスダトムメラルー` に化けて **同じ商品が2行に割れた**（#148429 と #75416 が
+ * 別商品として `/lottery` に並ぶ）。画面の商品名も裸の `=` で終わっていた。
+ *
+ * 記号1文字は商品の identity を持たないので落とす。ただし**単独で立っているものだけ**＝
+ * 名前の途中の `=` は残す（知っているものだけ書き換える）。キーと代表名と条件タグは
+ * どれも同じ文字列から作られるので、**取り込みの1箇所**で正規化すれば3つとも揃う。
+ */
+export function stripStrayMarks(name: string): string {
+  return name
+    .replace(/(^|\s)[=＝]+(?=\s|$)/g, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** 商品名からグループ化キーを作る（表記ゆれ・語順ゆれ・店ごとの販売条件を吸収）。 */
 export function productKey(name: string): string {
   const { base } = splitSaleConditions(name);
@@ -188,7 +208,8 @@ export function parseCardChusen(html: string, reference = todayJst()): Entry[] {
     const dueM = seg.match(/board-card__due"[^>]*>([\s\S]*?)<\/div>/);
     const ctaM = seg.match(/board-card__cta" href="([^"]+)"/);
     if (!storeM || !dueM || !ctaM) continue;
-    const product = decodeHtmlEntities(storeM[1]).trim();
+    // 単独の記号は取り込みの時点で落とす（キー・代表名・条件タグが同じ文字列から作られるため）。
+    const product = stripStrayMarks(decodeHtmlEntities(storeM[1]).trim());
     const store = stripTags(storeM[2]);
     const due = parseDue(stripTags(dueM[1]), reference);
     // 応募ページURLもエンティティを戻す。`?q=…&amp;b=birthday` のまま配ると、クエリ名が

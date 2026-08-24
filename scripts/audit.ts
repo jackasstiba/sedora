@@ -1651,7 +1651,12 @@ async function main() {
     const rate = shown.length ? deadEnd.length / shown.length : 0;
     report(
       "no_purchase_route",
-      `購入導線が1本も無い商品がある（${Math.round(rate * 100)}%）`,
+      // ⚠️ 文言は「導線が1本も無い」ではない（2026-08-24 修正）。ここが挙げる行は
+      // isOfficialUrl=false かつ officialUrl=null ＝ 詳細ページの showRakuten が
+      // **真になる条件そのもの**なので、100%「楽天で探す」が出ている（実測: /items/90439
+      // ほか5件を本番で確認）。見ているのは「公式・商品ページへ送れず、整形した商品名で
+      // 市場を検索させるしか手が無い行」。件数の意味は変えていないのでラチェットはそのまま。
+      `公式・商品ページの導線が無く、商品名検索しか出せない商品（${Math.round(rate * 100)}%）`,
       "warn",
       // ⚠️ ここで `.slice(0, 10)` してはいけない。report() は渡された配列の長さを
       // そのまま件数＝ラチェットの基準にするので、切り詰めると **常に10件** になり、
