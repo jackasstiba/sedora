@@ -149,6 +149,7 @@ import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 import { parseMedicomDetail } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { baselineWritable } from "./factsBaseline";
+import { jsonPrices } from "./pagePrice";
 import { parseYen } from "../src/lib/margin";
 import { chooseVerifiedUrl, isUnreadableUrl, orderedStoreUrls } from "../src/scrapers/verifyStoreUrl";
 import { canJudgeIdentity, identityMatchCount, pageShowsProduct } from "../src/lib/identity";
@@ -2130,6 +2131,16 @@ const cases: Case[] = [
   // **括弧を一律に落とすと壊れる**: 中身が「別商品の列挙」のことがある。
   { name: "cardchusen: 中身違い(御三家8種)は別商品のまま", fn: () => productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（フシギダネ・ヒトカゲ・ゼニガメ）") === productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（チコリータ・ヒノアラシ・ワニノコ）"), want: false },
   { name: "cardchusen: 外した条件は店のnoteに残す", fn: () => splitSaleConditions("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）").conds.join("・"), want: "5,760円税込・現金払いのみ・1BOX" },
+  // ── ページのJSONに載っている価格を読む（2026-08-24・検査側の誤検知11件を潰した） ──────────
+  // ちいかわマーケット(Shopify)は価格を本文の文字として持たず、埋め込みJSONの銭単位だけが持つ。
+  // 検査は script を落としてから本文を見るので、正本ごと捨てて「価格が本文に無い」と誤報していた。
+  { name: "価格JSON: Shopifyの銭を円として読む", fn: () => jsonPrices('<script src="/cdn/shop/x.js"></script>{"price":55000}').has(550), want: true },
+  { name: "価格JSON: 円の表記もそのまま読む", fn: () => jsonPrices('<div>{"price":"1980.00"}</div>').has(1980), want: true },
+  // **Shopifyでないページで銭として読んではいけない**（55,000円の商品を550円として黙って通す）。
+  { name: "価格JSON: Shopifyでなければ銭として読まない", fn: () => jsonPrices('<html>{"price":55000}</html>').has(550), want: false },
+  { name: "価格JSON: Shopifyでなくても円としては読む", fn: () => jsonPrices('<html>{"price":55000}</html>').has(55000), want: true },
+  { name: "価格JSON: 価格が無いページは空", fn: () => jsonPrices("<html><body>なにもない</body></html>").size, want: 0 },
+
   // ── 単独の記号が identity を割る（2026-08-24 実測 #148429/#75416） ──────────
   // productKey は語順ゆれを吸収するため文字ソートするので、名前の末尾に残った `=` が
   // キーの先頭に回り "=エスダトムメラルー" に化けて、同じ商品が2行に割れて並んでいた。

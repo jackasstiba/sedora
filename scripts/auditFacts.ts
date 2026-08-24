@@ -22,6 +22,7 @@ import { prisma } from "../src/lib/prisma";
 import { loadDisplayedItems } from "../src/lib/pages";
 import { isOfficialUrl } from "../src/lib/outbound";
 import { baselineWritable } from "./factsBaseline";
+import { jsonPrices } from "./pagePrice";
 import { cleanListTitle } from "../src/lib/title";
 import { normalizeForSearch } from "../src/lib/itemFilter";
 import { franchiseAliases } from "../src/lib/franchise";
@@ -98,7 +99,9 @@ function decodeBody(buf: Buffer, contentType: string | null): string {
 }
 
 /** 突合に使う本文。`text` は <title> 込み（同一性の判定用）、`body` は本文だけ（価格の判定用） */
-async function pageText(url: string): Promise<{ text: string; body: string } | null> {
+async function pageText(
+  url: string
+): Promise<{ text: string; body: string; prices: Set<number> } | null> {
   try {
     if (WALLED_HOSTS.test(new URL(url).hostname)) return null;
     const res = await fetch(url, {
@@ -112,7 +115,10 @@ async function pageText(url: string): Promise<{ text: string; body: string } | n
     // （実測 2026-08-18: #92255/#92355 の2件。実際にはページに商品名がある）。
     // スクレイパー側は fetchHtmlDetectCharset で既に対処済みで、**検査側だけが素の text() の
     // ままだった**＝検査が誤報を出す側に回っていた。
-    const $ = cheerio.load(decodeBody(Buffer.from(await res.arrayBuffer()), res.headers.get("content-type")));
+    const rawHtml = decodeBody(Buffer.from(await res.arrayBuffer()), res.headers.get("content-type"));
+    // 価格は script を落とす**前に**拾う（落とすと正本ごと消えるページがある）。
+    const prices = jsonPrices(rawHtml);
+    const $ = cheerio.load(rawHtml);
     $("script, style, noscript").remove();
     // 🚨 `<body>` だけを見ると**商品名がタイトルにしか無いページ**を「商品が見当たらない」と
     // 誤報する（実測 2026-08-19: タカラトミーモールの商品ページは body がナビだけで、
@@ -134,7 +140,7 @@ async function pageText(url: string): Promise<{ text: string; body: string } | n
     // 短いページは「判定できない」のではなく「中身が無い」＝指摘すべき側なので、
     // 殻（ほぼ空）とだけ区別する。長さは detail に出して、人が短さを見て判断できるようにする。
     if (t.length < SHELL_CHARS) return null;
-    return { text: normalizeForSearch(t), body: normalizeForSearch(body) };
+    return { text: normalizeForSearch(t), body: normalizeForSearch(body), prices };
   } catch {
     return null;
   }
@@ -260,7 +266,7 @@ async function main() {
         unusable++;
         continue;
       }
-      const { text, body } = page;
+      const { text, body, prices } = page;
       checked++;
       // 本文が薄いページは、それ自体が「商品ページではない」手がかりになる。
       const thin = text.length < 500;
@@ -300,7 +306,8 @@ async function main() {
       // 言うのは、読めていないことを根拠にした指摘になる（実測: takaratomy_mall 6件）。
       if (yen != null && yen > 0 && matchedInBody) {
         const forms = [String(yen), yen.toLocaleString("en-US")];
-        if (!forms.some((f) => text.includes(normalizeForSearch(f)))) {
+        // 本文の文字に無くても、ページ自身のJSONが同じ額を持っているなら「一次情報にある」。
+        if (!forms.some((f) => text.includes(normalizeForSearch(f))) && !prices.has(yen)) {
           findings.push({
             kind: "価格が一次情報に見当たらない",
             detail: `[${source} #${r.id}] 掲載価格 ${r.price} が本文に無い ${title.slice(0, 40)}`,
