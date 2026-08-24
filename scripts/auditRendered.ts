@@ -25,6 +25,8 @@ import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import { AD_DISCLOSURE, AD_DISCLOSURE_EN, isOfficialUrl, isRakutenAffiliateId } from "../src/lib/outbound";
 import { ONLINE_TAG_EN, isOnlineItem } from "../src/lib/channel";
 import { enCatalogPagePaths } from "../src/lib/enCatalog";
+import { findForbidden } from "../src/lib/xDraftText";
+import { cleanListTitle } from "../src/lib/title";
 
 const args = process.argv.slice(2);
 const baseIdx = args.indexOf("--base");
@@ -59,6 +61,32 @@ function checkAdDisclosure($: cheerio.CheerioAPI, page: string): boolean {
   if (body.includes(AD_DISCLOSURE) || body.includes(AD_DISCLOSURE_EN)) return true;
   flag(page, "広告表示の欠落", `「${AD_DISCLOSURE}」（または英語版）がページに出ていない`);
   return false;
+}
+
+/**
+ * **画像の alt に、立ち位置に反する語が出ていないか。**
+ *
+ * なぜ別に要るか（2026-08-24 実測）: このファイルの他の検査は全部 `$("main").text()` を見る。
+ * `text()` は**属性を含まない**ので、alt は描画監査からも `audit` からも原理的に見えない。
+ * 実際、詳細ページが `alt={item.title}`（整形前）を使っていたため、見出しから落とした
+ * 実況が alt にだけ残り、**本番で「ヤフオク高騰の再販です」が配信されていた**（#147022）。
+ * alt は読み上げに使われ検索エンジンも読む＝画面に出ていないだけで、利用者向けの文字列。
+ *
+ * 語は `src/lib/xDraftText.ts` の FORBIDDEN_WORDS（＝X下書きと同じ正本）を通す。
+ * **検査側に語のコピーを作らない**（コピーすると正本を直した日に検査だけ古い語で緑を出す）。
+ * 返すのは「見た alt の枚数」＝母数。0枚で終わったら検査が空振りしている。
+ */
+function checkAltText($: cheerio.CheerioAPI, page: string): number {
+  let seen = 0;
+  $("img[alt]").each((_, el) => {
+    const alt = ($(el).attr("alt") ?? "").trim();
+    if (!alt) return;
+    seen++;
+    const hits = findForbidden(alt);
+    if (hits.length)
+      flag(page, "altに立ち位置違反の語", `「${hits.join("/")}」 alt="${alt.slice(0, 60)}"`);
+  });
+  return seen;
 }
 
 /**
@@ -254,6 +282,11 @@ async function main() {
   // 楽天アフィリリンクを何本見たか。本番に出ていなければ収益は0なので、0本で終わったら
   // 「きれいだから0件」ではなく検査の空振り（＝収益導線が消えていても気付けない状態）。
   let rakutenLinksSeen = 0;
+  // 画像の alt を何枚見たか。属性は text() に出ないので、この母数が無いと
+  // 「alt の指摘0件」が“見た上での0”か“1枚も見ていない0”か区別できない。
+  let altsSeen = 0;
+  // 「整形して初めて禁止語が消える行」の件数＝alt語彙検査が実際に狙っている母数。
+  let riskyAltCount = 0;
   // 隠すべき収集元ホスト（実データから導出）と、HTMLに出てしまった回数。
   const hiddenHosts = hiddenSourceHosts(pages.flatMap((p) => p.rows));
   let sourceLeaks = 0;
@@ -274,6 +307,7 @@ async function main() {
     const text = $("main").text().replace(/\s+/g, " ").trim() || $("body").text();
     sourceLeaks += checkSourceLeak(html, p.name, hiddenHosts);
     checkAdDisclosure($, p.name);
+    altsSeen += checkAltText($, p.name);
     rakutenLinksSeen += checkRakutenLinks($, p.name);
     const titles = cardTitles($);
     cardsSeen += titles.length;
@@ -393,7 +427,24 @@ async function main() {
     const rich = [...withStores, ...withPrizes];
     const rest = [...byId.values()].filter((r) => !r.stores && !r.prizes);
     const sample = rest.filter((_, i) => i % Math.max(1, Math.floor(rest.length / 20)) === 0).slice(0, 20);
-    for (const r of [...rich, ...sample]) {
+    // **alt の語彙が壊れうる行だけを名指しで足す。**
+    // 詳細ページの alt は整形前タイトルに戻りやすい面で、危ないのは「整形して初めて
+    // 禁止語が消える行」だけ＝データから導出できる。stride の抜き取り（rest 約8,000件から
+    // 20件）では原理的に当たらない: 実測 2026-08-24、本番に7件あったのに alt を
+    // 8,886枚見て指摘0件だった。**網の母数がどこから来るかを、網と同じ日に決める。**
+    const riskyAlt = [...byId.values()]
+      .filter(
+        (r) =>
+          findForbidden(r.title).length > 0 &&
+          findForbidden(cleanListTitle(r.source, r.title)).length === 0
+      )
+      .slice(0, 30);
+    riskyAltCount = riskyAlt.length;
+    const seenIds = new Set<number>();
+    const details = [...rich, ...sample, ...riskyAlt].filter((r) =>
+      seenIds.has(r.id) ? false : (seenIds.add(r.id), true)
+    );
+    for (const r of details) {
       const html = await fetchPage(`${BASE}/items/${r.id}`);
       if (html === null) {
         flag(`/items/${r.id}`, "取得失敗", "詳細ページを取得できない");
@@ -405,6 +456,7 @@ async function main() {
       const text = $("main").text().replace(/\s+/g, " ").trim();
       sourceLeaks += checkSourceLeak(html, `/items/${r.id}`, hiddenHosts);
       checkAdDisclosure($, `/items/${r.id}`);
+      altsSeen += checkAltText($, `/items/${r.id}`);
       rakutenLinksSeen += checkRakutenLinks($, `/items/${r.id}`);
       for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
         if (text.includes(bad)) flag(`/items/${r.id}`, "未定義値の露出", `本文に「${bad}」が出ている`);
@@ -459,6 +511,7 @@ async function main() {
       const text = $("main").text().replace(/\s+/g, " ").trim();
       sourceLeaks += checkSourceLeak(html, page, hiddenHosts);
       checkAdDisclosure($, page);
+      altsSeen += checkAltText($, page);
       rakutenLinksSeen += checkRakutenLinks($, page);
       for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
         if (text.includes(bad)) flag(page, "未定義値の露出", `本文に「${bad}」が出ている`);
@@ -557,6 +610,7 @@ async function main() {
       const text = $("main").text().replace(/\s+/g, " ").trim();
       sourceLeaks += checkSourceLeak(html, page, hiddenHosts);
       checkAdDisclosure($, page);
+      altsSeen += checkAltText($, page);
       for (const bad of ["undefined", "NaN", "[object Object]", "Invalid Date"]) {
         if (text.includes(bad)) flag(page, "未定義値の露出", `本文に「${bad}」が出ている`);
       }
@@ -568,6 +622,7 @@ async function main() {
   console.log(
     `検査したページ ${checked}/${pages.length} / 商品カード ${cardsSeen}枚 / リスト項目 ${listItemsSeen}件 / ` +
       `カウントダウンのバッジ ${badgesSeen}枚 / 受付中ストア行 ${storeRowsSeen}行（${storeItemsCount}商品） / 楽天アフィリリンク ${rakutenLinksSeen}本 / ` +
+      `画像のalt ${altsSeen}枚（整形で禁止語が消える行 ${riskyAltCount}件を名指しで検査） / ` +
       `隠すべき収集元 ${hiddenHosts.length}ホスト（HTMLに ${sourceLeaks}回） / ENの入手経路タグ ${onlineTagsSeen}枚 / EN詳細 ${enDetailChecked}ページ / ` +
       `過ぎた日付の詳細 ${pastItemsSeen}ページ（過去の告知 ${pastNoticeSeen}件）`
   );
@@ -585,6 +640,10 @@ async function main() {
         ? "楽天アフィリリンクを1本も検出できていない（収益導線が消えている疑い／セレクタ破損）"
         : "楽天アフィリリンクを1本も検出できていない（RAKUTEN_AFFILIATE_ID が手元に無いのでIDの照合もしていない）"
     );
+  }
+  // alt を1枚も見ていないなら、alt の語彙検査は存在しないのと同じ（セレクタ破損・画像0枚）。
+  if (checked > 0 && altsSeen === 0) {
+    flag("(全体)", "検査が空振り", "画像の alt を1枚も検出できていない（altの語彙検査が何も守っていない）");
   }
   // 「受付中ストア」の検査は母数が要る。stores を持つ商品があるのに1行も見ていないなら、
   // それは「きれいだから0件」ではなく「何も見ていない0件」（セレクタ・見出し文言の変更）。

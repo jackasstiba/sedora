@@ -255,8 +255,12 @@ export default async function ItemPage({ params }: Props) {
       <div className="grid gap-6 sm:grid-cols-2">
         <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800">
           {item.imageUrl ? (
+            // alt は displayTitle（整形後）。生の item.title を入れると、見出しから落とした
+            // 実況・相場の文言が alt にだけ残る＝**読み上げと検索エンジンには出ている**
+            // （実測 2026-08-24: 本番の /items/147022「ヤフオク高騰の再販です」が、
+            // h1 は整形済みなのに alt に残っていた）。網＝audit:page の alt 走査。
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={proxiedImageUrl(item.id, item.imageUrl)!} alt={item.title} className="h-full w-full object-cover" />
+            <img src={proxiedImageUrl(item.id, item.imageUrl)!} alt={displayTitle} className="h-full w-full object-cover" />
           ) : (
             <NoImage genre={item.genre} />
           )}

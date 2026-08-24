@@ -194,8 +194,10 @@ export default async function ItemPageEn({ params }: Props) {
       <div className="grid gap-6 sm:grid-cols-2">
         <div className="relative aspect-square w-full overflow-hidden rounded-xl border border-neutral-200 bg-neutral-100 dark:border-neutral-800 dark:bg-neutral-800">
           {item.imageUrl ? (
+            // alt は displayTitle（整形後）。理由は日本語版と同じ＝生タイトルを入れると
+            // 見出しから落とした実況・相場の文言が alt にだけ残る。
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={proxiedImageUrl(item.id, item.imageUrl)!} alt={item.title} className="h-full w-full object-cover" />
+            <img src={proxiedImageUrl(item.id, item.imageUrl)!} alt={displayTitle} className="h-full w-full object-cover" />
           ) : (
             <NoImage genre={item.genre} />
           )}
