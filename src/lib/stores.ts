@@ -97,6 +97,60 @@ export function storeWhenLabelEn(s: StoreEntry, today: Date): string | null {
   return days > 0 ? `${s.when} (not open yet)` : s.when;
 }
 
+/**
+ * 「受付中」と言い切ってよい枠か（純関数）。
+ *
+ * `splitStoresByDeadline` は**締切が過ぎた枠**を落とすが、**そもそも締切を持たない枠**は
+ * 何日たっても open に残り続ける＝見出しが永久に「受付中」と言い続ける。
+ *
+ * 実測 2026-08-24（表示中の全件）: 「受付中」に並ぶ768行のうち **207行が締切を持たない**。
+ * うち18行は受付開始から30日以上たっており、一次情報を開くと #23075・#61954 の
+ * ノジマオンラインの応募フォームは**「終了しました」を返していた**のに受付中と書いていた。
+ * #91599 には「交流会**【7月開催】**」も残っていた。
+ *
+ * **落とす（消す）のではなく、言い方を弱める**（本人判断 2026-08-24・B案）。
+ * 締切を持たない＝終わった、ではないので消してはいけない（[[既定値に語らせない]]）。
+ * 締切を持つ枠だけを「受付中」と呼び、それ以外は事実（受付開始日）だけを書く。
+ *
+ * 判定を `kind === "締切"` に置くのは、`at` を持たない「締切時刻 調査中」（実測106行）が
+ * **締切のある抽選だと収集元が言っている**行で、かつ画面のラベル自身が調査中だと
+ * 断っているため。ここまで弱めると本当に受付中のものまで隠れる。
+ */
+export function isOpenClaimBacked(s: StoreEntry): boolean {
+  return s.kind === "締切";
+}
+
+/** 受付中と言い切れる枠 / 言い切れない枠に分ける（純関数）。 */
+export function splitStoresByEvidence(stores: StoreEntry[]): {
+  backed: StoreEntry[];
+  unbacked: StoreEntry[];
+} {
+  const backed: StoreEntry[] = [];
+  const unbacked: StoreEntry[] = [];
+  for (const s of stores) (isOpenClaimBacked(s) ? backed : unbacked).push(s);
+  return { backed, unbacked };
+}
+
+/**
+ * 締切を裏取りできていない枠の節の文言。**「受付中」と書かない**のがこの節の存在意義。
+ * 見出しに「受付中」を含めてはいけない（`auditRendered` の closedStoresShownAsOpen が
+ * 「受付中の約束」の目印に使う。含めるとこの節の行まで受付中の約束として検査される）。
+ */
+export function storeSectionCopyUnverified(): { heading: string; note: string } {
+  return {
+    heading: "📋 応募先として掲載されているストア",
+    note: "締切を確認できていないストアです。受付が続いているかは各公式ページでご確認ください。",
+  };
+}
+
+/** 上の英語版。見出しに "accepting entries"（受付中の約束の目印）を含めない。 */
+export function storeSectionCopyUnverifiedEn(): { heading: string; note: string } {
+  return {
+    heading: "📋 Stores listed for this item",
+    note: "We could not confirm a deadline for these. Check each official page for whether entries are still open.",
+  };
+}
+
 export function groupStoresByLabel(stores: StoreEntry[]): StoreGroup[] {
   const groups = new Map<string, StoreGroup>();
   for (const s of stores) {

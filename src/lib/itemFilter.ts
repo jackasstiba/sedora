@@ -3,6 +3,7 @@
 import { isMonthPrecision, isStalePlan, plannedDateFromText, todayJst } from "./date";
 import { parseYen } from "./margin";
 import {
+  isOpenClaimBacked,
   parseStoresJson,
   soonestOpenDeadline,
   storeDayMs,
@@ -820,6 +821,10 @@ export function liveStoreSummary(
   today: Date
 ): string | null {
   const PREFIX = "受付中ストア：";
+  // 締切を1つも裏取りできていないときに名乗る見出し（2026-08-24 本人判断・B案）。
+  // カードも詳細ページと同じ規約にする＝**同じ約束をしている面は全部直す**
+  // （2026-08-18「その値が出ている面を全部数える」）。
+  const UNVERIFIED_PREFIX = "応募先：";
   if (!highlights?.startsWith(PREFIX)) return highlights;
   const open = stores.filter((s) => {
     if (!s.at) return true; // 締切が分からない枠は落とさない（知らないことを根拠にしない）
@@ -828,8 +833,13 @@ export function liveStoreSummary(
     if (s.kind === "開始") return at <= today.getTime(); // まだ始まっていない店は「受付中」ではない
     return true;
   });
-  if (!open.length || open.length === stores.length) return highlights;
-  return `${PREFIX}${summarizeStores(open, 3)}`;
+  if (!open.length) return highlights;
+  // 「受付中」と名乗ってよいのは締切を持つ枠だけ。1つも無ければ事実だけの見出しにする
+  // （消さない＝締切が無い、は終わった、ではない）。
+  const backed = open.filter(isOpenClaimBacked);
+  if (!backed.length) return `${UNVERIFIED_PREFIX}${summarizeStores(open, 3)}`;
+  if (backed.length === stores.length) return highlights;
+  return `${PREFIX}${summarizeStores(backed, 3)}`;
 }
 
 /**

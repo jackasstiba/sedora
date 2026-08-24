@@ -22,8 +22,11 @@ import {
   parseStoresJson,
   preferredStoreUrl,
   splitStoresByDeadline,
+  splitStoresByEvidence,
   storeSectionCopy,
+  storeSectionCopyUnverified,
   storeWhenLabel,
+  type StoreGroup,
 } from "@/lib/stores";
 
 export const revalidate = 1800; // 30分ISRキャッシュ（表示高速化・Turso負荷減）
@@ -114,6 +117,95 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
+/**
+ * ストア1行の描画。「受付中」節と「締切を確認できていない」節が**同じ見た目・同じ規約**を
+ * 使うために切り出した（別実装にすると片方だけ直る＝この面で何度も踏んだ型）。
+ *
+ * `urgent` は締切の色。**断定の強さと見た目の強さを揃える**（2026-08-22 のルール）＝
+ * 締切を裏取りできていない行を、締切のある行と同じ赤で塗らない。
+ */
+function StoreRows({
+  groups,
+  itemId,
+  source,
+  button,
+  urgent,
+}: {
+  groups: StoreGroup[];
+  itemId: number;
+  source: string;
+  button: string;
+  urgent: boolean;
+}) {
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2">
+      {groups.flatMap((g) =>
+        g.entries.map((s, i) => {
+          // 受付時刻は保存文字列そのままではなく today から作る（保存物は絶対表記のまま）。
+          const whenLabel = storeWhenLabel(s, todayJst());
+          return (
+            <li
+              key={s.name + (s.url ?? "")}
+              className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
+                  {s.name}
+                  {/* 同じ店が別の応募ページを複数開くことがある。同じ行が2つ並ぶと区別が
+                      つかないので、何口目かを事実として添える（推測は足さない）。 */}
+                  {g.entries.length > 1 && source !== "collabo_cafe" && (
+                    <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
+                      応募ページ {i + 1}/{g.entries.length}
+                    </span>
+                  )}
+                </div>
+                {(s.form || whenLabel) && (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                    {s.form && (
+                      <span className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
+                        {s.form}
+                      </span>
+                    )}
+                    {whenLabel && (
+                      <span
+                        className={
+                          urgent
+                            ? "font-semibold text-rose-600 dark:text-rose-400"
+                            : "font-semibold text-neutral-700 dark:text-neutral-300"
+                        }
+                      >
+                        {whenLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {s.note && (
+                  <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
+                    条件: {s.note}
+                  </p>
+                )}
+              </div>
+              {/* URLを持たない行がある（複数店舗開催では、記事の地図リンクがどの店の
+                  ものか特定できないので紐づけない）。無い時はボタンを出さない。 */}
+              {s.url && (
+                <OutboundLink
+                  href={s.url}
+                  kind="official"
+                  source={sourceCode(source)}
+                  itemId={itemId}
+                  className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
+                >
+                  {button}
+                </OutboundLink>
+              )}
+            </li>
+          );
+        })
+      )}
+    </ul>
+  );
+}
+
 export default async function ItemPage({ params }: Props) {
   const { id } = await params;
   const item = await getItemById(Number(id));
@@ -152,7 +244,16 @@ export default async function ItemPage({ params }: Props) {
   const openStores = storeSplit?.open ?? [];
   const closedStoreCount = storeSplit?.closed.length ?? 0;
   // 同一表示ラベル（店名＋形式＋受付時刻）でまとめる。同じ店が別ページで複数口開くため。
-  const storeGroups = groupStoresByLabel(openStores);
+  // 「受付中」と言い切れる枠（締切を持つ）と、締切を裏取りできていない枠を分ける
+  // （2026-08-24 本人判断・B案）。**落とさずに言い方を弱める**＝締切が無い＝終わった、ではない。
+  // 開催店舗（collabo_cafe）は「受付中」と約束していない面なので分けない。
+  const claimsOpen = item.source !== "collabo_cafe";
+  const evidence = claimsOpen
+    ? splitStoresByEvidence(openStores)
+    : { backed: openStores, unbacked: [] };
+  const storeGroups = groupStoresByLabel(evidence.backed);
+  const unverifiedGroups = groupStoresByLabel(evidence.unbacked);
+  const unverifiedCopy = storeSectionCopyUnverified();
   // 「公式ページで見る」の行き先。item.url は巡回時に選んだ1店で、日が経つと
   // **締切済みの店**を指す（実測 2026-08-19: 掲載中の抽選5件。#75419 のリンク先は8/18に終了）。
   // 受付中の店があるなら、巡回時と同じ優先順（店舗ドメイン＞フォーム＞X）でそちらへ送る。
@@ -498,11 +599,13 @@ export default async function ItemPage({ params }: Props) {
 
       {/* 「どこへ行けば/どこで応募すれば買えるか」。家電・ゲーム機は各小売の応募ページ、
           コラボ/ポップアップ/カフェは開催店舗（会場限定なのでここが買える唯一の場所）。 */}
-      {storeList && (
+      {/* 「受付中」節は、そう言い切れる枠があるときだけ出す。1件も無いのに見出しだけ出すと
+          「受付中」という約束が空で立つ（締切済みの件数を説明する必要があるときは出す）。 */}
+      {storeList && (evidence.backed.length > 0 || closedStoreCount > 0) && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
             {storeCopy.heading}（{storeGroups.length}
-            {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${openStores.length}件`}）
+            {item.source === "collabo_cafe" ? "店舗" : `店・応募ページ ${evidence.backed.length}件`}）
           </h2>
           <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
             {storeCopy.note}
@@ -510,66 +613,41 @@ export default async function ItemPage({ params }: Props) {
                 隠した」を画面で区別できるようにする）。 */}
             {closedStoreCount > 0 && `（締切が過ぎた ${closedStoreCount}件は表示していません）`}
           </p>
-          {openStores.length === 0 && (
+          {evidence.backed.length === 0 && (
             <p className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
-              受付中のストアはありません（{closedStoreCount}件はすべて締切済み）。
+              {/* 締切を確認できていない枠は下の節に出しているので、「すべて締切済み」と
+                  言い切ってよいのは、その節が空のときだけ。 */}
+              締切が確認できている受付中のストアはありません（
+              {closedStoreCount}件は締切済み
+              {unverifiedGroups.length > 0 && `／締切を確認できていない ${unverifiedGroups.length}店は下に掲載`}
+              ）。
             </p>
           )}
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {storeGroups.flatMap((g) =>
-              g.entries.map((s, i) => {
-              // 受付時刻は保存文字列そのままではなく today から作る（保存物は絶対表記のまま）。
-              const whenLabel = storeWhenLabel(s, todayJst());
-              return (
-              <li
-                key={s.name + (s.url ?? "")}
-                className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
-                    {s.name}
-                    {/* 同じ店が別の応募ページを複数開くことがある。同じ行が2つ並ぶと区別が
-                        つかないので、何口目かを事実として添える（推測は足さない）。 */}
-                    {g.entries.length > 1 && item.source !== "collabo_cafe" && (
-                      <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
-                        応募ページ {i + 1}/{g.entries.length}
-                      </span>
-                    )}
-                  </div>
-                  {(s.form || whenLabel) && (
-                    <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
-                      {s.form && (
-                        <span className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
-                          {s.form}
-                        </span>
-                      )}
-                      {whenLabel && <span className="font-semibold text-rose-600 dark:text-rose-400">{whenLabel}</span>}
-                    </div>
-                  )}
-                  {s.note && (
-                    <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                      条件: {s.note}
-                    </p>
-                  )}
-                </div>
-                {/* URLを持たない行がある（複数店舗開催では、記事の地図リンクがどの店の
-                    ものか特定できないので紐づけない）。無い時はボタンを出さない。 */}
-                {s.url && (
-                  <OutboundLink
-                    href={s.url}
-                    kind="official"
-                    source={sourceCode(item.source)}
-                    itemId={item.id}
-                    className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
-                  >
-                    {storeCopy.button}
-                  </OutboundLink>
-                )}
-              </li>
-              );
-              })
-            )}
-          </ul>
+          <StoreRows
+            groups={storeGroups}
+            itemId={item.id}
+            source={item.source}
+            button={storeCopy.button}
+            urgent
+          />
+        </section>
+      )}
+
+      {/* 締切を裏取りできていない応募先。**「受付中」とは書かない**（見出しにその語を入れない）。
+          消さないのは「締切が無い＝終わった」ではないから。日付は事実（受付開始）だけを出す。 */}
+      {unverifiedGroups.length > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            {unverifiedCopy.heading}（{unverifiedGroups.length}店）
+          </h2>
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">{unverifiedCopy.note}</p>
+          <StoreRows
+            groups={unverifiedGroups}
+            itemId={item.id}
+            source={item.source}
+            button={storeCopy.button}
+            urgent={false}
+          />
         </section>
       )}
 

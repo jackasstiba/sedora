@@ -33,8 +33,11 @@ import {
   parseStoresJson,
   preferredStoreUrl,
   splitStoresByDeadline,
+  splitStoresByEvidence,
   storeSectionCopyEn,
+  storeSectionCopyUnverifiedEn,
   storeWhenLabelEn,
+  type StoreGroup,
 } from "@/lib/stores";
 
 // 英語版の商品詳細。データ・掲載判定・「約束の強さ」の規則は (ja)/items/[id] と同一で、
@@ -96,6 +99,89 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   };
 }
 
+/**
+ * ストア1行の描画（英語面）。日本語版の StoreRows と同じ構造・同じ規約。
+ * `urgent` は締切の色＝**断定の強さと見た目の強さを揃える**（締切を裏取りできていない行を
+ * 締切のある行と同じ赤で塗らない）。
+ */
+function StoreRowsEn({
+  groups,
+  itemId,
+  source,
+  button,
+  urgent,
+}: {
+  groups: StoreGroup[];
+  itemId: number;
+  source: string;
+  button: string;
+  urgent: boolean;
+}) {
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2">
+      {groups.flatMap((g) =>
+        g.entries.map((s, i) => {
+          const whenLabel = storeWhenLabelEn(s, todayJst());
+          return (
+            <li
+              key={s.name + (s.url ?? "")}
+              className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
+            >
+              <div className="min-w-0">
+                <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
+                  <span lang="ja">{s.name}</span>
+                  {g.entries.length > 1 && source !== "collabo_cafe" && (
+                    <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
+                      entry page {i + 1}/{g.entries.length}
+                    </span>
+                  )}
+                </div>
+                {(s.form || whenLabel) && (
+                  <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                    {s.form && (
+                      <span lang="ja" className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
+                        {s.form}
+                      </span>
+                    )}
+                    {whenLabel && (
+                      <span
+                        lang="ja"
+                        className={
+                          urgent
+                            ? "font-semibold text-rose-600 dark:text-rose-400"
+                            : "font-semibold text-neutral-700 dark:text-neutral-300"
+                        }
+                      >
+                        {whenLabel}
+                      </span>
+                    )}
+                  </div>
+                )}
+                {s.note && (
+                  <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
+                    Conditions: <span lang="ja">{s.note}</span>
+                  </p>
+                )}
+              </div>
+              {s.url && (
+                <OutboundLink
+                  href={s.url}
+                  kind="official"
+                  source={sourceCode(source)}
+                  itemId={itemId}
+                  className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
+                >
+                  {button}
+                </OutboundLink>
+              )}
+            </li>
+          );
+        })
+      )}
+    </ul>
+  );
+}
+
 export default async function ItemPageEn({ params }: Props) {
   const { id } = await params;
   const item = await getItemById(Number(id));
@@ -121,7 +207,14 @@ export default async function ItemPageEn({ params }: Props) {
   const storeSplit = storeList ? splitStoresByDeadline(storeList, todayJst()) : null;
   const openStores = storeSplit?.open ?? [];
   const closedStoreCount = storeSplit?.closed.length ?? 0;
-  const storeGroups = groupStoresByLabel(openStores);
+  // 「受付中」と言い切れる枠かの判定は**日本語版と同じ純関数**を通す（表示だけ英語）。
+  const claimsOpen = item.source !== "collabo_cafe";
+  const evidence = claimsOpen
+    ? splitStoresByEvidence(openStores)
+    : { backed: openStores, unbacked: [] };
+  const storeGroups = groupStoresByLabel(evidence.backed);
+  const unverifiedGroups = groupStoresByLabel(evidence.unbacked);
+  const unverifiedCopy = storeSectionCopyUnverifiedEn();
   const officialHref = (openStores.length ? preferredStoreUrl(openStores) : null) ?? item.url;
   const lotteryCtx = { source: item.source, eventDate: item.eventDate, stores: item.stores };
   const past = isEventPast(item.eventDate, item.eventDateText, todayJst());
@@ -469,76 +562,50 @@ export default async function ItemPageEn({ params }: Props) {
       )}
 
       {/* 受付中ストア一覧／開催店舗。締切が過ぎた枠を「受付中」に混ぜない（JAと同じ判定）。 */}
-      {storeList && (
+      {storeList && (evidence.backed.length > 0 || closedStoreCount > 0) && (
         <section className="mt-10">
           <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
             {storeCopy.heading} ({storeGroups.length}
             {item.source === "collabo_cafe"
               ? ` venue${storeGroups.length === 1 ? "" : "s"}`
-              : ` store${storeGroups.length === 1 ? "" : "s"} · ${openStores.length} entry page${openStores.length === 1 ? "" : "s"}`})
+              : ` store${storeGroups.length === 1 ? "" : "s"} · ${evidence.backed.length} entry page${evidence.backed.length === 1 ? "" : "s"}`})
           </h2>
           <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">
             {storeCopy.note}
             {/* 落とした分は黙って消さず件数で書く（「情報が無い」と「隠した」を区別可能に）。 */}
             {closedStoreCount > 0 && ` (${closedStoreCount} past-deadline entries are not shown.)`}
           </p>
-          {openStores.length === 0 && (
+          {evidence.backed.length === 0 && (
             <p className="rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700 dark:border-neutral-800 dark:bg-neutral-900 dark:text-neutral-300">
-              No stores are currently accepting entries ({closedStoreCount} deadlines have passed).
+              No stores with a confirmed deadline are accepting entries ({closedStoreCount} have passed
+              {unverifiedGroups.length > 0 && `; ${unverifiedGroups.length} without a confirmed deadline are listed below`}).
             </p>
           )}
-          <ul className="grid gap-2 sm:grid-cols-2">
-            {storeGroups.flatMap((g) =>
-              g.entries.map((s, i) => {
-                const whenLabel = storeWhenLabelEn(s, todayJst());
-                return (
-                  <li
-                    key={s.name + (s.url ?? "")}
-                    className="flex items-center justify-between gap-3 rounded-lg border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900"
-                  >
-                    <div className="min-w-0">
-                      <div className="truncate font-semibold text-neutral-900 dark:text-neutral-100">
-                        <span lang="ja">{s.name}</span>
-                        {g.entries.length > 1 && item.source !== "collabo_cafe" && (
-                          <span className="ml-1 text-xs font-normal text-neutral-600 dark:text-neutral-400">
-                            entry page {i + 1}/{g.entries.length}
-                          </span>
-                        )}
-                      </div>
-                      {(s.form || whenLabel) && (
-                        <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
-                          {s.form && (
-                            <span lang="ja" className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
-                              {s.form}
-                            </span>
-                          )}
-                          {whenLabel && (
-                            <span lang="ja" className="font-semibold text-rose-600 dark:text-rose-400">{whenLabel}</span>
-                          )}
-                        </div>
-                      )}
-                      {s.note && (
-                        <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                          Conditions: <span lang="ja">{s.note}</span>
-                        </p>
-                      )}
-                    </div>
-                    {s.url && (
-                      <OutboundLink
-                        href={s.url}
-                        kind="official"
-                        source={sourceCode(item.source)}
-                        itemId={item.id}
-                        className="shrink-0 rounded-lg bg-rose-600 px-3 py-2 text-xs font-semibold text-white transition hover:bg-rose-700"
-                      >
-                        {storeCopy.button}
-                      </OutboundLink>
-                    )}
-                  </li>
-                );
-              })
-            )}
-          </ul>
+          <StoreRowsEn
+            groups={storeGroups}
+            itemId={item.id}
+            source={item.source}
+            button={storeCopy.button}
+            urgent
+          />
+        </section>
+      )}
+
+      {/* 締切を裏取りできていない応募先。**判定は日本語版と同じ純関数**を通し、文言だけ英語。
+          見出しに "accepting entries"（受付中の約束の目印）を入れない＝翻訳で断定を強くしない。 */}
+      {unverifiedGroups.length > 0 && (
+        <section className="mt-10">
+          <h2 className="mb-1 text-lg font-bold text-neutral-900 dark:text-neutral-50">
+            {unverifiedCopy.heading} ({unverifiedGroups.length} store{unverifiedGroups.length === 1 ? "" : "s"})
+          </h2>
+          <p className="mb-3 text-xs text-neutral-600 dark:text-neutral-400">{unverifiedCopy.note}</p>
+          <StoreRowsEn
+            groups={unverifiedGroups}
+            itemId={item.id}
+            source={item.source}
+            button={storeCopy.button}
+            urgent={false}
+          />
         </section>
       )}
 

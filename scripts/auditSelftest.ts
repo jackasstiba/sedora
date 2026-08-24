@@ -59,11 +59,15 @@ import {
 import { holoPlacement, isHoloDigitalListing } from "../src/scrapers/hololiveShop";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
+  isOpenClaimBacked,
   lastDeadline,
   preferredStoreUrl,
   soonestOpenDeadline,
   splitStoresByDeadline,
+  splitStoresByEvidence,
   storeSectionCopyEn,
+  storeSectionCopyUnverified,
+  storeSectionCopyUnverifiedEn,
   storeWhenLabel,
   storeWhenLabelEn,
   type StoreEntry,
@@ -2391,7 +2395,18 @@ const cases: Case[] = [
   { name: "カード要約: まだ始まっていない店は受付中に数えない", fn: () => liveStoreSummary("受付中ストア：店1（抽選・8/20 00:00〜）、店2（抽選・〜8/21）", [{ name: "店1", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, { name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店2（抽選・〜8/21）" },
   { name: "カード要約: 相対表記を作らない（本日/明日を混ぜない）", fn: () => /本日|明日/.test(liveStoreSummary("受付中ストア：店1（抽選・〜8/1）、店2（抽選・〜8/8）", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }, { name: "店2", url: null, form: "抽選", when: "〜8/8", note: null, at: "2026-08-08", kind: "締切" }], today) ?? ""), want: false },
   { name: "カード要約: 全部受付中なら触らない", fn: () => liveStoreSummary("受付中ストア：そのまま", [{ name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：そのまま" },
-  { name: "カード要約: 締切が分からない枠は落とさない", fn: () => liveStoreSummary("受付中ストア：x", [{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today), want: "受付中ストア：x" },
+  // ⚠️ この期待値は 2026-08-24 に**意図的に変えた**（B案）。旧: 締切が分からない枠でも
+  // 「受付中ストア：」のままにしていた＝**永久に受付中と名乗り続ける**振る舞いを正解として
+  // 固定していた。落とさない（消さない）方針はそのままで、**名乗りだけ弱める**。
+  { name: "カード要約: 締切が分からない枠は落とさないが「受付中」とは名乗らない", fn: () => liveStoreSummary("受付中ストア：x", [{ name: "店", url: null, form: "抽選", when: "締切時刻 調査中", note: null }], today), want: "応募先：店（抽選・締切時刻 調査中）" },
+  // ── 「受付中」と言い切れるのは締切を持つ枠だけ（2026-08-24・B案） ──────────
+  // 実測: 「受付中」に並ぶ768行のうち207行が締切を持たず、うち18行は開始から30日以上。
+  // 一次情報では #23075/#61954 のノジマの応募フォームが「終了しました」を返していた。
+  { name: "受付中の裏取り: 締切を持つ枠は受付中と言える", fn: () => isOpenClaimBacked({ name: "店", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }), want: true },
+  { name: "受付中の裏取り: 開始日しか無い枠は受付中と言えない", fn: () => isOpenClaimBacked({ name: "店", url: null, form: "抽選", when: "6/10〜", note: null, at: "2026-06-10", kind: "開始" }), want: false },
+  { name: "受付中の裏取り: 情報が何も無い枠は受付中と言えない", fn: () => isOpenClaimBacked({ name: "店", url: null, form: null, when: null, note: null }), want: false },
+  { name: "受付中の裏取り: 分割は落とさず両方に残す（消さない）", fn: () => { const r = splitStoresByEvidence([{ name: "a", url: null, form: null, when: null, note: null, at: "2026-08-30", kind: "締切" }, { name: "b", url: null, form: null, when: null, note: null, at: "2026-06-10", kind: "開始" }]); return `${r.backed.length}/${r.unbacked.length}`; }, want: "1/1" },
+  { name: "カード要約: 締切のある枠があれば受付中のまま（裏取りできない枠は外す）", fn: () => liveStoreSummary("受付中ストア：x", [{ name: "店A", url: null, form: "抽選", when: "6/10〜", note: null, at: "2026-06-10", kind: "開始" }, { name: "店B", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店B（抽選・〜8/21）" },
   { name: "カード要約: 「受付中ストア：」以外の要約は触らない", fn: () => liveStoreSummary("抽選受付 〜8/16", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }], today), want: "抽選受付 〜8/16" },
 
   // ── 「日付未定」なのに商品名が時期を言っている（2026-08-16・観点C 通読で発見） ──────
@@ -4571,6 +4586,25 @@ const cases: Case[] = [
     fn: () =>
       `${storeSectionCopyEn("collabo_cafe").heading}|${storeSectionCopyEn("nyuka_now").heading.includes("accepting entries")}`,
     want: "📍 Venues|true",
+  },
+  // **未確認の節の見出しに「受付中の約束の目印」を入れてはいけない。**
+  // auditRendered の closedStoresShownAsOpen は「受付中ストア」/"accepting entries" を目印に
+  // その節の行を検査するので、目印を入れるとこの節まで受付中の約束として扱われる
+  // （＝弱めたつもりが、検査の上では受付中と名乗ったことになる）。
+  {
+    name: "未確認ストア節: 見出しに「受付中」を含めない（JA）",
+    fn: () => storeSectionCopyUnverified().heading.includes("受付中"),
+    want: false,
+  },
+  {
+    name: "未確認ストア節: 見出しに accepting entries を含めない（EN）",
+    fn: () => storeSectionCopyUnverifiedEn().heading.toLowerCase().includes("accepting entries"),
+    want: false,
+  },
+  {
+    name: "未確認ストア節: 注記で「受付が続いているか各公式ページで」と断る（断定しない）",
+    fn: () => storeSectionCopyUnverified().note.includes("締切を確認できていない"),
+    want: true,
   },
   {
     name: "EN受付ラベル: 絶対表記のまま出す（本日/明日への置換をしない＝保存物が古びても嘘にならない）",
