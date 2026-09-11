@@ -1,5 +1,6 @@
+import { unstable_cache } from "next/cache";
 import { prisma } from "./prisma";
-import { todayJst } from "./date";
+import { todayJst, nowInstant } from "./date";
 import {
   dedupeItems,
   dedupeKey,
@@ -69,6 +70,90 @@ export async function getItemById(id: number) {
  * - series: タイトルから作品を判定し、同じ作品の予約/発売（ジャンル横断）。関連性が高い。
  * - genre:  同ジャンルの新着（作品で拾えない/枠が余った分の補完）。series と重複しない。
  */
+/**
+ * 読み取り量の話（2026-09-11）。関連商品は「タイトル LIKE '%作品名%'」で全行を舐めるので、
+ * 1回の詳細ページ再生成で Item 全件（1.1万行）を2回読んでいた。詳細ページは日英で7,000超あり、
+ * ISR 30分をクローラーが叩くと**1日4,700万行**になり、Turso の月間上限（無料5億行）を11日で
+ * 使い切って全詳細ページが 500 になった（Daily 2026-09-11）。
+ *
+ * 対策: 候補探しに要る列だけ（id/title/genre/eventDate ≒ 1.2MB）を Next のデータキャッシュに
+ * 30分置き、候補の絞り込みはメモリで行い、本体は id で引く（索引付き・数十行）。全件スキャンは
+ * 30分に1回＝サイト全体で共有される。並び・重複解消・件数は SQL 版と同じ規則に揃えてある。
+ * 索引の鮮度は詳細ページの ISR（30分）と同じなので、見た目の遅れは増えない。
+ */
+type ItemIndexRow = { id: number; title: string; genre: string; eventDate: number | null };
+
+const ITEM_INDEX_REVALIDATE_SEC = 1800;
+
+/**
+ * Next のデータキャッシュに置く読み取り。**Next の外（scripts/ の audit 等・tsx 直実行）では
+ * キャッシュ基盤が無く unstable_cache が例外を投げる**ので、そこでは素の関数を呼ぶ。
+ * 判定は Next がビルド時に埋める NEXT_RUNTIME（"nodejs"/"edge"）。念のため実行時の
+ * 「incrementalCache missing」も同じ扱いにする。
+ */
+function cachedRead<T>(fn: () => Promise<T>, keyParts: string[], revalidate: number): () => Promise<T> {
+  const cached = unstable_cache(fn, keyParts, { revalidate, tags: ["items"] });
+  return async () => {
+    if (!process.env.NEXT_RUNTIME) return fn();
+    try {
+      return await cached();
+    } catch (e) {
+      if (e instanceof Error && e.message.includes("incrementalCache missing")) return fn();
+      throw e;
+    }
+  };
+}
+
+const loadItemIndex = cachedRead(
+  async (): Promise<ItemIndexRow[]> => {
+    const rows = await prisma.item.findMany({
+      where: JP_SCOPE_WHERE,
+      select: { id: true, title: true, genre: true, eventDate: true },
+    });
+    return rows.map((r) => ({ id: r.id, title: r.title, genre: r.genre, eventDate: r.eventDate ? r.eventDate.getTime() : null }));
+  },
+  ["item-index-v1"],
+  ITEM_INDEX_REVALIDATE_SEC
+);
+
+// 同じ関数インスタンス内では 1.2MB をデータキャッシュから毎回引き直さない（5分だけ手元に持つ）。
+let itemIndexMemo: { at: number; rows: ItemIndexRow[] } | null = null;
+const ITEM_INDEX_MEMO_MS = 5 * 60 * 1000;
+
+async function getItemIndex(): Promise<ItemIndexRow[]> {
+  const now = nowInstant().getTime();
+  if (itemIndexMemo && now - itemIndexMemo.at < ITEM_INDEX_MEMO_MS) return itemIndexMemo.rows;
+  const rows = await loadItemIndex();
+  itemIndexMemo = { at: now, rows };
+  return rows;
+}
+
+/** SQL 版と同じ並び: eventDate 昇順（null は末尾）→ id 降順 */
+function compareUpcoming(a: ItemIndexRow, b: ItemIndexRow): number {
+  if (a.eventDate === null && b.eventDate !== null) return 1;
+  if (a.eventDate !== null && b.eventDate === null) return -1;
+  if (a.eventDate !== null && b.eventDate !== null && a.eventDate !== b.eventDate) return a.eventDate - b.eventDate;
+  return b.id - a.id;
+}
+
+/** SQLite の LIKE は ASCII だけ大文字小文字を畳む。同じ意味になるよう ASCII だけ畳んで比較する。 */
+function foldAscii(s: string): string {
+  return s.replace(/[A-Z]/g, (c) => c.toLowerCase());
+}
+
+/** 候補 id の本体を引き、索引の並びに戻す（IN 句の戻り順は不定）。 */
+async function fetchInIndexOrder(cands: ItemIndexRow[]) {
+  if (!cands.length) return [];
+  const rows = await prisma.item.findMany({ where: { id: { in: cands.map((c) => c.id) } } });
+  const pos = new Map(cands.map((c, i) => [c.id, i]));
+  return rows.sort((a, b) => (pos.get(a.id) ?? 0) - (pos.get(b.id) ?? 0));
+}
+
+/**
+ * 関連アイテムを2系統で返す（自分自身は除く）。
+ * - series: タイトルから作品を判定し、同じ作品の予約/発売（ジャンル横断）。関連性が高い。
+ * - genre:  同ジャンルの新着（作品で拾えない/枠が余った分の補完）。series と重複しない。
+ */
 export async function getRelatedItems(
   item: { id: number; genre: string; title: string },
   take = 12,
@@ -76,45 +161,41 @@ export async function getRelatedItems(
    *  価格つきで出ているので、関連欄にもう一度同じ商品を並べると1ページに2回出ることになる。 */
   excludeIds: number[] = []
 ) {
-  const today = todayJst();
-  const upcoming = { OR: [{ eventDate: { gte: today } }, { eventDate: null }] };
-  const orderBy = [
-    { eventDate: { sort: "asc" as const, nulls: "last" as const } },
-    { id: "desc" as const },
-  ];
+  const todayMs = todayJst().getTime();
+  const index = await getItemIndex();
+  // 「今後の予定＋日付未定」だけ（getItems / SQL 版の upcoming と同じ条件）
+  const upcoming = index.filter((r) => r.eventDate === null || r.eventDate >= todayMs);
 
   // 1) 同じ作品（ジャンル横断）。ワンピのフィギュアとカードを互いに関連づける等。
   //    figisland↔koretore が同じプライズを両方載せるため、一覧と同じ dedupeItems で
   //    クロスソース重複を畳む（畳まないと関連欄に同一フィギュアが2枚並ぶ）。
-  const aliases = franchiseAliases(item.title);
-  const rawSeries = aliases.length
-    ? await prisma.item.findMany({
-        where: {
-          id: { notIn: [item.id, ...excludeIds] },
-          AND: [{ OR: aliases.map((a) => ({ title: { contains: a } })) }, upcoming, JP_SCOPE_WHERE],
-        },
-        orderBy,
-        take: take + 8, // dedupe で減る分を見込んで多めに取る
-      })
+  const aliases = franchiseAliases(item.title).map(foldAscii);
+  const notSelf = new Set([item.id, ...excludeIds]);
+  const seriesCands = aliases.length
+    ? upcoming
+        .filter((r) => !notSelf.has(r.id) && aliases.some((a) => foldAscii(r.title).includes(a)))
+        .sort(compareUpcoming)
+        .slice(0, take + 8) // dedupe で減る分を見込んで多めに取る
     : [];
-  const series = dedupeItems(rawSeries).slice(0, take);
+  const series = dedupeItems(await fetchInIndexOrder(seriesCands)).slice(0, take);
 
   // 2) 同ジャンルで補完（series と自分自身は除外）。series と同じ商品（別ソース含む）が
   //    genre 側に再登場して2セクションで重複しないよう、series のタイトルキーでも除外する。
   const seriesKeys = new Set(
     series.map((s) => dedupeKey(s.title)).filter((k) => k.length >= 6)
   );
-  const excluded = [item.id, ...excludeIds, ...series.map((s) => s.id)];
+  const excluded = new Set([item.id, ...excludeIds, ...series.map((s) => s.id)]);
   const need = take - series.length;
+  const genreCands =
+    need > 0
+      ? upcoming
+          .filter((r) => r.genre === item.genre && !excluded.has(r.id))
+          .sort(compareUpcoming)
+          .slice(0, need + 8)
+      : [];
   const genre =
     need > 0
-      ? dedupeItems(
-          await prisma.item.findMany({
-            where: { genre: item.genre, id: { notIn: excluded }, AND: [upcoming, JP_SCOPE_WHERE] },
-            orderBy,
-            take: need + 8,
-          })
-        )
+      ? dedupeItems(await fetchInIndexOrder(genreCands))
           .filter((g) => {
             const k = dedupeKey(g.title);
             return k.length < 6 || !seriesKeys.has(k);
@@ -324,9 +405,19 @@ export async function getMonthsWithItems(): Promise<string[]> {
 }
 
 /** 内部リンク用：ジャンル一覧（表示順を固定、未知ジャンルは末尾） */
+// 全ページのヘッダーが呼ぶ。groupBy は Item 全件を読む（1.1万行）ので、ページの再生成のたびに
+// 走らせず、データキャッシュに 30 分置く（getRelatedItems のコメントと同じ 2026-09-11 の件）。
+const loadGenreNames = cachedRead(
+  async (): Promise<string[]> => {
+    const rows = await prisma.item.groupBy({ by: ["genre"], where: JP_SCOPE_WHERE, _count: true });
+    return rows.map((r) => r.genre);
+  },
+  ["genre-list-v1"],
+  ITEM_INDEX_REVALIDATE_SEC
+);
+
 export async function getGenreList(): Promise<string[]> {
-  const rows = await prisma.item.groupBy({ by: ["genre"], where: JP_SCOPE_WHERE, _count: true });
-  const genres = rows.map((r) => r.genre);
+  const genres = [...(await loadGenreNames())];
   return genres.sort((a, b) => {
     const ia = GENRE_ORDER.indexOf(a);
     const ib = GENRE_ORDER.indexOf(b);

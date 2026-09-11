@@ -1,4 +1,4 @@
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import type { NextRequest } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { nowInstant, todayJst } from "@/lib/date";
@@ -55,6 +55,9 @@ export async function GET(req: NextRequest) {
   // ルートレイアウト配下＝全ページを対象に捨てる。ページを列挙すると、
   // 新しいページを足した日に必ず漏れる（同じ型の穴を「表示範囲」で一度踏んでいる）。
   revalidatePath("/", "layout");
+  // ジャンル一覧・関連商品の索引（lib/seo.ts の unstable_cache）も同じタイミングで捨てる。
+  // ページだけ捨てて索引が古いままだと、0時に消えた予定が関連欄にだけ残る。
+  revalidateTag("items", "max");
 
   const site = process.env.NEXT_PUBLIC_SITE_URL;
   const warmed: string[] = [];

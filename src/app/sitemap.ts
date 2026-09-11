@@ -4,6 +4,10 @@ import { getTcgTitleCounts } from "@/lib/tcg";
 import { nowInstant } from "@/lib/date";
 import { EN_TRENDS_PATH, enCatalogPagePaths } from "@/lib/enCatalog";
 
+// sitemap は Item 全件を読む。クローラーが1日に何度も取りに来るので 1 時間は同じものを返す
+// （中身は朝の巡回でしか変わらない。2026-09-11 の読み取り上限の件）。
+export const revalidate = 3600;
+
 export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const base = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
 

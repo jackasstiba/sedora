@@ -73,6 +73,10 @@ model Item {
   @@unique([source, sourceId])
   @@index([genre])
   @@index([eventDate])
+  // 2026-09-11 読み取り削減: 最終更新（scrapedAt 降順の先頭1件）が全行ソートにならないように
+  @@index([scrapedAt])
+  // 同上: 販売単位の兄弟探し（source が同じ・同じ日付か日付なし）を全行スキャンにしない
+  @@index([source, eventDate])
 }
 
 // 自前アクセス解析イベント。Vercel Web Analytics のカスタムイベントは Hobby プランでは
