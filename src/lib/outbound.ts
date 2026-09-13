@@ -214,3 +214,25 @@ export const AD_DISCLOSURE = "本サイトはアフィリエイト広告を利�
  * 実際に /en に出ているかは `npm run audit:page` が見る（checkAdDisclosure が両言語を受ける）。
  */
 export const AD_DISCLOSURE_EN = "This site uses affiliate advertising links.";
+
+/**
+ * 代行（proxy / forwarding）サービスの検索URL。**英語圏の読者にとっての実際の購入手段**。
+ *
+ * なぜ楽天検索だけでは足りないか: 楽天市場の店舗は大半が国内発送のみで、海外の読者は
+ * 検索結果に辿り着いても買えない。代行は「日本の店で買って国際発送する」経路そのもので、
+ * /en/how-to-buy が説明している手段と一致する。
+ *
+ * 形式は**実物で確認した**（2026-08-24 実測。ブラウザで取得し英語UIの検索結果が出ることと、
+ * 件数が返ることを確認済み。素の curl は bot 対策で 202 空応答になるので根拠にしない）:
+ *   https://buyee.jp/item/search/query/<encodeURIComponent(商品名)>?lang=en
+ * `?lang=en` を落とすと日本語UIで着地する＝英語ページから送る先としては壊れている。
+ *
+ * ⚠ **アフィリエイトリンクではない（素リンク）。** Buyee の計測リンク（Indoleads）は承認待ちで、
+ * 取れたらここだけ差し替える。差し替えた瞬間に「機械で踏んではいけないURL」に変わるので、
+ * その時は rakutenSearchUrl と同じ注意（保存しない・fetch しない・画面に出す瞬間だけ呼ぶ）が
+ * この関数にもかかる。
+ */
+export function buyeeSearchUrl(title: string): string {
+  // 全角英数記号は半角に（実測 2026-09-13: 「BE@RBRICK MOFF GIDEON 400％」は0件、「％」を外すと当たる）。
+  return `https://buyee.jp/item/search/query/${encodeURIComponent(title.normalize("NFKC").trim())}?lang=en`;
+}

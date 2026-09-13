@@ -6,7 +6,7 @@ import { toCardItem } from "@/lib/cardItem";
 import { NoImage } from "@/components/NoImage";
 import { OutboundLink } from "@/components/OutboundLink";
 import { formatPriceDisplay } from "@/lib/margin";
-import { hasSearchableTitle, isOfficialUrl, officialUrlLabelEn, rakutenSearchUrl } from "@/lib/outbound";
+import { buyeeSearchUrl, hasSearchableTitle, isOfficialUrl, officialUrlLabelEn, rakutenSearchUrl } from "@/lib/outbound";
 import { getItemById, getRelatedItems, getSaleUnits } from "@/lib/seo";
 import { eventDateHeading } from "@/lib/itemFilter";
 import { countdown, displayEventType, eventDateLabelEn, eventPeriodText, isEventPast, isMonthPrecision, pastNotice, todayJst } from "@/lib/date";
@@ -495,6 +495,23 @@ export default async function ItemPageEn({ params }: Props) {
                 className="inline-flex items-center justify-center rounded-lg border border-rose-600 px-4 py-2.5 text-sm font-semibold text-rose-600 transition hover:bg-rose-50 dark:border-rose-400 dark:text-rose-400 dark:hover:bg-rose-950"
               >
                 Search on Rakuten (Japan) →
+              </OutboundLink>
+            )}
+            {/* 代行での検索。楽天は国内発送のみの店が大半で、**海外の読者は楽天に着地しても
+                買えない**＝英語版で唯一「自分の住所に届く」可能性のある導線がこれ。
+                出す条件と検索語は楽天と同じ（文章タイトルのソースで無関係な結果に飛ばさない）。
+                ラベルは "Search" 止まり＝在庫があるとも買えるとも約束しない（代行が扱えるかは
+                店とサービス側が決める。/en/how-to-buy が説明している通り）。 */}
+            {showRakuten && (
+              <OutboundLink
+                href={buyeeSearchUrl(hasSearchableTitle(item.source) ? item.title : displayTitle)}
+                kind="proxy"
+                detail="buyee"
+                source={sourceCode(item.source)}
+                itemId={item.id}
+                className="inline-flex items-center justify-center rounded-lg border border-neutral-300 px-4 py-2.5 text-sm font-semibold text-neutral-700 transition hover:bg-neutral-50 dark:border-neutral-700 dark:text-neutral-200 dark:hover:bg-neutral-900"
+              >
+                Search on Buyee (proxy service) →
               </OutboundLink>
             )}
           </div>

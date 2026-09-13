@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { OutboundLink } from "@/components/OutboundLink";
+
+/** 代行サービスへの外部リンク（本文中のインラインリンク）の見た目。 */
+const proxyLink = "text-rose-600 hover:underline dark:text-rose-400";
 
 // 「日本からどう買うか」の固定ガイド（英語版のコア導線）。データを読まない静的ページ。
 //
@@ -9,8 +13,10 @@ import Link from "next/link";
 //  ・費用は構造（内訳）だけを書き、料率・金額の数字は書かない（裏取りできても翌週腐る）。
 //  ・立ち位置の語彙（resell/resale/scalp/profit 等）は使わない＝auditSelftest の
 //    表示層スキャンがこのファイルも自動で見る。
-//  ・代行サービスへのリンクは現状**素リンク**。Buyee の計測リンク（Indoleads・承認待ち）が
-//    取れたら、リンクを差し替え＋リンク近傍にアフィリ開示の一文を追加する（FTC・§5設計）。
+//  ・代行サービスへのリンクは現状**素リンク**（＝収益は発生しない）。Buyee の計測リンク
+//    （Indoleads・承認待ち）が取れたら、リンクを差し替え＋リンク近傍にアフィリ開示の一文を
+//    追加する（FTC・§5設計）。素リンクのうちから OutboundLink で包んであるので、
+//    **どの代行がどれだけ押されているか**は今の時点から積み上がる（提携先を実測で選ぶため）。
 export const metadata: Metadata = {
   title: "How to buy from Japan | Hatsukore",
   description:
@@ -85,23 +91,26 @@ export default function HowToBuyPage() {
       </ol>
       <p className="mt-3 text-sm text-neutral-700 dark:text-neutral-300">
         {/* Buyee を先頭に置く（本命・Indoleads承認後に計測リンクへ差し替え予定）。
-            差し替え時はこの段落の直下にリンク近傍のアフィリ開示を追加すること。 */}
+            差し替え時はこの段落の直下にリンク近傍のアフィリ開示を追加すること。
+            素リンクのままでも OutboundLink で包む＝**どの代行が実際に押されているか**を
+            outbound_click(kind=proxy, detail=サービス名) で数える。提携を申し込む先を
+            人気の想像ではなく実測で決めるため。 */}
         Widely used services include{" "}
-        <a href="https://buyee.jp/?lang=en" target="_blank" rel="nofollow noopener noreferrer" className="text-rose-600 hover:underline dark:text-rose-400">
+        <OutboundLink href="https://buyee.jp/?lang=en" kind="proxy" detail="buyee" className={proxyLink}>
           Buyee
-        </a>
+        </OutboundLink>
         ,{" "}
-        <a href="https://zenmarket.jp/en/" target="_blank" rel="nofollow noopener noreferrer" className="text-rose-600 hover:underline dark:text-rose-400">
+        <OutboundLink href="https://zenmarket.jp/en/" kind="proxy" detail="zenmarket" className={proxyLink}>
           ZenMarket
-        </a>
+        </OutboundLink>
         ,{" "}
-        <a href="https://www.fromjapan.co.jp/en/" target="_blank" rel="nofollow noopener noreferrer" className="text-rose-600 hover:underline dark:text-rose-400">
+        <OutboundLink href="https://www.fromjapan.co.jp/en/" kind="proxy" detail="fromjapan" className={proxyLink}>
           FROM JAPAN
-        </a>{" "}
+        </OutboundLink>{" "}
         and{" "}
-        <a href="https://neokyo.com/" target="_blank" rel="nofollow noopener noreferrer" className="text-rose-600 hover:underline dark:text-rose-400">
+        <OutboundLink href="https://neokyo.com/" kind="proxy" detail="neokyo" className={proxyLink}>
           Neokyo
-        </a>
+        </OutboundLink>
         . Each has its own fees, supported shops and rules — compare before you order.
       </p>
 

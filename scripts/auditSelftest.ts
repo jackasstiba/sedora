@@ -114,7 +114,7 @@ const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Mobile Safari/537.36";
 const WINDOWS_UA =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36";
-import { isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, officialUrlLabelEn, rakutenSearchUrl } from "../src/lib/outbound";
+import { buyeeSearchUrl, isOfficialUrl, isRakutenAffiliateId, officialUrlLabel, officialUrlLabelEn, rakutenSearchUrl } from "../src/lib/outbound";
 import { extractKujiFee, extractKujiPrizes, extractKujiStores } from "../src/scrapers/ichibanKujiEnrich";
 import {
   extractMapUrl,
@@ -1218,6 +1218,13 @@ const cases: Case[] = [
     name: "アフィリIDが無ければ素の検索URL",
     fn: () => rakutenSearchUrl("ポケカ 拡張パック", ""),
     want: "https://search.rakuten.co.jp/search/mall/%E3%83%9D%E3%82%B1%E3%82%AB%20%E6%8B%A1%E5%BC%B5%E3%83%91%E3%83%83%E3%82%AF/",
+  },
+  // (d-3) 代行（Buyee）の検索URL。英語UIで着地する `?lang=en` と、全角の半角化を固定する
+  //（実測 2026-09-13: 「400％」のままだと0件、`?lang=en` を落とすと日本語UIに着地する）。
+  {
+    name: "Buyee検索URLは英語UI(?lang=en)で、全角英数記号は半角にしてから投げる",
+    fn: () => buyeeSearchUrl("BE@RBRICK MOFF GIDEON 400％ "),
+    want: "https://buyee.jp/item/search/query/BE%40RBRICK%20MOFF%20GIDEON%20400%25?lang=en",
   },
   {
     name: "形が違うIDは使わない（成果の付かないリンクを作らない）",
