@@ -1,3 +1,4 @@
+import { decodeHtmlEntities } from "./aggregatorUtil";
 import { todayJst } from "../lib/date";
 
 const USER_AGENT =
@@ -220,7 +221,10 @@ const TRAILING_LOCATION = new RegExp(
 
 /** タイトルから日付告知・編集タグを取り除いて商品名として読みやすくする */
 export function cleanTitle(raw: string): string {
-  let t = raw.trim();
+  // HTMLエンティティは**保存の入口**で戻す。各スクレイパーに任せると1本忘れるだけで本番に
+  // 「&quot;」「&#x27;」が生で出る（実測 2026-09-13: raffle_kuji「SAY MY NAME &quot;LOVvmE&#x27;s Note&quot;」
+  // が / と /lottery のカードに出て audit:page が鳴った）。汎用画像の判定と同じ置き場。
+  let t = decodeHtmlEntities(raw).trim();
   // NBSP(U+00A0)等の特殊空白は普通の空白に。見た目は同じだが、楽天検索URLに %C2%A0 が
   // 乗り検索を狂わせ、重複突合のキーも揺らす（実測: SNKRS「コービー 5」のNBSP）。
   // 全角スペース(U+3000)は日本語タイトルの区切りとして意味を持つので触らない。
