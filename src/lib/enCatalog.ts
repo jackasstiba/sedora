@@ -47,6 +47,15 @@ export const EN_CATALOG_STORES: EnCatalogStore[] = [
     name: "mofusand Mofumofu Market",
     blurb: "The official store for mofusand's cat characters.",
   },
+  // 2026-09-13 追加。企業サイトが Shopify ストアに一本化されたのを機に、chara 3店と同じ
+  // `collections/all` の在庫ありをカタログにする（src/scrapers/medicomToy.ts の medicomCatalogItem）。
+  // 海外需要の本命（BE@RBRICK / MAFEX）。店名は店の <title> の名乗り。
+  {
+    source: "medicom_toy",
+    slug: "medicom",
+    name: "MEDICOM TOY OFFICIAL STORE",
+    blurb: "The official store for BE@RBRICK, MAFEX, UDF and MEDICOM TOY sofubi.",
+  },
 ];
 
 /** slug から店を引く（未知の slug は null＝ページを作らない）。 */

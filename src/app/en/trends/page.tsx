@@ -162,12 +162,12 @@ export default async function TrendsEn() {
             {long.franchises.map((f, i) => (
               <li key={f.key} className="flex items-baseline justify-between gap-3 border-b border-neutral-100 py-1 dark:border-neutral-800">
                 <span className="text-neutral-800 dark:text-neutral-200">
-                  <span className="mr-2 tabular-nums text-neutral-400">{i + 1}.</span>
+                  <span className="mr-2 tabular-nums text-neutral-600 dark:text-neutral-400">{i + 1}.</span>
                   {f.name}
                 </span>
                 <span className="tabular-nums text-neutral-900 dark:text-neutral-50">
                   <span className="font-semibold">{f.firstSeen}</span>
-                  <span className="ml-1 text-xs text-neutral-500">new · {f.current} tracked</span>
+                  <span className="ml-1 text-xs text-neutral-600 dark:text-neutral-400">new · {f.current} tracked</span>
                 </span>
               </li>
             ))}

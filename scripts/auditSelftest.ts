@@ -137,7 +137,7 @@ import { cleanProductName as cleanTqProductName, isReleaseTitle, verifyReleasePo
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { parseCardChusen, parseDue, productKey, splitSaleConditions, stripStrayMarks } from "../src/scrapers/cardChusen";
-import { buildSaleUnits, groupSaleUnits, isBundlePriced, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
+import { buildSaleUnits, groupSaleUnits, isBundlePriced, isSaleUnitGroup, looksBundlePriceForBlind, saleUnitLabel } from "../src/lib/saleUnit";
 import { cleanGunplaName, gunplaCalendarUrls, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { parseTorecasokuList } from "../src/scrapers/torecasoku";
 import { sofviDeadlineFromArticle, sofviEventInfo, sofviProductName, storeLinkNear } from "../src/scrapers/sofvi";
@@ -153,7 +153,7 @@ import { crawlDecision, lastIsOlderThan } from "../src/scrapers/crawl";
 import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
-import { medicomItemFromProduct, parseMedicomTitle } from "../src/scrapers/medicomToy";
+import { medicomCatalogItem, medicomItemFromProduct, parseMedicomTitle } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { baselineWritable } from "./factsBaseline";
 import { jsonPrices } from "./pagePrice";
@@ -3035,6 +3035,19 @@ const cases: Case[] = [
     want: "2026-09-30|受注期間は9月30日まで|2027年2月発送予定",
   },
   {
+    // 2026-09-13: EN専用カタログ（在庫ありだけ・日付なし・scope=en・《予定》は落とす）
+    name: "medicom カタログ: 在庫ありは scope=en の日付なし行、売り切れは載せない",
+    fn: () => {
+      const base = { handle: "x", product_type: "BE@RBRICK", published_at: "2026-07-31T00:00:00+09:00", tags: [], images: [{ src: "https://cdn.shopify.com/a.png" }] };
+      const a = medicomCatalogItem({ ...base, id: 1, title: "BE@RBRICK TOKYO MER", variants: [{ price: "2000", available: true }] });
+      const b = medicomCatalogItem({ ...base, id: 2, title: "BE@RBRICK SOLD", variants: [{ price: "2000", available: false }] });
+      // 《…予定》付きは受注中＝「Out now」の顔で出さない
+      const c = medicomCatalogItem({ ...base, id: 3, title: "SFS グレート・ムタ《2027年2月発送予定 受注期間は9月30日まで》", variants: [{ price: "15000", available: true }] });
+      return `${a?.title}|${a?.scope}|${a?.eventType}|${a?.eventDate}|${a?.price}|${b}|${c}`;
+    },
+    want: "BE@RBRICK TOKYO MER|en|登場済み|null|2,200円|null|null",
+  },
+  {
     name: "medicom: 締切を過ぎた受注は載せない",
     fn: () =>
       medicomItemFromProduct(
@@ -5004,6 +5017,26 @@ const cases: Case[] = [
       `|${isBundlePriced("『クリィミーマミ』缶バッジ11/ブラインド(全5種)【BOX】")}` +
       `|${isBundlePriced("『モノノ怪 第三章 蛇神』アクリル色紙/薬売り 離の剣")}`,
     want: "true|true|true|false",
+  },
+  // 2026-09-13: 「全◯種」でセット表記の無い行は単品か一括か名前で決められない → 種類数×¥400 以上を一括とみなす
+  {
+    name: "ブラインドの一括判定: 全10種¥5,500は一括／全10種¥550は1個／「単品」明記は1個／全種表記が無ければ対象外",
+    fn: () =>
+      `${looksBundlePriceForBlind("トレーディング缶バッジ 全10種", 5500)}` +
+      `|${looksBundlePriceForBlind("トレーディング缶バッジ（全10種）", 550)}` +
+      `|${looksBundlePriceForBlind("トレーディング缶バッジ 全10種 単品", 5500)}` +
+      `|${looksBundlePriceForBlind("アクリルスタンド 全5種", 1650)}` +
+      `|${looksBundlePriceForBlind("アクリルスタンド", 5500)}`,
+    want: "true|false|false|false|false",
+  },
+  {
+    name: "公式販売の要約: 全10種¥5,500（一括に見える）は価格帯から外し、¥550（1個）は載せる",
+    fn: () =>
+      formatOfficialItems([
+        { name: "トレーディング缶バッジ 全10種", price: 5500 },
+        { name: "トレーディング缶バッジ（全10種）", price: 550 },
+      ]),
+    want: "公式販売: 缶バッジ¥550",
   },
   {
     name: "公式販売の要約: まとめ売りを価格帯に混ぜない（1個の値段の顔で数万円を出さない）",

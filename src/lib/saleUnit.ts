@@ -55,6 +55,26 @@ export function isBundlePriced(name: string): boolean {
   return /セット/.test(name);
 }
 
+/**
+ * ブラインド商品（「全◯種」）の価格が**一括（全種まとめ）の値段に見える**か。
+ *
+ * 「トレーディング缶バッジ（全10種）¥550」は1個の値段、「トレーディング缶バッジ 全10種 ¥5,500」は
+ * 全種一括の値段だが、公式ページの商品名にはセット表記が無いことがあり、名前だけでは区別できない
+ *（[[Projects/sedori_radar_en]] 2026-08-22「残る曖昧さ」）。1個の値段の顔で一括の値段を価格帯に混ぜると
+ * 上端が膨らむので、**種類数×¥400 以上なら一括とみなして価格帯から外す**（1個¥400未満の
+ * ブラインド商品は実測でほぼ無く、逆に全10種で¥4,000未満の一括はまず無い）。
+ * 「単品」「1個」「1回」等と明記された行は1個の値段として扱う。外した行は「無い」ではなく
+ * 「言えない」＝価格帯に載らないだけ（点数には残る）。
+ */
+export function looksBundlePriceForBlind(name: string, price: number): boolean {
+  const m = name.match(/全\s*(\d{1,3})\s*種/);
+  if (!m) return false;
+  const kinds = Number(m[1]);
+  if (kinds < 2) return false;
+  if (/単品|1個|１個|1点|１点|1回|１回|1枚|１枚|各種/.test(name)) return false;
+  return price >= kinds * 400;
+}
+
 /** 単位表記を落とした商品名。**落とした結果が短すぎるときは元のまま返す**
  *  （名前がほぼ単位表記だけの行を、別商品と束ねてしまわないため）。 */
 export function stripSaleUnit(title: string): string {

@@ -1,6 +1,9 @@
 import { ScrapedItem } from "./types";
 import { fetchShopifyProducts, monthPlanDate, resolveMonthDay, sleep, type ShopifyProduct } from "./util";
 import { calendarDate, todayJst } from "../lib/date";
+import { crawlPages } from "./crawl";
+import { EN_ONLY_SCOPE } from "../lib/scope";
+import { CATALOG_EVENT_TYPE } from "./shopifyCharaStore";
 
 // メディコム・トイ公式（BE@RBRICK / MAFEX / ソフビ）＝**受注開始（＝予約できる）の一次情報**。
 //
@@ -31,6 +34,22 @@ const STORE = "https://store.medicomtoy.co.jp";
  * 《予定》付きの商品を取りこぼさない。重複は product id で畳む。
  */
 const COLLECTIONS = ["new-release", "coming-soon", "new-items"];
+
+/** EN 専用カタログに使う商品ラインのコレクション（店のナビに並ぶ現行ライン。実測 2026-09-13 の件数）。 */
+const CATALOG_COLLECTIONS = [
+  "bearbrick", // 679
+  "ultra-detail-figure", // 419
+  "medicomtoy-life-entertainment", // 276
+  "new-items", // 198
+  "mafex", // 134
+  "others", // 100
+  "sofvi", // 49
+  "vinyl-collectible-dolls", // 37
+  "real-action-heroes", // 27
+  "fabrick", // 22
+  "skate-art-deck", // 9
+  "kubrick", // 3
+];
 
 export type MedicomPlan = {
   name: string; // 《…》を落とした商品名
@@ -144,6 +163,41 @@ export function medicomItemFromProduct(p: ShopifyProduct, today: Date): ScrapedI
   };
 }
 
+/**
+ * EN専用カタログ行（[[Projects/sedori_radar_en]] Phase 3b'・2026-09-13 にこの店へ横展開）＝
+ * 予定コレクションには無いが**店のカタログ（`collections/all`）に今も在庫がある**商品。
+ * 日本の読者には新着でないので日本語面には出さないが、海外の読者には BE@RBRICK / MAFEX の
+ * 現行在庫そのものが価値（chara 3店と同じ設計＝ shopifyCharaStore.ts の toCatalogItem）。
+ * 日付は持たせない。約束するのは「この日、店の一覧に在庫ありで並んでいた」まで。
+ */
+export function medicomCatalogItem(p: ShopifyProduct): ScrapedItem | null {
+  if (!p.variants?.some((v) => v.available)) return null; // 売り切れは載せない（押した先が行き止まり）
+  // 《…予定》付き＝受注/予約中の商品。予定コレクションで拾えなかった行（別IDの同名商品等）を
+  // 「Out now / still listed」の顔で出さない（実測 2026-09-13: SFS グレート・ムタ（受注中）がカタログに出た）。
+  if (/《[^》]*》/.test(p.title)) return null;
+  const name = p.title.replace(/\s+/g, " ").trim();
+  if (!name) return null;
+  const v0 = p.variants[0];
+  const raw = v0?.price ? Number(v0.price) : NaN;
+  const price = v0?.taxable === false ? raw : Math.round(raw * 1.1);
+  const listed = p.published_at ? Date.parse(p.published_at) : NaN;
+  return {
+    source: "medicom_toy",
+    sourceId: String(p.id),
+    title: name,
+    genre: medicomGenre(name, p.product_type),
+    subGenre: null,
+    eventType: CATALOG_EVENT_TYPE,
+    eventDate: null,
+    eventDateText: null,
+    price: Number.isFinite(price) && price > 0 ? `${price.toLocaleString()}円` : null,
+    url: `${STORE}/products/${p.handle}`,
+    imageUrl: p.images?.[0]?.src ?? null,
+    scope: EN_ONLY_SCOPE,
+    storeListedAt: Number.isFinite(listed) ? new Date(listed) : null,
+  };
+}
+
 export async function scrapeMedicomToy(): Promise<ScrapedItem[]> {
   const today = todayJst();
   const byId = new Map<string, ScrapedItem>();
@@ -160,5 +214,29 @@ export async function scrapeMedicomToy(): Promise<ScrapedItem[]> {
   // 3コレクション合計が0件＝入口が変わった（コレクションの handle が消えた等）。
   // 静かに0件を返すと健全性チェックが「静かな日」と区別できないので、エラーで落とす。
   if (fetched === 0) throw new Error("ストアのコレクションが全て0件（入口が変わった疑い）");
+
+  // 店の現行ライン（商品ラインごとのコレクション）。`collections/all` と店全体の /products.json は
+  // Shopify の自動コレクション＝**アーカイブ込みの全商品（1.5万件超）**で、現行在庫の一覧にならない
+  // （実測 2026-09-13: 60ページ辿っても終わらなかった）。ラインの一覧を並べる方が「店がいま売っている物」
+  // に近い。予定コレクションで拾った行はそのまま、それ以外の在庫ありを EN 専用カタログとして足す。
+  let catalogFetched = 0;
+  for (const c of CATALOG_COLLECTIONS) {
+    const products = await crawlPages<ShopifyProduct>({
+      label: `${STORE}/${c}`,
+      urlOf: (page) => `${STORE}/collections/${c}/products.json?limit=250&page=${page}`,
+      parse: (body) => (JSON.parse(body) as { products?: ShopifyProduct[] }).products ?? [],
+      keyOf: (p) => String(p.id),
+      maxPages: 6, // 最大は bearbrick 679件＝3ページ（実測）。安全弁
+      sleepMs: 300,
+    });
+    catalogFetched += products.length;
+    for (const p of products) {
+      if (byId.has(String(p.id))) continue;
+      const item = medicomCatalogItem(p);
+      if (item) byId.set(item.sourceId, item);
+    }
+  }
+  // 0件は例外（空配列を返すと突き合わせ削除がカタログ行を全部消す）。
+  if (catalogFetched === 0) throw new Error(`${STORE}: ラインのコレクションが全て0件（カタログ取得の失敗を疑う）`);
   return [...byId.values()];
 }

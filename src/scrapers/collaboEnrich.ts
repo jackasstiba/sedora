@@ -7,7 +7,7 @@ import {
   buildHighlights,
   type CollabMechanism,
 } from "../lib/collabHighlights";
-import { isBundlePriced } from "../lib/saleUnit";
+import { isBundlePriced, looksBundlePriceForBlind } from "../lib/saleUnit";
 import { cleanStoreUrl } from "./aggregatorUtil";
 
 // コラボイベント記事の「本文」から、せどらーが最も欲しい情報＝抽選/ランダム/数量限定の
@@ -463,7 +463,7 @@ export function formatOfficialItems(items: { name: string; price: number }[]): s
   for (const it of items) {
     // まとめ売り（BOX・◯種セット）は**1個の値段ではない**ので、種別ごとの価格帯に混ぜない。
     // 混ぜると「アクスタ ¥22,880」のように1個の値段の顔で数万円が出る（実測・saleUnit.ts 参照）。
-    if (isBundlePriced(it.name)) continue;
+    if (isBundlePriced(it.name) || looksBundlePriceForBlind(it.name, it.price)) continue;
     const key = GOODS_NOUNS.find((n) => it.name.includes(n));
     if (!key) continue; // 賞品名詞に紐づかない行（雑多/雛形）は要約に載せない
     const b = buckets.get(key);

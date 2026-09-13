@@ -417,7 +417,12 @@ async function main() {
         /(?:ブースター|スターター)?パック(?![ァ-ヴーぁ-ん一-龥A-Za-z0-9])/.test(t) &&
         !isBoxWord;
       if (y != null && isSinglePack && y >= 3000) bad.push(`[${r.source} #${r.id}] ${y.toLocaleString()}円(BOX表記なしの単パック?) ${t}`);
-      if (y != null && (y <= 0 || y > 3_000_000)) bad.push(`[${r.source} #${r.id}] 異常価格 ${r.price} ${t}`);
+      // 上限は「打ち間違い」を捕まえる線。メディコム・トイ公式ストアには本物の高額品がある
+      // （実測 2026-09-13: BE@RBRICK fragment K24＝純金 ¥15,999,999／九谷BE@RBRICK 1000% ¥8,252,660／
+      // CRYSTAL DECORATE mastermind JAPAN 1000% ¥6,600,000＝店の価格をJSONから税込にしたもの）。
+      // この店だけ上限を2,000万円にする（それでも桁の打ち間違い×10は捕まる）。
+      const ceiling = r.source === "medicom_toy" ? 20_000_000 : 3_000_000;
+      if (y != null && (y <= 0 || y > ceiling)) bad.push(`[${r.source} #${r.id}] 異常価格 ${r.price} ${t}`);
     }
     report("price_sanity", "価格の疑い（単パックがBOX価格 / 異常値）", "warn", bad, baseline);
   }
