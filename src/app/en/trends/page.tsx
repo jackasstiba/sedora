@@ -17,6 +17,7 @@ import {
   trendsHeadlineEn,
   trendsIsStale,
 } from "@/lib/trends";
+import { TRENDS_LONG_WINDOW_DAYS, getLongWindowSummary, pct } from "@/lib/trendsFranchise";
 
 // 「日本の公式ストアが今週なにを並べたか」。設計と約束の全部は src/lib/trends.ts の先頭。
 //
@@ -44,6 +45,8 @@ export default async function TrendsEn() {
   // 店名を出してよいのは公式ストアだけ＝母集団は登録簿から導出している（src/lib/trends.ts）。
   const stores = countByStore(rows);
   const stale = win ? trendsIsStale(win, nowInstant()) : false;
+  // 4週間ビュー（作品別に「初めて見た」件数）。物差しが週次ビューと違うので混ぜず、別の節に出す。
+  const long = await getLongWindowSummary();
 
   const genreCounts = Object.entries(
     items.reduce<Record<string, number>>((m, it) => {
@@ -137,6 +140,45 @@ export default async function TrendsEn() {
               </li>
             ))}
           </ul>
+        </section>
+      )}
+
+      {long && long.franchises.length > 0 && (
+        // 「日本の企業がいまどの作品に賭けているか」。言えるのは「こちらの巡回で初めて見た件数」まで
+        //（人気・売れ行き・発売とは言わない）。観測できた日数を必ず添える＝空白を事実として語らない。
+        <section className="mb-8 rounded-xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900">
+          <h2 className="text-base font-semibold text-neutral-900 dark:text-neutral-50">
+            What Japanese companies are making right now — {TRENDS_LONG_WINDOW_DAYS}-day view
+          </h2>
+          <p className="mt-1 text-xs text-neutral-600 dark:text-neutral-400">
+            Franchises ranked by how many listings (pre-orders, releases, lotteries, store items)
+            first appeared in our daily crawl between {seenOnStoreEn(long.from)} and{" "}
+            {seenOnStoreEn(long.to)} (JST) — counted on {long.observedDays} of {long.calendarDays}{" "}
+            days; anything that appeared and disappeared between checks is not counted. A listing
+            can belong to more than one franchise. This is what companies put money behind, not what
+            sold.
+          </p>
+          <ol className="mt-3 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+            {long.franchises.map((f, i) => (
+              <li key={f.key} className="flex items-baseline justify-between gap-3 border-b border-neutral-100 py-1 dark:border-neutral-800">
+                <span className="text-neutral-800 dark:text-neutral-200">
+                  <span className="mr-2 tabular-nums text-neutral-400">{i + 1}.</span>
+                  {f.name}
+                </span>
+                <span className="tabular-nums text-neutral-900 dark:text-neutral-50">
+                  <span className="font-semibold">{f.firstSeen}</span>
+                  <span className="ml-1 text-xs text-neutral-500">new · {f.current} tracked</span>
+                </span>
+              </li>
+            ))}
+          </ol>
+          {long.lotteryShare && (
+            <p className="mt-3 text-xs text-neutral-600 dark:text-neutral-400">
+              Lottery-type listings (raffles, kuji) were {pct(long.lotteryShare.from)} of everything we
+              track on {seenOnStoreEn(long.from)} and {pct(long.lotteryShare.to)} on{" "}
+              {seenOnStoreEn(long.to)}.
+            </p>
+          )}
         </section>
       )}
 

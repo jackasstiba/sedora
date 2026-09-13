@@ -188,6 +188,7 @@ import {
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { buildSnapshotRows, type SnapshotInput } from "../src/lib/snapshot";
 import { countByStore, trendWindow, trendsHeadlineEn, trendsIsStale } from "../src/lib/trends";
+import { franchiseNameEn, pct, summarizeLongWindow } from "../src/lib/trendsFranchise";
 
 // 観点H用: パレットは**実ファイルから読む**。ここに値をコピーすると、CSSを戻したときに
 // 検査だけが古い値で緑を出す（＝「誤りを正解として固定する」型・2026-08-16 に踏んだ）。
@@ -5360,6 +5361,52 @@ const cases: Case[] = [
     fn: () => trendsHeadlineEn(1, 1),
     want: "1 item went up across 1 official Japanese store",
   },
+
+  // ── /en/trends の4週間ビュー（2026-09-13）: 観測の空白を事実にしない数え方を固定する ──
+  {
+    // 境界日（窓の最初の観測日）の newCount は窓の外の期間を指すので足さない。
+    // 観測が空いた分は次の観測日の newCount にまとまって入る（足し算で落ちない）。
+    name: "trends 4週: 境界日は足さず、空白の後の観測にまとまった新着は落とさない",
+    fn: () => {
+      const d = (s: string) => new Date(`2026-${s}T00:00:00Z`);
+      const fr = [
+        { day: d("08-22"), key: "ちいかわ", newCount: null, count: 2975, lotteryCount: 0 },
+        { day: d("08-24"), key: "ちいかわ", newCount: 0, count: 2912, lotteryCount: 0 },
+        { day: d("09-02"), key: "ちいかわ", newCount: 74, count: 2483, lotteryCount: 0 },
+        { day: d("09-12"), key: "ちいかわ", newCount: 146, count: 2379, lotteryCount: 0 },
+        { day: d("09-02"), key: "ガンダム", newCount: 49, count: 267, lotteryCount: 0 },
+        { day: d("09-12"), key: "ガンダム", newCount: 35, count: 321, lotteryCount: 0 },
+      ];
+      const tot = [
+        { day: d("08-22"), key: "all", newCount: null, count: 10467, lotteryCount: 624 },
+        { day: d("09-12"), key: "all", newCount: 1078, count: 12042, lotteryCount: 1046 },
+      ];
+      const s = summarizeLongWindow(fr, tot, 28, 5);
+      return s && `${s.from.toISOString().slice(5, 10)}..${s.to.toISOString().slice(5, 10)} obs=${s.observedDays}/${s.calendarDays} ` + s.franchises.map((f) => `${f.name}:${f.firstSeen}/${f.current}`).join(" ") + ` lot=${s.lotteryShare ? pct(s.lotteryShare.from) + ">" + pct(s.lotteryShare.to) : "-"}`;
+    },
+    // 8/24 の 0 と 8/22（境界）の null は足されず、ちいかわ=74+146、ガンダム=49+35。観測3日/暦21日。
+    want: "08-22..09-12 obs=3/21 Chiikawa:220/2379 Gundam:84/321 lot=6.0%>8.7%",
+  },
+  {
+    name: "trends 4週: 観測日が2日未満なら何も言わない（null）",
+    fn: () => summarizeLongWindow([{ day: new Date("2026-09-12T00:00:00Z"), key: "x", newCount: 5, count: 5, lotteryCount: 0 }], [], 28),
+    want: null,
+  },
+  {
+    name: "trends 4週: 窓の外（29日以上前）の観測は境界にならない",
+    fn: () => {
+      const d = (s: string) => new Date(`2026-${s}T00:00:00Z`);
+      const fr = [
+        { day: d("08-01"), key: "x", newCount: null, count: 1, lotteryCount: 0 },
+        { day: d("09-02"), key: "x", newCount: 9, count: 9, lotteryCount: 0 },
+        { day: d("09-12"), key: "x", newCount: 1, count: 10, lotteryCount: 0 },
+      ];
+      const s = summarizeLongWindow(fr, [], 28);
+      return s && `${s.from.toISOString().slice(5, 10)} ${s.franchises[0].firstSeen}`;
+    },
+    want: "09-02 1",
+  },
+  { name: "trends 4週: 英語名が無い作品は日本語のまま（推測で訳さない）", fn: () => franchiseNameEn("未知の作品"), want: "未知の作品" },
 
   // ── 英語版の日付欄に日本語が出ていた件（2026-08-23）──────────────────────
   // 直すのは**こちらが組み立てたラベルだけ**。収集元の自由文は原文のまま＝
