@@ -1,6 +1,6 @@
 import { ScrapedItem } from "./types";
 import { todayJst } from "../lib/date";
-import { parseJapaneseFullDate } from "./util";
+import { fetchHtml, parseJapaneseFullDate, sleep } from "./util";
 import { crawlPages } from "./crawl";
 import { classifyAggregatorGenre, stripTags } from "./aggregatorUtil";
 import { rakutenSearchRawUrl } from "../lib/outbound";
@@ -94,6 +94,68 @@ export function cleanProductName(title: string): string {
   return title.replace(/^\s*【[^】]*】\s*/, "").trim();
 }
 
+/** 先頭の【…】の中身（「2026年9月12日（土）21時～」）。無ければ null。 */
+export function titleBracket(title: string): string | null {
+  return title.normalize("NFKC").match(/^\s*【([^】]*)】/)?.[1]?.trim() ?? null;
+}
+
+export type ReleaseVerdict = {
+  eventType: "発売" | "予約";
+  eventDate: Date;
+  eventDateText: string;
+  highlights: string | null;
+};
+
+/**
+ * 発売日投稿の**見出しの日付が何の日か**を、記事本文の「発売日」欄で確かめる（純関数・selftest対象）。
+ *
+ * 実測 2026-09-12（観点A）: 「【2026年9月12日（土）21時～】Apple iPhone 18シリーズ & iPhone Duo」を
+ * 「発売 🔥本日 9/12」で本番に出していたが、本文は「発売日 2026年9月18日（金）／9月12日（土）21時より
+ * 予約の受付がスタート」＝見出しの日付は**予約開始**だった。この収集元の見出しの【日付】は
+ * 「その日に何かが始まる日」であって発売日とは限らない（iPhone 16 の投稿も同じ形＝予約開始日）。
+ *
+ *   ・本文の発売日 ＝ 見出しの日付 → 発売（見出しの文言をそのまま日付文言に）
+ *   ・違う、かつ本文が見出しの日付を「予約」と言っている → 予約（見出しの日付）＋補足に本文の発売日
+ *   ・違う、かつ予約とも言っていない → 発売（本文の発売日を採る＝見出しの日付では語らない）
+ *   ・本文に発売日欄が無い → null（判定材料が無い。呼び出し側は見出しどおり「発売」のまま）
+ */
+export function verifyReleasePost(title: string, articleHtml: string): ReleaseVerdict | null {
+  const norm = title.normalize("NFKC");
+  const titleDate = parseJapaneseFullDate(norm);
+  const bracket = titleBracket(title);
+  if (!titleDate || !bracket) return null;
+
+  const text = stripTags(articleHtml.replace(/<(script|style)[\s\S]*?<\/\1>/gi, " "))
+    .normalize("NFKC")
+    .replace(/[ \t　]+/g, " ");
+  const at = text.search(/発売日\s*\n?/);
+  if (at < 0) return null;
+  const after = text.slice(at, at + 400);
+  const m = after.match(/(\d{4})年\s*(\d{1,2})月\s*(\d{1,2})日(?:\s*\([月火水木金土日]\))?/);
+  if (!m) return null;
+  const bodyDate = parseJapaneseFullDate(m[0]);
+  if (!bodyDate) return null;
+  const bodyDateText = m[0].replace(/\s+/g, "");
+
+  if (bodyDate.getTime() === titleDate.getTime()) {
+    return { eventType: "発売", eventDate: titleDate, eventDateText: bracket, highlights: null };
+  }
+  // 見出しの日付（「9月12日」）の前後に「予約」があるか
+  // （見出しと同じ日付は記事タイトルにも出るので、**どこかの出現**の周辺に「予約」があれば）
+  const md = `${titleDate.getUTCMonth() + 1}月${titleDate.getUTCDate()}日`;
+  let saysReserve = false;
+  for (let i = text.indexOf(md); i >= 0 && !saysReserve; i = text.indexOf(md, i + 1)) {
+    saysReserve = /予約/.test(text.slice(Math.max(0, i - 120), i + 160));
+  }
+  if (saysReserve) {
+    return { eventType: "予約", eventDate: titleDate, eventDateText: bracket, highlights: `発売日 ${bodyDateText}` };
+  }
+  return { eventType: "発売", eventDate: bodyDate, eventDateText: bodyDateText, highlights: null };
+}
+
+/** 発売日投稿の本文を開く上限（1回の巡回で数件。収集元への負荷の保険）。 */
+const MAX_RELEASE_ARTICLES = 10;
+
 export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
   // 「日本時間の今日」を暦日(UTC0時)で。締切が過去の抽選（＝受付終了）は載せない。
   const today = todayJst();
@@ -108,6 +170,7 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
   });
 
   const items: ScrapedItem[] = [];
+  let opened = 0;
   for (const c of cards) {
     const lottery = isLotteryTitle(c.title);
     const release = !lottery && isReleaseTitle(c.title);
@@ -117,10 +180,32 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
     if (name.length < 3) continue;
     if (/限定公開記事/.test(name)) continue;
 
-    // 抽選＝タイトル内の締切日／発売日投稿＝発売日。どちらも過去なら載せない。
-    const date = parseJapaneseFullDate(c.title.normalize("NFKC"));
+    // 抽選＝タイトル内の締切日／発売日投稿＝見出しの日付。どちらも過去なら載せない。
+    let date = parseJapaneseFullDate(c.title.normalize("NFKC"));
     if (date && date.getTime() < today.getTime()) continue;
     if (release && !date) continue; // 発売日投稿なのに日付が読めない＝採らない
+
+    // 発売日投稿は、見出しの日付が「発売日」なのか「予約開始日」なのかを本文で確かめる
+    // （verifyReleasePost のコメント）。開けなかった／本文に発売日欄が無い → 見出しどおり。
+    let eventType: string = lottery ? "抽選" : "発売";
+    let eventDateText: string | null = date ? null : "抽選 受付中";
+    let highlights: string | null = null;
+    if (release && opened < MAX_RELEASE_ARTICLES) {
+      opened++;
+      try {
+        const v = verifyReleasePost(c.title, await fetchHtml(`${HOME}${c.slugPath}`));
+        if (v) {
+          eventType = v.eventType;
+          date = v.eventDate;
+          eventDateText = v.eventDateText;
+          highlights = v.highlights;
+          if (date.getTime() < today.getTime()) continue; // 本文の発売日が過去＝載せない
+        }
+      } catch {
+        // 本文が開けない回は見出しどおり
+      }
+      await sleep(300);
+    }
 
     let genre = classifyAggregatorGenre(name);
     if (genre === "その他" && CAT_GENRE[c.cat]) genre = CAT_GENRE[c.cat];
@@ -131,9 +216,10 @@ export async function scrapeTenbaiQuest(): Promise<ScrapedItem[]> {
       title: name,
       genre,
       subGenre: null,
-      eventType: lottery ? "抽選" : "発売",
+      eventType,
       eventDate: date,
-      eventDateText: date ? null : "抽選 受付中",
+      eventDateText,
+      highlights,
       price: null,
       // 収集元（転売クエスト）は一切出さない。購入導線は商品名で楽天検索に寄せる。
       // **保存するのは素の検索URL。** アフィリ化は画面に出す瞬間だけ（outbound.ts の注意書き）。

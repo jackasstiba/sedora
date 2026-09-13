@@ -1,179 +1,164 @@
-import * as cheerio from "cheerio";
 import { ScrapedItem } from "./types";
-import { fetchHtml, monthPlanDate, sleep } from "./util";
+import { fetchShopifyProducts, monthPlanDate, resolveMonthDay, sleep, type ShopifyProduct } from "./util";
 import { calendarDate, todayJst } from "../lib/date";
 
-// メディコム・トイ公式（BE@RBRICK / ソフビ）＝**受注開始（＝予約できる）の一次情報**。
+// メディコム・トイ公式（BE@RBRICK / MAFEX / ソフビ）＝**受注開始（＝予約できる）の一次情報**。
 //
 // なぜ足したか（2026-08-18 実測）: 本番3512件に「BE@RBRICK」「ベアブリック」「メディコム」が
 // **3語とも0件**。ジャンル「ソフビ・アートトイ」に至っては全体で3件しかなく、実質空だった。
 // ベアブリックは1体1〜3万円台の受注品が二次で数倍になる定番なので、穴としては相当大きい。
-// （同じ層の POP MART / LABUBU は Cloudflare + クライアント描画で本文が取れず取得不能と
-//   実証済み＝[[Projects/sedori_radar]]。取れる方から埋める。）
 //
-// 取得方式: `/top/` に「◯◯の受注を開始しました。」の告知が並び、各詳細 `/list/<id>.html` の
-// `#p_descrip` に「2026年10月発売・発送予定 / 商品名 / 頒布価格￥17,380（税込）」がある。
+// 取得方式（2026-09-12 作り直し）: 企業サイト `www.medicomtoy.co.jp/top/` の告知一覧と
+// `/list/<id>.html` の商品ページは **2026-09 に廃止され 404** になった（実測: 9/4 から巡回が
+// 落ち続け、旧URLは `medicomtoy.co.jp/list/…` へ 301 した先も無い）。企業サイト自体が
+// Shopify に移り、商品は公式ストア `store.medicomtoy.co.jp` に一本化されたので、
+// **ストアの公開JSON（/collections/<handle>/products.json）** から取る。
 //
-// 【掲載方針】url は公式の商品ページ（一次情報）＝直リンクしてよい。
+// 発売予定はタイトル末尾の `《2026年9月発売予定》` `《2027年2月発送予定 受注期間は9月30日まで》`
+// に入っている（実測: new-release 32件は全件この形）。本文（body_html）には無い。
+//
+// 【掲載基準】旧実装と同じ＝**発売/発送の予定が読めない商品は載せない**（受注開始の告知で
+// あることの裏付けがタイトルの《》しか無い）。受注期間の締切があれば締切を eventDate にする
+// （hololive_shop と同じ型＝「逃すと買えない」日）。無ければ発売月の月精度。
+//
+// 【掲載方針】url は公式ストアの商品ページ（一次情報）＝直リンクしてよい。
 
-const HOME = "https://www.medicomtoy.co.jp";
-const LIST_URL = `${HOME}/top/`;
+const STORE = "https://store.medicomtoy.co.jp";
 
 /**
- * 詳細を取りに行く件数の上限。`/top/` は300件超を1枚に並べており、全部の詳細を毎回
- * 取ると巡回時間が跳ねる。並びは新しい告知が先頭なので、先頭から一定数だけ見る。
- * **取りこぼしても静かに0件になるだけ**なので、件数が張り付いたら見直すこと。
+ * 読むコレクション。`new-release`（当月の受注開始）だけだと、翌月に告知が入れ替わった瞬間に
+ * まだ受注中の前月分が消える。`coming-soon`（発売予定の全体）と `new-items`（新着）を重ねて、
+ * 《予定》付きの商品を取りこぼさない。重複は product id で畳む。
  */
-const MAX_DETAILS = 250;
+const COLLECTIONS = ["new-release", "coming-soon", "new-items"];
 
-export type MedicomPost = { id: string; url: string; headline: string };
-
-/**
- * 商品一覧から商品ページを取り出す（純関数・selftest対象）。
- *
- * `/top/` には2種類の入口が同居する:
- *   ・What's New の告知リンク … アンカーのテキストが「◯◯の受注を開始しました。」
- *   ・商品タイル `div.productdata` … アンカーは画像だけで、商品名は `img[alt]` にある
- * 最初はテキストのあるものだけ拾っていたが、それは **308件中8件**（＝告知欄だけ）で、
- * 商品一覧そのものを丸ごと見落としていた。**アンカーのテキストが空＝商品ではない、
- * という思い込みが取りこぼしの原因**なので、alt も名前として扱う。
- */
-export function parseMedicomList(html: string): MedicomPost[] {
-  const $ = cheerio.load(html);
-  const seen = new Map<string, MedicomPost>();
-  $("a[href]").each((_, el) => {
-    const href = $(el).attr("href") ?? "";
-    const m = href.match(/\/list\/(\d+)\.html/);
-    if (!m) return;
-    const text = $(el).text().replace(/\s+/g, " ").trim();
-    const alt = $(el).find("img").first().attr("alt")?.replace(/\s+/g, " ").trim() ?? "";
-    const headline = text || alt;
-    if (!headline) return;
-    if (seen.has(m[1])) return;
-    seen.set(m[1], { id: m[1], url: `${HOME}/list/${m[1]}.html`, headline });
-  });
-  return [...seen.values()];
-}
-
-export type MedicomDetail = {
-  name: string | null;
-  price: string | null;
-  planText: string | null; // 「2026年10月発売・発送予定」
-  year: number | null;
-  month: number | null;
-  day: number | null; // 日まで書いてある告知だけ入る（無ければ月精度）
-  imageUrl: string | null;
-  storeUrl: string | null;
+export type MedicomPlan = {
+  name: string; // 《…》を落とした商品名
+  planText: string; // 《》の中身そのまま（「2027年2月発送予定 受注期間は9月30日まで」）
+  year: number;
+  month: number;
+  day: number | null; // 日まで書いてある予定だけ入る（無ければ月精度）
+  deadline: Date | null; // 「受注期間は9月30日まで」があればその日
+  deadlineText: string | null; // 「受注期間は9月30日まで」
 };
 
-/** 商品ページ本文から商品名・頒布価格・発売予定を取り出す（純関数・selftest対象）。 */
-export function parseMedicomDetail(html: string): MedicomDetail {
-  const $ = cheerio.load(html);
-  const descrip = $("#p_descrip").first();
-  // <br> 区切りの平文。行に割ってから読む（1行目=発売予定、次に商品名、以降に頒布価格）。
-  const lines =
-    descrip
-      .html()
-      ?.split(/<br\s*\/?>/i)
-      .map((s) => cheerio.load(`<div>${s}</div>`)("div").text().replace(/\s+/g, " ").trim())
-      .filter(Boolean) ?? [];
+/**
+ * 商品タイトルから商品名と発売予定・受注締切を読む（純関数・selftest対象）。
+ * 予定（YYYY年M月）が読めなければ null＝載せない。
+ *
+ * 実測した形:
+ *   「BE@RBRICK MOFF GIDEON(TM) 400％《2026年9月発売予定》」
+ *   「VAG SERIES SP 仮面ライダー × おおかみくん《2026年9月19日発売予定》」
+ *   「SOFVI DARTH VADER《2027年2月発送予定 受注期間は9月30日まで》」
+ *   「…《2027年2月発送予定 受注期間は8月22日(土)23:59まで》」
+ *   「…《2026年10月発売・発送予定 受注期間は2026年7月10日まで》」
+ */
+export function parseMedicomTitle(title: string, today: Date): MedicomPlan | null {
+  const t = title.replace(/\s+/g, " ").trim();
+  const m = t.match(/《([^》]*)》\s*$/);
+  if (!m || m.index === undefined) return null;
+  const planText = m[1].trim();
+  const name = t.slice(0, m.index).trim();
+  if (!name) return null;
 
-  const planLine = lines.find((l) => /\d{4}年\s*\d{1,2}月.*(?:発売|発送)/.test(l)) ?? null;
-  const ym = planLine?.match(/(\d{4})年\s*(\d{1,2})月/);
-  // 日まで書いてある告知がある（「2026年7月25日発売予定」）。**日を読まずに月初を入れると
-  // カードに 7/1 という実在しない発売日が出る**（[[System/mistakes]] ミス15と同型）ので、
-  // 日精度と月精度をここで分ける。
-  const dayMatch = planLine?.match(/\d{4}年\s*\d{1,2}月\s*(\d{1,2})\s*日/);
+  const ym = planText.match(/(\d{4})年\s*(\d{1,2})月/);
+  if (!ym) return null;
+  const year = Number(ym[1]);
+  const month = Number(ym[2]);
+  if (month < 1 || month > 12) return null;
+  // 日まで書いてある予定（「2026年9月19日発売予定」）。**日を読まずに月初を入れると
+  // カードに 9/1 という実在しない発売日が出る**（[[System/mistakes]] ミス15）ので分ける。
+  const dayMatch = planText.match(/^\d{4}年\s*\d{1,2}月\s*(\d{1,2})\s*日/);
+  const day = dayMatch ? Number(dayMatch[1]) : null;
 
-  // 商品名は「発売予定」行の次から。**1行とは限らない**（実測: BAPE コラボは
-  // 「MCT 30th ANNIV. BAPE(R) CAMO」/「REVERSIBLE BE@R SHARK FULL ZIP HOODIE」の2行で、
-  // 先頭行だけ採ると **商品名が途中で切れたカード**になる）。頒布価格・箇条書き（●）・
-  // 空行のどれかに当たるまでを名前として繋ぐ。
-  const planIdx = planLine ? lines.indexOf(planLine) : -1;
-  const nameParts: string[] = [];
-  if (planIdx >= 0) {
-    for (const line of lines.slice(planIdx + 1)) {
-      if (/^(?:頒布価格|価格|●|※|\(C\)|©)/i.test(line)) break;
-      if (/^\d{4}年/.test(line)) break; // 次の日付告知＝名前は終わっている
-      nameParts.push(line);
-      if (nameParts.length >= 3) break; // 説明文まで飲み込まないための上限
+  let deadline: Date | null = null;
+  let deadlineText: string | null = null;
+  const dl = planText.match(/受注期間は\s*(?:(\d{4})年)?\s*(\d{1,2})月\s*(\d{1,2})日[^ま]*まで/);
+  if (dl) {
+    const dm = Number(dl[2]);
+    const dd = Number(dl[3]);
+    if (dm >= 1 && dm <= 12 && dd >= 1 && dd <= 31) {
+      deadline = dl[1] ? calendarDate(Number(dl[1]), dm, dd) : resolveMonthDay(dm, dd, today);
+      deadlineText = dl[0].replace(/\s+/g, " ").trim();
     }
   }
-  const name = nameParts.join(" ").trim();
-
-  // 「頒布価格各￥36,300（税込）」＝複数サイズ共通価格の表記が実在する。「各」を挟んでも読む。
-  const price = descrip.text().match(/(?:頒布価格|価格)\s*各?\s*[￥¥]\s*([\d,]+)/)?.[1] ?? null;
-
-  const img = $("#p_imageview").first().attr("src") ?? null;
-  const storeUrl = $("#p_buy a.p_buylink").first().attr("href") ?? null;
-
-  return {
-    name: name || null,
-    price: price ? `${price}円` : null,
-    planText: planLine,
-    year: ym ? Number(ym[1]) : null,
-    month: ym ? Number(ym[2]) : null,
-    day: dayMatch ? Number(dayMatch[1]) : null,
-    imageUrl: img ? (img.startsWith("http") ? img : `${HOME}${img.replace(/^\/\.\//, "/")}`) : null,
-    storeUrl,
-  };
+  return { name, planText, year, month, day, deadline, deadlineText };
 }
 
-export function medicomGenre(name: string): string {
-  if (/BE@RBRICK|ベアブリック/i.test(name)) return "ソフビ・アートトイ";
-  if (/ソフビ|VINYL|vinyl/i.test(name)) return "ソフビ・アートトイ";
-  if (/フィギュア|figure|RAH|MAFEX/i.test(name)) return "フィギュア";
+export function medicomGenre(name: string, productType = ""): string {
+  const t = `${productType} ${name}`;
+  if (/BE@RBRICK|ベアブリック|KUBRICK/i.test(t)) return "ソフビ・アートトイ";
+  if (/ソフビ|SOFVI|VINYL|VAG/i.test(t)) return "ソフビ・アートトイ";
+  if (/フィギュア|figure|RAH|MAFEX|REAL ACTION HEROES/i.test(t)) return "フィギュア";
   return "ソフビ・アートトイ";
 }
 
+/** Shopify の商品1件を掲載行にする（純関数・selftest対象）。載せない商品は null。 */
+export function medicomItemFromProduct(p: ShopifyProduct, today: Date): ScrapedItem | null {
+  const plan = parseMedicomTitle(p.title, today);
+  if (!plan) return null;
+
+  // 締切がある受注＝締切を「逃すと買えない日」として出す。締切を過ぎた受注は載せ続けない。
+  // 締切が無い＝発売予定の月まで残す（日精度なら当日まで、月精度ならその月いっぱい。
+  // 月精度の行を月初で切ると、まだ受注中の「今月発売」が初日に消える）。
+  let eventDate: Date | null;
+  let eventDateText: string | null;
+  let expiry: number;
+  if (plan.deadline) {
+    eventDate = plan.deadline;
+    eventDateText = plan.deadlineText;
+    expiry = plan.deadline.getTime();
+  } else if (plan.day) {
+    eventDate = calendarDate(plan.year, plan.month, plan.day);
+    eventDateText = plan.planText;
+    expiry = eventDate.getTime();
+  } else {
+    // 当月なら null＝日付未定にして、月初という過去の日で消えないようにする（monthPlanDate）。
+    eventDate = monthPlanDate(plan.year, plan.month, today);
+    eventDateText = plan.planText;
+    expiry = calendarDate(plan.year, plan.month + 1, 1).getTime() - 1;
+  }
+  if (expiry < today.getTime()) return null;
+
+  // ストアの JSON 価格は**税抜**（実測: JSON 10909 ↔ 商品ページ「¥10,909 (税込¥12,000)」）。
+  // サイトの価格欄は他ソースと同じく税込で揃える（×1.1 を四捨五入＝ページの表示と一致）。
+  const v0 = p.variants?.[0];
+  const raw = v0?.price ? Number(v0.price) : NaN;
+  const price = v0?.taxable === false ? raw : Math.round(raw * 1.1);
+  return {
+    source: "medicom_toy",
+    sourceId: String(p.id),
+    title: plan.name,
+    genre: medicomGenre(plan.name, p.product_type),
+    subGenre: null,
+    // 収集元が「受注期間」「発売予定」と言っている＝いま予約できる。
+    eventType: "予約",
+    eventDate,
+    eventDateText,
+    price: Number.isFinite(price) && price > 0 ? `${price.toLocaleString()}円` : null,
+    url: `${STORE}/products/${p.handle}`,
+    imageUrl: p.images?.[0]?.src ?? null,
+    // 締切で eventDate を使った行は、発送予定を補足として残す（日付欄からは消えるので）。
+    highlights: plan.deadline ? plan.planText.replace(plan.deadlineText ?? "", "").trim() || null : null,
+    storeListedAt: p.published_at ? new Date(p.published_at) : null,
+  };
+}
+
 export async function scrapeMedicomToy(): Promise<ScrapedItem[]> {
-  const html = await fetchHtml(LIST_URL);
-  const posts = parseMedicomList(html).slice(0, MAX_DETAILS);
-
   const today = todayJst();
-  const items: ScrapedItem[] = [];
-
-  for (const post of posts) {
-    let detailHtml: string;
-    try {
-      detailHtml = await fetchHtml(post.url);
-    } catch {
-      continue;
+  const byId = new Map<string, ScrapedItem>();
+  let fetched = 0;
+  for (const c of COLLECTIONS) {
+    const products = await fetchShopifyProducts(STORE, c);
+    fetched += products.length;
+    for (const p of products) {
+      const item = medicomItemFromProduct(p, today);
+      if (item && !byId.has(item.sourceId)) byId.set(item.sourceId, item);
     }
     await sleep(300);
-    const d = parseMedicomDetail(detailHtml);
-    if (!d.name || !d.year || !d.month) continue; // 商品名か発売予定が読めない＝載せない
-
-    // 日まで書いてあればその日。書いていなければ月精度＝monthPlanDate に任せる
-    // （当月なら null＝日付未定にして、月初という過去の日で消えないようにする）。
-    // **書いていない日を作らない**（ミス15）。
-    const eventDate = d.day
-      ? calendarDate(d.year, d.month, d.day)
-      : monthPlanDate(d.year, d.month, today);
-    // 過ぎた受注は載せ続けない。日精度なら当日まで、月精度ならその月いっぱい残す
-    // （月精度の行を月初で切ると、まだ受注中の「今月発売」が初日に消える）。
-    const expiry = d.day
-      ? calendarDate(d.year, d.month, d.day).getTime()
-      : calendarDate(d.year, d.month + 1, 1).getTime() - 1;
-    if (expiry < today.getTime()) continue;
-
-    items.push({
-      source: "medicom_toy",
-      sourceId: post.id,
-      title: d.name,
-      genre: medicomGenre(d.name),
-      subGenre: null,
-      // 収集元が「受注を開始しました」と言っている＝いま予約できる。
-      eventType: "予約",
-      eventDate,
-      eventDateText: d.planText,
-      price: d.price,
-      url: post.url,
-      imageUrl: d.imageUrl,
-      // 実際に買える場所（公式オンラインストア）が本文にある時だけ渡す。
-      officialUrl: d.storeUrl,
-    });
   }
-
-  return items;
+  // 3コレクション合計が0件＝入口が変わった（コレクションの handle が消えた等）。
+  // 静かに0件を返すと健全性チェックが「静かな日」と区別できないので、エラーで落とす。
+  if (fetched === 0) throw new Error("ストアのコレクションが全て0件（入口が変わった疑い）");
+  return [...byId.values()];
 }

@@ -50,8 +50,27 @@ function loadSnapshot(): Snapshot | null {
   }
 }
 
-function saveSnapshot(stats: Record<string, SourceStat>): void {
-  const snap: Snapshot = { updatedAt: nowInstant().toISOString(), sources: stats };
+/**
+ * 次回の基準にする件数を決める（純関数・selftest対象）。
+ *
+ * 🔴 2026-09-12 実測: gunpla_resale が 9/4 に「ゼロ落ち（前回34件）」と鳴った後、基準が
+ * **0件で上書きされた**ので、9/5 以降は 0→0 で毎日 🟢 になり、9/12 まで8日間誰も気付かなかった
+ * （sofvi も同じ）。落ちた日に1回鳴るだけの網は、その日に人が見ていなければ無いのと同じ。
+ * → 急減・ゼロ落ちした回は**前回の件数を基準として持ち越す**。復旧するまで毎日鳴り続ける。
+ * 「静かな日」が本当に続くソース（VOLATILE_SOURCES）は従来どおり今回の値で上書きする。
+ */
+export function nextBaseline(cur: SourceStat, prev: SourceStat | undefined, volatile: boolean): SourceStat {
+  if (volatile || !prev || prev.count < MIN_PREV_FOR_DROP) return cur;
+  if (cur.count < prev.count * DROP_RATIO) return prev;
+  return cur;
+}
+
+function saveSnapshot(stats: Record<string, SourceStat>, prev: Snapshot | null): void {
+  const sources: Record<string, SourceStat> = {};
+  for (const [src, cur] of Object.entries(stats)) {
+    sources[src] = nextBaseline(cur, prev?.sources[src], VOLATILE_SOURCES.has(src));
+  }
+  const snap: Snapshot = { updatedAt: nowInstant().toISOString(), sources };
   fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(snap, null, 2));
 }
 
@@ -80,6 +99,20 @@ export function zeroAdoptionVerdict(
     level: "info",
     message: `記事${crawled}件は取れているが採用0件（受付中が無い＝静かな日の可能性。収集元を開いて確かめる）`,
   };
+}
+
+/**
+ * 突き合わせ削除の**崩落ガード**（純関数・selftest対象）。
+ *
+ * 🔴 実測 2026-09-12: タカラトミーモールが応答せず、巡回が3本の一覧のうち1本ぶん（24件）だけを
+ * 返した回に、突き合わせが「一覧に無い＝在庫切れ」として **56件を削除**した（朝は186件）。
+ * 取れなかった（部分成功）と無かった（本当に消えた）は別物で、消す側は区別できない。
+ * → 既存の過半を一度に消す突き合わせは**やらずに警告する**。本当に半分以上が消える日
+ * （大型発売の翌日等）は翌日の巡回でも同じ結果になるので、1日遅れるだけで害は無い。
+ * 少数（20件未満）は揺れが大きいので対象外（0件→数件の小ソースを止めない）。
+ */
+export function reconcileCollapsed(existing: number, doomed: number): boolean {
+  return existing >= 20 && doomed * 2 > existing;
 }
 
 export function checkHealth(results: ScraperResult[]): boolean {
@@ -151,6 +184,6 @@ export function checkHealth(results: ScraperResult[]): boolean {
     console.log("すべて正常。");
   }
 
-  saveSnapshot(stats);
+  saveSnapshot(stats, prev);
   return warnings.length > 0;
 }

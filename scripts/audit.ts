@@ -37,6 +37,7 @@ import { cleanListTitle, cutsMidWord, looksTruncatedTitle } from "../src/lib/tit
 import { dedupeKey, GENRE_ORDER, INVISIBLE_CHARS, matchesQuery, normalizeForSearch, overlapsRange, productUrlKey } from "../src/lib/itemFilter";
 import { parseYen } from "../src/lib/margin";
 import { hasSearchableTitle, isOfficialUrl } from "../src/lib/outbound";
+import { isMalformedUrl } from "../src/lib/url";
 import { parsePrizesJson } from "../src/lib/prizes";
 import { GENRE_TO_GOOGLE_CATEGORY } from "../src/lib/productCategory";
 import { lastDeadline, parseStoresJson } from "../src/lib/stores";
@@ -51,6 +52,7 @@ import { AFFILIATE_REDIRECT } from "../src/scrapers/aggregatorUtil";
 import { cannotSourceImage, conflictingJanImages, isGenericImageUrl, isStoreNoticeImage, keepableSameProduct } from "../src/scrapers/imagePick";
 import { POKEMON_GOODS_RECENT_DAYS, parseAppearedDate } from "../src/scrapers/pokemonGoods";
 import { figislandListPlaceholder } from "../src/scrapers/figisland";
+import { billysDropPage } from "../src/scrapers/billys";
 import { TAILWIND_TEXT_COLORS, findLowContrastTextClasses } from "../src/lib/textColorLint";
 import { getSitemapItemRefs, hasSubstance } from "../src/lib/seo";
 import { CLOCK_RULE_WHY } from "../src/lib/clockLint";
@@ -726,6 +728,8 @@ async function main() {
       // 個別ページがまだ無い行の「置き場」（figisland の一覧URL）は商品ページではないので数えない。
       // 画面にも出ないURLなので、ここで数えても直しようがなく、本物の粗（送客先が一覧止まり）が埋もれる。
       if (arr.every((x) => figislandListPlaceholder(x.source, x.url))) continue;
+      // billys の DROP 特集ページ（全型・全色の商品リンクが並ぶ買える場所）は、収集元がそう繋いでいる。
+      if (arr.every((x) => billysDropPage(x.source, x.url))) continue;
       bad.push(
         `${arr.length}件が同じURLを共有 → ${url}\n        ` +
           arr.slice(0, 3).map((x) => `[${x.source} #${x.id}] ${cleanListTitle(x.source, x.title).slice(0, 34)}`).join("\n        ")
@@ -737,7 +741,10 @@ async function main() {
   // (9b) 括弧の対応が取れていない表示タイトル。
   //      ランダム標本の目視で見つかった型（『で始まって閉じない）。人間なら一瞬で気付く。
   {
-    const pairs: [string, string][] = [["『", "』"], ["「", "」"], ["【", "】"], ["（", "）"]];
+    // 半角の () も見る（実測 2026-09-12: card_chusen の2件が「… まで)」＝ネストした括弧の条件を
+    // 内側で閉じた残骸。全角しか見ていなかったので、目視の通読でしか見つからなかった）。
+    // 顔文字の「(^^」のような半角の片括弧は商品名に出てこない（出たら鳴らして人が見る）。
+    const pairs: [string, string][] = [["『", "』"], ["「", "」"], ["【", "】"], ["（", "）"], ["(", ")"]];
     const bad: string[] = [];
     for (const r of shown) {
       const t = cleanListTitle(r.source, r.title);
@@ -1205,6 +1212,27 @@ async function main() {
     );
   }
 
+  // (11g) **URLとして壊れているリンク先**（2026-09-12）。
+  //
+  // 実測: pokemoncard の拡張パック「30th CELEBRATION」（＝一番の目玉）の url が
+  // 「https://www.pokemon-card.comhttps://www.30th.pokemon-card.com/product/m6a」＝相対パス前提の
+  // 前置に絶対URLが来て、**ホスト名の中に http が入った死リンク**で本番に出ていた。
+  // 死リンク検査（audit:links）は抜き取りで、shared_url は「同じ」しか見ない＝どの網にも掛からない。
+  // 文字列として URL の形をしているかは全件・毎回・機械で見られる。判定は src/lib/url.ts の
+  // isMalformedUrl ひとつ（audit:selftest が鳴る側／鳴らない側を固定）。
+  {
+    const bad: string[] = [];
+    for (const r of shown) {
+      const why = isMalformedUrl(r.url);
+      if (why) bad.push(`[${r.source} #${r.id}] url: ${why} ${r.url.slice(0, 80)}`);
+      if (r.officialUrl) {
+        const w2 = isMalformedUrl(r.officialUrl);
+        if (w2) bad.push(`[${r.source} #${r.id}] officialUrl: ${w2} ${r.officialUrl.slice(0, 80)}`);
+      }
+    }
+    report("url_malformed", "URLとして壊れているリンク先（ホスト名に http が入る等）", "error", bad, baseline, shown.length);
+  }
+
   // (12) 鮮度: ソースごとの最終取得。古いまま表示され続けるのが一番気付きにくい。
   {
     const last = new Map<string, number>();
@@ -1233,7 +1261,12 @@ async function main() {
       else stale.push(line);
     }
     report("source_stale", "更新が止まっているソースがある", "error", stale, baseline);
-    report("source_stale_by_design", "設計上更新されないソースの鮮度", "warn", staleByDesign, baseline);
+    // ラチェット対象外: x_watch は手動取り込みなので「3日空いた」は暦だけで 0→1 に振れる
+    // （実測 2026-09-12: 基準0のまま1件になり ERROR で朝の関門が止まった）。放置の検知は
+    // 上の source_stale と同じ物差しではなく、行が期限切れで表示から落ちることに任せる。
+    report("source_stale_by_design", "設計上更新されないソースの鮮度", "warn", staleByDesign, baseline, undefined, {
+      ratchet: false,
+    });
 
     // (12a2) **巡回は成功しているのに、サイトに1件も出ていないソース。**
     //

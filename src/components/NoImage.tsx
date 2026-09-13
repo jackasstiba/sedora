@@ -47,7 +47,9 @@ export function NoImage({ genre, title, label }: { genre: string; title?: string
   if (title) {
     return (
       <div
-        className={`relative flex h-full w-full flex-col justify-between overflow-hidden bg-gradient-to-br ${tint} p-3`}
+        // 上端は ItemCard の種別バッジ（left-2 top-2・高さ約22px）が重なる帯。ジャンルのチップを
+        // その下に置く（実測 2026-09-12: 「抽選」と「🃏 トレカ」が重なって「抽選トレカ」に読めた）。
+        className={`relative flex h-full w-full flex-col justify-between overflow-hidden bg-gradient-to-br ${tint} p-3 pt-10`}
       >
         <span
           className="pointer-events-none absolute -bottom-4 -right-3 select-none text-8xl opacity-10"

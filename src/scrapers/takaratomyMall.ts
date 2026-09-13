@@ -200,12 +200,14 @@ export async function scrapeTakaraTomyMall(): Promise<ScrapedItem[]> {
   const byId = new Map<string, ScrapedItem>();
 
   for (const list of LISTS) {
-    let html: string;
-    try {
-      html = await fetchHtmlDetectCharset(`${STORE}${list.path}`);
-    } catch {
-      continue;
-    }
+    // 🔴 一覧が1本でも取れなかったら**巡回ごと失敗**にする（部分成功を返さない）。
+    // 実測 2026-09-12 15:11 の回: モールが応答せず（curl でも 60秒タイムアウト）、3本のうち
+    // 1本ぶん24件だけを返した。scrape.ts はそれを「一覧に無い＝在庫切れ」と読んで
+    // **56件を削除**した（朝は186件）。取れなかったことと無かったことは別で、失敗は失敗と言う。
+    // エラーにすれば scrape.ts は `if (error) continue` で突き合わせ削除に入らない。
+    const html = await fetchHtmlDetectCharset(`${STORE}${list.path}`).catch((e: unknown) => {
+      throw new Error(`一覧 ${list.label}（${list.path}）が取れない: ${e instanceof Error ? e.message : String(e)}`);
+    });
     await sleep(600);
 
     for (const card of parseTakaraTomyList(html)) {

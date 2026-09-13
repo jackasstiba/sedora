@@ -79,7 +79,7 @@ export type ShopifyProduct = {
   published_at: string;
   tags: string[];
   images: { src: string }[];
-  variants: { title?: string; price: string; available: boolean }[];
+  variants: { title?: string; price: string; available: boolean; taxable?: boolean }[];
 };
 
 /**
@@ -212,8 +212,10 @@ const TRAILING_DATE =
 // 「〜プリンセスカフェ、東京・大阪で」と地名＋助詞が宙ぶらりんに残る（実測2件）。
 // 地名は語彙を固定し、末尾の「(、)地名(・地名)*(ほか)で/にて」だけを落とす。
 const LOC = "東京|大阪|京都|名古屋|福岡|札幌|仙台|広島|横浜|池袋|秋葉原|渋谷|新宿|原宿|梅田|難波|天神|沖縄|全国|各地";
+// 「、」で区切られた末尾の地名は助詞が無くても落とす（上の密着助詞の除去で「〜カフェ、東京・大阪」の
+// 形になる）。「、」が無い「ちいかわ展 大阪」型は情報なので助詞付きのときだけ落とす。
 const TRAILING_LOCATION = new RegExp(
-  `\\s*、?\\s*(?:${LOC})(?:・(?:${LOC}))*(?:ほか|など)?(?:で|にて)$`
+  `(?:\\s*、\\s*(?:${LOC})(?:・(?:${LOC}))*(?:ほか|など)?(?:で|にて)?|\\s*(?:${LOC})(?:・(?:${LOC}))*(?:ほか|など)?(?:で|にて))$`
 );
 
 /** タイトルから日付告知・編集タグを取り除いて商品名として読みやすくする */
@@ -225,7 +227,14 @@ export function cleanTitle(raw: string): string {
   t = t.replace(/[   ]/g, " ").replace(/ {2,}/g, " ");
   t = t.replace(NOISE_TAGS, "");
   t = t.replace(LEADING_DATE, "");
+  // 日付告知が助詞に**密着**している（「紫原敦が9月17日開催!」「ロフト4店舗で9月15日より順次開催!」）
+  // なら、その助詞は告知文の一部＝一緒に落とす。日付だけ削ると「〜紫原敦が」「〜ロフト4店舗で」と
+  // 文の途中で切れた商品名が保存される（実測 2026-09-12: collabo_cafe 5件・audit dangling_particle）。
+  // 空白を挟む「あべの 10月24日より開催!」の「の」は地名の一部なので触らない（密着だけを見る）。
+  const dm = t.match(TRAILING_DATE);
+  const particleGlued = !!dm && !/^[\s　]/.test(dm[0]);
   t = t.replace(TRAILING_DATE, "");
+  if (particleGlued) t = t.replace(/(?<=[^\s　])[でがにをはもへの]$/, "");
   t = t.replace(TRAILING_LOCATION, "");
   // 「◯◯」が登場！ 型の告知ラッパー。外側の「」ごと剥がして商品名だけにする。
   // 実測: pokemon_goods「「一番くじ ポケモンマスターズ EX 7th Anniversary」が登場！」が

@@ -20,13 +20,16 @@ const SOURCE_LABEL_HEAD = /^(?:最新)?リーク\s*[｜|]\s*/;
 // SOURCE_LABEL_TAIL が末尾を落とした後も先頭のラベルが残り、監査 title_pipe_residue が鳴った
 // （本番 snkrdunk 112件中4件がこの形。うち表示中1件）。日付は eventDate バッジと重複するノイズ。
 // **告知語＋パイプを必須にする**＝日付だけの「8/22｜…」は剥がさない（商品名を削る側に転ばない）。
+// 「海外9/4発売｜…」の地域語つき（実測 2026-09-12: snkrdunk の Travis Scott 2件）も同じラベル。
 const SOURCE_LABEL_DATE_HEAD =
-  /^\d{1,2}\/\d{1,2}(?:[・,、･]\d{1,2}(?:\/\d{1,2})?)*\s*(?:発売|抽選|販売|再販|入荷|予約|受付)\s*[｜|]\s*/;
+  /^(?:海外|国内|日本)?\d{1,2}\/\d{1,2}(?:[・,、･]\d{1,2}(?:\/\d{1,2})?)*\s*(?:発売|抽選|販売|再販|入荷|予約|受付)\s*[｜|]\s*/;
 
 // 収集元が使っている区切り記号の残骸。実測: トレカ速報の8件が
 // 「【MTG】| ホビット コレクター・ブースター 日本語版」と、タグ直後にパイプが残っていた。
 // 商品名にパイプは出てこないので、タグ直後のものだけ落とす（本文中のパイプは触らない）。
-const TAG_PIPE = /^(【[^】]{1,12}】)\s*[|｜]\s*/;
+// タグは先頭とは限らない（実測 2026-09-12: 「マーベル・レジェンド 【MTG】| マーベル スーパー・ヒーローズ …」
+// とシリーズ名の後ろに来る3件）。**タグ直後**という条件はそのまま、位置の縛りだけ外す。
+const TAG_PIPE = /(【[^】]{1,12}】)\s*[|｜]\s*/g;
 
 // 開き括弧だけが余っているタイトル（実測: トレカ速報の12件が
 // 「『【MTG】プレイヤーズカードスリーブ … 《調和した大合唱》(80枚入り)」と、
@@ -48,6 +51,16 @@ const BRACKET_PAIRS: [string, string][] = [
  */
 function dropUnmatchedBrackets(title: string): string {
   let t = title.trim();
+  // 全角と半角の丸括弧が**混ざって対になっている**商品名（実測 2026-09-13: ちいかわマーケット
+  // 「ハンドタオル（ウキウキピクニック) グリーン」・mofusand「アームカバー(ドーナツにゃん）」計5件）。
+  // 幅ごとに数えると「（」だけ余り→落とす→「)」だけが残る、と**整形が粗を作る**。
+  // 幅を混ぜて数えて釣り合っているなら、半角に揃えて対として扱う（片幅だけの商品名は触らない）。
+  {
+    const fw = (t.split("（").length - 1) + (t.split("(").length - 1);
+    const bw = (t.split("）").length - 1) + (t.split(")").length - 1);
+    const mixed = /[（(]/.test(t) && /[）)]/.test(t) && /（/.test(t) !== /）/.test(t);
+    if (fw === bw && mixed) t = t.replace(/（/g, "(").replace(/）/g, ")");
+  }
   for (const [open, close] of BRACKET_PAIRS) {
     let opens = t.split(open).length - 1;
     let closes = t.split(close).length - 1;
@@ -125,7 +138,10 @@ export function stripDateNoticeTail(title: string): string {
  *   実測 2026-08-22（Phase 3b で公式ショップのカタログを取り込んだ回）: この名前を持つ
  *   グッズ4件が一斉に鳴った（`hololive friends with u 風真いろは` 等）。
  */
-const PARTICLE_ENDING_PROPER_NOUNS = ["風真いろは"];
+// ・あべの … 大阪・阿倍野の地名（あべのハルカス等の表記）。末尾の「の」は名前の一部。
+//   実測 2026-09-12: collabo_cafe「ゼロの使い魔20周年記念展 in あべの」（日付告知は空白を
+//   挟んで付いていたので、保存側の整形は正しくここで止めている＝切れ残りではない）。
+const PARTICLE_ENDING_PROPER_NOUNS = ["風真いろは", "あべの"];
 
 /**
  * 表示タイトルが「文の途中で切れた痕跡」（末尾が宙ぶらりん助詞）に見えるか。audit (9) の判定。

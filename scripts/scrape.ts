@@ -1,7 +1,7 @@
 import { prisma } from "../src/lib/prisma";
 import { runAllScrapers, SCRAPER_SOURCES } from "../src/scrapers";
 import type { ScrapeContext } from "../src/scrapers/types";
-import { checkHealth } from "./health";
+import { checkHealth, reconcileCollapsed } from "./health";
 import { cleanTitle } from "../src/scrapers/util";
 import { mergePrizeEnrichment } from "../src/lib/prizes";
 import { backfillChanneltonoRaffleUrls } from "./backfillChanneltonoRaffle";
@@ -20,7 +20,10 @@ import { nowInstant } from "../src/lib/date";
 // billys＝発売カレンダー。同名の色違いを1枚に畳む都合で sourceId が商品名だけになっており、
 // 日付が変わると **古い sourceId の行が孤児として残る**。カレンダーから消えた＝発売済み/中止
 // なので、突き合わせて消す。
-const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen", "billys"]);
+// medicom_toy＝公式ストアの「発売予定」コレクション3本（2026-09-12 に Shopify 取りに作り直し）。
+// sourceId が旧サイトの告知ID→ストアの商品IDに変わったので、旧IDの行（リンク先が 404）は
+// この突き合わせで消える。以後もコレクションから外れた＝受注が終わった行を消す。
+const RECONCILE_SOURCES = new Set(["nyuka_now", "card_chusen", "billys", "medicom_toy"]);
 
 /**
  * **日付を持たない行だけ**を突き合わせるソース（2026-08-18 新設）。
@@ -48,7 +51,6 @@ const RECONCILE_UNDATED_SOURCES = new Set([
   // 月精度の予定は、当月分だけ日付なしになる（monthPlanDate）。その月が終われば収集元から
   // 消えるので、突き合わせないと「今月発売予定」のまま居座る。
   "gashapon",
-  "medicom_toy",
 ]);
 
 // `--only=<source>[,<source>…]`: その収集元だけを巡回する（定例更新では使わない）。
@@ -81,6 +83,12 @@ async function deleteMissing(
     select: { id: true, sourceId: true },
   });
   const doomed = existing.filter((r) => !live.has(r.sourceId)).map((r) => r.id);
+  if (reconcileCollapsed(existing.length, doomed.length)) {
+    console.error(
+      `[${source}] 🔴 突き合わせ削除を中止: 既存${existing.length}件のうち${doomed.length}件が今回の巡回に無い（過半＝部分成功の疑い。消さずに残す）`
+    );
+    return 0;
+  }
   const CHUNK = 200; // 上限に余裕を持たせた大きさ（1回のクエリのバインド変数の数）
   for (let i = 0; i < doomed.length; i += CHUNK) {
     await prisma.item.deleteMany({ where: { id: { in: doomed.slice(i, i + CHUNK) } } });

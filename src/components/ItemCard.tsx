@@ -12,15 +12,18 @@ import type { CardItem } from "@/lib/cardItem";
 // 型として持てない**＝クライアントへ渡しようがない、という形で非公開方針を固定する。
 export type Item = CardItem;
 
-const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300";
-const BLUE = "bg-blue-100 text-blue-800 dark:bg-blue-900/40 dark:text-blue-300";
-const PURPLE = "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300";
-const AMBER = "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300";
+// 画像の上に載るバッジは**不透明**にする。ダークの `bg-*-900/40`（半透明）は暗い面を前提に
+// していて、白っぽい商品写真の上では地が透けて文字が消える（実測 2026-09-12: /lottery の
+// 「発売」「開催」が写真の上で読めなかった。375px・ダーク）。
+const GREEN = "bg-emerald-100 text-emerald-800 dark:bg-emerald-900 dark:text-emerald-200";
+const BLUE = "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200";
+const PURPLE = "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200";
+const AMBER = "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200";
 
 // 近日バッジの配色（緊急度）。urgent=本日/明日は目立つ柿色、soon/weekは徐々に落ち着かせる。
 const COUNTDOWN_TONE: Record<"urgent" | "soon" | "week", string> = {
   urgent: "bg-rose-600 text-white",
-  soon: "bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-200",
+  soon: "bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200",
   week: "bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300",
 };
 
@@ -87,7 +90,7 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
           <NoImage genre={item.genre} title={displayTitle} />
         )}
         <span
-          className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold ${eventColor(eventLabel)}`}
+          className={`absolute left-2 top-2 rounded-full px-2 py-0.5 text-xs font-semibold shadow-sm ${eventColor(eventLabel)}`}
         >
           {eventTypeLabel(eventLabel, locale)}
         </span>

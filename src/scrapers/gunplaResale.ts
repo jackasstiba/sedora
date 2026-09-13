@@ -54,14 +54,46 @@ export function parseGunplaCalendar(html: string): { rows: GunplaRow[]; prices: 
   return { rows, prices };
 }
 
-export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
-  const top = await fetchHtml(HOME);
-  const urls = [...new Set(top.match(CALENDAR_URL_RE) ?? [])];
+const MONTH_SLUGS = [
+  "january", "february", "march", "april", "may", "june",
+  "july", "august", "september", "october", "november", "december",
+];
 
+/**
+ * 当月と翌月の本体カレンダーURL（純関数・selftest対象）。
+ *
+ * 2026-09-02 実測: トップページから**本体カレンダーへのリンクが消え**、延期記事
+ * （postponement）だけが残った。延期記事は日付列を持たない別形式なので行が0件になり、
+ * 巡回は 121→34→**0件** と静かに落ちた（健全性チェックは初回の「ゼロ落ち」しか鳴らない）。
+ * 記事のURLは `gunpla-restock-daily-calender-<month>-<year>/` で規則的なので、トップに
+ * 頼らず**月から組み立てて直接開く**（無い月は404＝飛ばす）。トップの発見経路は補助として残す。
+ */
+export function gunplaCalendarUrls(today: Date): string[] {
+  const out: string[] = [];
+  for (const add of [0, 1]) {
+    const d = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + add, 1));
+    const slug = `${MONTH_SLUGS[d.getUTCMonth()]}-${d.getUTCFullYear()}`;
+    out.push(`https://harmonizers-jp.com/gunpla-restock-daily-calender-${slug}/`);
+    out.push(`https://harmonizers-jp.com/gunpla-restock-daily-calender-addition-${slug}/`);
+  }
+  return out;
+}
+
+export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
   const today = todayJst();
+  let discovered: string[] = [];
+  try {
+    const top = await fetchHtml(HOME);
+    discovered = top.match(CALENDAR_URL_RE) ?? [];
+  } catch {
+    // トップが落ちていても、月から組み立てたURLで本体は取れる
+  }
+  const urls = [...new Set([...gunplaCalendarUrls(today), ...discovered])];
+
   const cutoff = today.getTime() - 3 * 86_400_000; // 過ぎた再販は3日で消す
 
   const byId = new Map<string, ScrapedItem>();
+  let opened = 0;
   for (const url of urls) {
     let html: string;
     try {
@@ -69,6 +101,7 @@ export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
     } catch {
       continue;
     }
+    opened++;
     await sleep(500);
     const { rows, prices } = parseGunplaCalendar(html);
     for (const r of rows) {
@@ -93,5 +126,7 @@ export async function scrapeGunplaResale(): Promise<ScrapedItem[]> {
       });
     }
   }
+  // 1本も開けなかった＝入口が変わった。静かに0件を返さずエラーで落とす（健全性チェックが拾う）。
+  if (opened === 0) throw new Error(`カレンダー記事を1本も開けなかった（${urls.length}本を試行）`);
   return [...byId.values()];
 }

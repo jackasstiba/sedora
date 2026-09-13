@@ -73,7 +73,7 @@ import {
   type StoreEntry,
 } from "../src/lib/stores";
 import { unfreezeStoreWhen } from "./backfillDisplayText";
-import { zeroAdoptionVerdict } from "./health";
+import { nextBaseline, reconcileCollapsed, zeroAdoptionVerdict } from "./health";
 import { mergePrizeEnrichment, parsePrizesJson } from "../src/lib/prizes";
 import {
   accumulateUnexplained,
@@ -128,16 +128,19 @@ import {
 import { cleanStoreUrl } from "../src/scrapers/aggregatorUtil";
 import { kidsLabel } from "../src/scrapers/nikeSnkrs";
 import { figislandListPlaceholder } from "../src/scrapers/figisland";
+import { billysDropPage } from "../src/scrapers/billys";
+import { isMalformedUrl } from "../src/lib/url";
+import { parseGoodsIndex, productUrl } from "../src/scrapers/pokemonCard";
 import { extractRaffleUrl } from "../src/scrapers/channeltono";
 import { buildRecentEndedItem, cleanProductName, cleanRestockName, parseEndedStores, parseRestockStores, resolvePastMonthDay } from "../src/scrapers/nyukaNow";
-import { cleanProductName as cleanTqProductName, isReleaseTitle } from "../src/scrapers/tenbaiquest";
+import { cleanProductName as cleanTqProductName, isReleaseTitle, verifyReleasePost } from "../src/scrapers/tenbaiquest";
 import { buildKujimapItem, parseKujiDetail, pickRecentPageSitemaps } from "../src/scrapers/kujimap";
 import { buildOnePieceItem, parseOnePieceProducts } from "../src/scrapers/onepieceCard";
 import { parseCardChusen, parseDue, productKey, splitSaleConditions, stripStrayMarks } from "../src/scrapers/cardChusen";
 import { buildSaleUnits, groupSaleUnits, isBundlePriced, isSaleUnitGroup, saleUnitLabel } from "../src/lib/saleUnit";
-import { cleanGunplaName, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
+import { cleanGunplaName, gunplaCalendarUrls, parseGunplaCalendar } from "../src/scrapers/gunplaResale";
 import { parseTorecasokuList } from "../src/scrapers/torecasoku";
-import { sofviEventInfo, sofviProductName } from "../src/scrapers/sofvi";
+import { sofviDeadlineFromArticle, sofviEventInfo, sofviProductName, storeLinkNear } from "../src/scrapers/sofvi";
 import { findClockViolations, isClockLinted } from "../src/lib/clockLint";
 import { findCrawlViolations, isCrawlLinted } from "../src/lib/crawlLint";
 import {
@@ -150,7 +153,7 @@ import { crawlDecision, lastIsOlderThan } from "../src/scrapers/crawl";
 import { itemPeriodMs, overlapsRange } from "../src/lib/itemFilter";
 // 2026-08-18 追加の一次ストア6ソース。**巡回しないと確かめられない部分を合成入力で固定する**
 // （収集元が落ちていても、直した箇所が壊れていないことは分かる）。
-import { parseMedicomDetail } from "../src/scrapers/medicomToy";
+import { medicomItemFromProduct, parseMedicomTitle } from "../src/scrapers/medicomToy";
 import { parseTakaraTomyRelease, takaraTomyEndedEvidence, takaraTomyEventType, takaraTomyGenre, takaraTomyUnavailable, type TakaraTomyCard } from "../src/scrapers/takaratomyMall";
 import { baselineWritable } from "./factsBaseline";
 import { jsonPrices } from "./pagePrice";
@@ -1542,6 +1545,9 @@ const cases: Case[] = [
   { name: "宙ぶらりん判定: タレント名「風真いろは」で終わる商品名は鳴らない", fn: () => looksTruncatedTitle("hololive friends with u 風真いろは"), want: false },
   // 鳴る側: 例外を足しても、同じ「は」で終わる本物の切れ残りは鳴り続ける（例外で網を殺していない）
   { name: "宙ぶらりん判定: 「〜の予約は」は鳴る（例外を足しても本物は捕まえる）", fn: () => looksTruncatedTitle("ねんどろいど 予約は"), want: true },
+  // 2026-09-12: 地名「あべの」（collabo_cafe 実測1件）。同じ「の」で終わる本物は鳴り続ける
+  { name: "宙ぶらりん判定: 地名「あべの」で終わる催事名は鳴らない", fn: () => looksTruncatedTitle("ゼロの使い魔20周年記念展 in あべの"), want: false },
+  { name: "宙ぶらりん判定: 「〜最終会場の」は鳴る（地名の例外を足しても本物は捕まえる）", fn: () => looksTruncatedTitle("呪術廻戦 完結展 最終会場の"), want: true },
   // ── 2026-08-21 追加: チャネル句＋日付告知の一括除去（#117298 の表示修正） ──
   {
     name: "日付直前の「〇〇通販で」も告知と一緒に落とす",
@@ -1687,6 +1693,32 @@ const cases: Case[] = [
     name: "既に切り詰められて保存済みの「〜東京で」も再クリーンで直る",
     fn: () => cleanTitle("『「アオハル・ワンスモア」Drink Stand Fair』東京で"),
     want: "『「アオハル・ワンスモア」Drink Stand Fair』",
+  },
+  // 2026-09-12 実測: 日付が助詞に密着した告知（collabo_cafe 5件）が「〜紫原敦が」で保存されていた
+  {
+    name: "日付に密着した助詞（〜が9月17日開催!）も告知の一部として落とす",
+    fn: () => cleanTitle("黒子のバスケ ナンジャタウン 第5弾 紫原敦が9月17日開催!"),
+    want: "黒子のバスケ ナンジャタウン 第5弾 紫原敦",
+  },
+  {
+    name: "日付に密着した「〜店舗で」も落とす（地名語彙に無い場所）",
+    fn: () => cleanTitle("蓮ノ空 POP UP STORE in ロフト4店舗で9月15日より順次開催!"),
+    want: "蓮ノ空 POP UP STORE in ロフト4店舗",
+  },
+  {
+    name: "密着した「新宿で」の助詞だけ落とし、会場名は残す",
+    fn: () => cleanTitle("呪術廻戦 完結展 最終会場の新宿で12月25日より開催決定!"),
+    want: "呪術廻戦 完結展 最終会場の新宿",
+  },
+  {
+    name: "「、」の無い末尾の地名（ちいかわ展 大阪）は情報なので落とさない",
+    fn: () => cleanTitle("ちいかわ展 大阪"),
+    want: "ちいかわ展 大阪",
+  },
+  {
+    name: "空白を挟む日付告知の手前の「あべの」（地名）は触らない",
+    fn: () => cleanTitle("ゼロの使い魔20周年記念展 in あべの 10月24日より開催!"),
+    want: "ゼロの使い魔20周年記念展 in あべの",
   },
   // 鳴らない側: 文中の地名や、末尾が「で」でないタイトルは触らない
   {
@@ -2006,6 +2038,35 @@ const cases: Case[] = [
   { name: "転売Q: 年無しの日付投稿は採らない", fn: () => isReleaseTitle("【7月3日（金）】Audio-Technica"), want: false },
   { name: "転売Q: 抽選でも発売日でもない投稿は対象外", fn: () => isReleaseTitle("【完売店舗多数】EGOIST"), want: false },
   { name: "転売Q: ブラケット除去で商品名", fn: () => cleanTqProductName("【2026年9月16日（水）】ポケモンカードゲーム MEGA 拡張パック"), want: "ポケモンカードゲーム MEGA 拡張パック" },
+  // 2026-09-12 観点A: 見出しの【日付】は予約開始日のことがある（iPhone 18 を「発売 本日」で出していた）
+  {
+    name: "転売Q: 本文の発売日が見出しと違い、見出しの日付を「予約」と言っていれば 予約（補足に発売日）",
+    fn: () => {
+      const v = verifyReleasePost(
+        "【2026年9月12日（土）21時～】Apple iPhone 18シリーズ & iPhone Duo",
+        `<h1>【2026年9月12日（土）21時～】Apple iPhone 18</h1><h2>発売日</h2><p>iPhone 18 Pro：2026年9月18日（金）</p><p>「iPhone 18 Pro」は9月12日（土）21時より予約の受付がスタート予定。</p>`
+      );
+      return v && `${v.eventType}|${ymd(v.eventDate)}|${v.eventDateText}|${v.highlights}`;
+    },
+    want: "予約|2026-09-12|2026年9月12日(土)21時~|発売日 2026年9月18日(金)",
+  },
+  {
+    name: "転売Q: 本文の発売日が見出しと同じなら 発売",
+    fn: () => {
+      const v = verifyReleasePost("【2026年9月16日（水）】ポケカ 30th", `<h2>発売日</h2><p>2026年9月16日（水）</p>`);
+      return v && `${v.eventType}|${ymd(v.eventDate)}`;
+    },
+    want: "発売|2026-09-16",
+  },
+  {
+    name: "転売Q: 本文の発売日が違い、予約とも言っていなければ本文の発売日を採る（見出しの日付で語らない）",
+    fn: () => {
+      const v = verifyReleasePost("【2026年9月12日（土）】X", `<h2>発売日</h2><p>2026年9月18日（金）</p><p>9月12日（土）は店頭で先行展示。</p>`);
+      return v && `${v.eventType}|${ymd(v.eventDate)}|${v.highlights}`;
+    },
+    want: "発売|2026-09-18|null",
+  },
+  { name: "転売Q: 本文に発売日欄が無ければ判定しない（null）", fn: () => verifyReleasePost("【2026年9月12日（土）】X", `<p>概要だけ</p>`), want: null },
 
   // ── sofvi.tokyo ソフビ情報（2026-08-15新設） ──────────
   // ニュース見出しを商品名にしない＝［ブランド］＋「商品名」を組み立てられる記事だけ載せる
@@ -2030,8 +2091,70 @@ const cases: Case[] = [
     fn: () => sofviEventInfo("奇才・安楽安作氏が「マシュマロマン」を手掛けた！", new Date(Date.UTC(2026, 7, 15))),
     want: null,
   },
+  // 2026-09-12 実測: 見出しの締切の書き方が揺れ、9/4 から0件が続いていた（受注中は実在した）。
+  {
+    name: "sofvi: 「明日10日受付締切」（日が締切の前）も読む",
+    fn: () => { const r = sofviEventInfo("明日10日受付締切！［MAT］第19弾「MAT ブロッケン(2期)」抽選販売！", new Date(Date.UTC(2026, 8, 9))); return r ? `${r.eventType}|${ymd(r.date)}` : null; },
+    want: "抽選|2026-09-10",
+  },
+  {
+    name: "sofvi: 「受注締切は明日2日まで」も読む",
+    fn: () => { const r = sofviEventInfo("受注締切は明日2日まで！ENKA VINYL受注第22弾「アフロダイA」", new Date(Date.UTC(2026, 8, 1))); return r ? ymd(r.date) : null; },
+    want: "2026-09-02",
+  },
+  {
+    name: "sofvi: 本文の「YYYY年M月D日…まで」を締切として読む（範囲は終点・抽選は周辺の文で判定）",
+    fn: () => {
+      const r = sofviDeadlineFromArticle(
+        `<html><head></head><body><nav>他記事「〇〇」抽選販売！</nav><p>受注受付は2026年9月13日10時〜2026年9月17日23時59分まで、店頭にて受注。</p></body></html>`,
+        new Date(Date.UTC(2026, 8, 12))
+      );
+      return r ? `${ymd(r.date)}|${r.text}|${r.lottery}` : null;
+    },
+    want: "2026-09-17|2026年9月17日23時59分まで|false",
+  },
+  {
+    name: "sofvi: 締切の段落にある販売店のリンクを officialUrl に（収集元・SNS・共有ボタンは除く）",
+    fn: () =>
+      storeLinkNear(
+        `<p><a href="https://x.com/sofvitokyo">X</a></p><p>2026年9月18日17時まで <a href="https://twitter.com/share">tweet</a> <a href="https://jp.ric-toy.com/200647r.html">少年リック</a> にて受注受付</p><p><a href="https://example.com/other">別段落</a></p>`,
+        "2026年9月18日17時まで"
+      ),
+    want: "https://jp.ric-toy.com/200647r.html",
+  },
+  {
+    name: "sofvi: 応募フォーム（forms.gle）は店のページではないので officialUrl にしない",
+    fn: () => storeLinkNear(`<p>2026年9月14日23時59分まで <a href="https://forms.gle/abc">応募</a></p>`, "2026年9月14日23時59分まで"),
+    want: null,
+  },
+  {
+    name: "sofvi: 締切の段落に店のリンクが無ければ null（他の段落から取らない）",
+    fn: () => storeLinkNear(`<p>2026年9月18日17時まで受付</p><p><a href="https://example.com/x">x</a></p>`, "2026年9月18日17時まで"),
+    want: null,
+  },
+  {
+    name: "sofvi: 記事より前の日付は締切にしない（開催報告等）",
+    fn: () => sofviDeadlineFromArticle(`<html><head></head><body>2026年8月1日までの受付は終了。</body></html>`, new Date(Date.UTC(2026, 8, 12))),
+    want: null,
+  },
+  {
+    name: "sofvi: ブランド名で始まる商品名にはブランドを重ねない",
+    fn: () => sofviProductName("明日10日受付締切！［MAT］第19弾として『ウルトラマンA』より「MAT ブロッケン(2期)」抽選販売！"),
+    want: "MAT ブロッケン(2期)",
+  },
 
   // ── gunpla_resale ガンプラ再販カレンダー（2026-08-15新設） ──────────
+  // 2026-09-12: トップから本体カレンダーのリンクが消えて0件が続いた。月から組み立てる。
+  {
+    name: "gunpla: 当月と翌月の本体カレンダーURLを月から組み立てる（年跨ぎ含む）",
+    fn: () => gunplaCalendarUrls(new Date(Date.UTC(2026, 11, 20))).join(" "),
+    want: [
+      "https://harmonizers-jp.com/gunpla-restock-daily-calender-december-2026/",
+      "https://harmonizers-jp.com/gunpla-restock-daily-calender-addition-december-2026/",
+      "https://harmonizers-jp.com/gunpla-restock-daily-calender-january-2027/",
+      "https://harmonizers-jp.com/gunpla-restock-daily-calender-addition-january-2027/",
+    ].join(" "),
+  },
   {
     name: "gunpla: 行のパース（名前・日付・新発売タグ・価格）",
     fn: () => {
@@ -2135,6 +2258,11 @@ const cases: Case[] = [
   // **括弧を一律に落とすと壊れる**: 中身が「別商品の列挙」のことがある。
   { name: "cardchusen: 中身違い(御三家8種)は別商品のまま", fn: () => productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（フシギダネ・ヒトカゲ・ゼニガメ）") === productKey("ポケモンカード 30th CELEBRATION 御三家カードセット（チコリータ・ヒノアラシ・ワニノコ）"), want: false },
   { name: "cardchusen: 外した条件は店のnoteに残す", fn: () => splitSaleConditions("ONE PIECEカードゲーム ブースターパック 世界最強の戦士【OP-17】 1BOX（5,760円税込・現金払いのみ）").conds.join("・"), want: "5,760円税込・現金払いのみ・1BOX" },
+  // 2026-09-12 実測（本番の通読）: 「…」2」「… まで)」で出ていた2型
+  { name: "cardchusen: ネストした括弧の条件を外側で閉じる（「1BOXまで）」を残さない）", fn: () => splitSaleConditions("ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」1BOX（お一人様（一家族）1BOXまで）").base, want: "ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」" },
+  { name: "cardchusen: ネストした括弧の条件は丸ごと note に回す", fn: () => splitSaleConditions("X 1BOX（お一人様（一家族）1BOXまで）").conds.join("・"), want: "お一人様(一家族)1BOXまで・1BOX" },
+  { name: "cardchusen: 回次の丸数字②は商品名に残さない（NFKCで裸の2になる）", fn: () => splitSaleConditions("ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」②（2回目・1パック360円税込・各店舗5パックまで）").base, want: "ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」" },
+  { name: "cardchusen: セット番号の丸数字（御三家カードセット②）は identity なので残す", fn: () => splitSaleConditions("御三家カードセット②（フシギダネ・ヒトカゲ・ゼニガメ）").base, want: "御三家カードセット2(フシギダネ・ヒトカゲ・ゼニガメ)" },
   // ── ページのJSONに載っている価格を読む（2026-08-24・検査側の誤検知11件を潰した） ──────────
   // ちいかわマーケット(Shopify)は価格を本文の文字として持たず、埋め込みJSONの銭単位だけが持つ。
   // 検査は script を落としてから本文を見るので、正本ごと捨てて「価格が本文に無い」と誤報していた。
@@ -2840,35 +2968,68 @@ const cases: Case[] = [
   // ── 2026-08-18 追加の一次ストア6ソース ────────────────────────────────────
   // 「載せる基準」と「精度を足さない」の2点だけを固定する。どちらも実データで一度間違えた。
 
-  // メディコム・トイ: 商品名が <br> で複数行に割れている（BAPEコラボ）。先頭行だけ採ると
-  // **商品名が途中で切れたカード**になる。実測でそうなっていた。
+  // メディコム・トイ（2026-09-12 に Shopify ストア取りへ作り直し）: 予定はタイトル末尾の《》だけ。
+  // 「載せる基準（《予定》が無ければ載せない）」「日を作らない」「締切があれば締切が日付」
+  // 「JSONの価格は税抜→税込に揃える」の4点を固定する。
   {
-    name: "medicom: 商品名が2行に割れていても繋ぐ",
-    fn: () =>
-      parseMedicomDetail(
-        `<div id="p_descrip">2026年10月発売予定<br>MCT 30th ANNIV. BAPE(R) CAMO<br>REVERSIBLE BE@R SHARK FULL ZIP HOODIE<br><br>頒布価格各￥62,700（税込）<br>●サイズ：S/M/L</div>`
-      ).name,
-    want: "MCT 30th ANNIV. BAPE(R) CAMO REVERSIBLE BE@R SHARK FULL ZIP HOODIE",
+    name: "medicom: 《YYYY年M月発売予定》から商品名と月を読む（日は作らない）",
+    fn: () => {
+      const p = parseMedicomTitle("BE@RBRICK MOFF GIDEON(TM) 400％《2026年9月発売予定》", new Date(Date.UTC(2026, 8, 12)));
+      return p && `${p.name}|${p.year}-${p.month}|${p.day}|${p.deadline}`;
+    },
+    want: "BE@RBRICK MOFF GIDEON(TM) 400％|2026-9|null|null",
   },
   {
-    name: "medicom: 「頒布価格各￥」も価格として読む",
-    fn: () =>
-      parseMedicomDetail(
-        `<div id="p_descrip">2026年10月発売予定<br>X<br><br>頒布価格各￥62,700（税込）</div>`
-      ).price,
-    want: "62,700円",
-  },
-  {
-    // 日が書いてあるのに月精度扱いすると、カードに「10/1」という実在しない発売日が出る（ミス15）。
     name: "medicom: 日まで書いてあれば日を読む",
-    fn: () =>
-      parseMedicomDetail(`<div id="p_descrip">2026年7月25日発売予定<br>X<br><br>頒布価格￥100（税込）</div>`).day,
-    want: 25,
+    fn: () => parseMedicomTitle("VAG SERIES SP 仮面ライダー × おおかみくん《2026年9月19日発売予定》", new Date(Date.UTC(2026, 8, 12)))?.day,
+    want: 19,
   },
   {
-    name: "medicom: 日が無ければ日を作らない",
+    name: "medicom: 「受注期間は9月30日まで」は締切として読む（年は今日基準で補う）",
+    fn: () => {
+      const p = parseMedicomTitle("SOFVI DARTH VADER《2027年2月発送予定 受注期間は9月30日まで》", new Date(Date.UTC(2026, 8, 12)));
+      return p && `${p.deadline?.toISOString().slice(0, 10)}|${p.deadlineText}`;
+    },
+    want: "2026-09-30|受注期間は9月30日まで",
+  },
+  {
+    name: "medicom: 「受注期間は8月22日(土)23:59まで」も締切として読む",
+    fn: () => parseMedicomTitle("X《2027年2月発送予定 受注期間は8月22日(土)23:59まで》", new Date(Date.UTC(2026, 8, 12)))?.deadline?.toISOString().slice(0, 10),
+    want: "2026-08-22",
+  },
+  {
+    name: "medicom: 《予定》が無い商品は載せない",
+    fn: () => parseMedicomTitle("MAFEX DEADPOOL", new Date(Date.UTC(2026, 8, 12))),
+    want: null,
+  },
+  {
+    // 実測: JSON 10909 ↔ 商品ページ「¥10,909 (税込¥12,000)」。税抜のまま出すと他ソースと揃わない。
+    name: "medicom: ストアJSONの税抜価格を税込にして出す",
     fn: () =>
-      parseMedicomDetail(`<div id="p_descrip">2026年10月発売・発送予定<br>X<br><br>頒布価格￥100（税込）</div>`).day,
+      medicomItemFromProduct(
+        { id: 1, title: "X《2026年12月発売予定》", handle: "x", product_type: "BE@RBRICK", published_at: "2026-09-01T00:00:00+09:00", tags: [], images: [], variants: [{ price: "10909", available: false, taxable: true }] },
+        new Date(Date.UTC(2026, 8, 12))
+      )?.price,
+    want: "12,000円",
+  },
+  {
+    name: "medicom: 締切のある受注は締切が eventDate・発送予定は補足に残す",
+    fn: () => {
+      const it = medicomItemFromProduct(
+        { id: 1, title: "X《2027年2月発送予定 受注期間は9月30日まで》", handle: "x", product_type: "", published_at: "2026-09-01T00:00:00+09:00", tags: [], images: [], variants: [] },
+        new Date(Date.UTC(2026, 8, 12))
+      );
+      return it && `${it.eventDate?.toISOString().slice(0, 10)}|${it.eventDateText}|${it.highlights}`;
+    },
+    want: "2026-09-30|受注期間は9月30日まで|2027年2月発送予定",
+  },
+  {
+    name: "medicom: 締切を過ぎた受注は載せない",
+    fn: () =>
+      medicomItemFromProduct(
+        { id: 1, title: "X《2027年1月発送予定 受注期間は8月31日まで》", handle: "x", product_type: "", published_at: "2026-09-01T00:00:00+09:00", tags: [], images: [], variants: [] },
+        new Date(Date.UTC(2026, 8, 12))
+      ),
     want: null,
   },
 
@@ -3630,6 +3791,27 @@ const cases: Case[] = [
     fn: () => imgSearchQueryName("ねんどろいど ホロライブ（限定カラー）"),
     want: "ねんどろいど ホロライブ（限定カラー）",
   },
+  // 2026-09-13 実測: card_chusen 48件が画像0件。条件語「家族・会員・N回」と末尾の金額を知らなかった
+  {
+    name: "画像検索語: 「(お1家族様1回・タムカ会員限定)」は販売条件なので括弧ごと落とす",
+    fn: () => imgSearchQueryName("ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」 (お1家族様1回・タムカ会員限定)"),
+    want: "ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」",
+  },
+  {
+    name: "画像検索語: 末尾の金額「各1,800円税込」を落としてから括弧を見る",
+    fn: () => imgSearchQueryName("ポケモンカードゲーム MEGA スターターセットex 3種(イーブイex/ゾロア&ゾロアークex)各1,800円税込"),
+    want: "ポケモンカードゲーム MEGA スターターセットex 3種(イーブイex/ゾロア&ゾロアークex)",
+  },
+  {
+    name: "cardchusen: 「(お1家族様1回・タムカ会員限定)」は条件として外し note に回す",
+    fn: () => { const r = splitSaleConditions("ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」 (お1家族様1回・タムカ会員限定)"); return `${r.base}|${r.conds.join("・")}`; },
+    want: "ポケモンカードゲーム MEGA 拡張パック「30th CELEBRATION」|お1家族様1回・タムカ会員限定",
+  },
+  {
+    name: "cardchusen: 括弧の外の「各1,800円税込」は条件として外す（中身の列挙の括弧は残す）",
+    fn: () => splitSaleConditions("ポケモンカードゲーム MEGA スターターセットex 3種(イーブイex/ゾロア&ゾロアークex/ニャオハ&マスカーニャex)各1,800円税込").base,
+    want: "ポケモンカードゲーム MEGA スターターセットex 3種(イーブイex/ゾロア&ゾロアークex/ニャオハ&マスカーニャex)",
+  },
 
   // 同じ画像に解決した行を「行ごと」に分ける根拠＝型番（2026-08-18）。
   // 名前の長さでは特定性を測れない（「ONE PIECE カードゲーム」は長いが作品名でしかない）。
@@ -4144,6 +4326,26 @@ const cases: Case[] = [
   { name: "採用0件: 記事は取れているなら静かな日（鳴らさず観測に出す）", fn: () => zeroAdoptionVerdict(0, 20)?.level, want: "info" },
   { name: "採用0件: 巡回件数が分からないソースは判定しない", fn: () => zeroAdoptionVerdict(0, null), want: null },
   { name: "採用0件: 1件でも採用していれば対象外", fn: () => zeroAdoptionVerdict(3, 0), want: null },
+  // 2026-09-12: ゼロ落ちが1回しか鳴らず8日間沈黙した。基準は復旧まで持ち越す。
+  {
+    name: "健全性: ゼロ落ち/急減した回は前回の件数を基準に持ち越す（翌日も鳴る）",
+    fn: () => nextBaseline({ count: 0, withDate: 0, dateRate: 0 }, { count: 34, withDate: 34, dateRate: 1 }, false).count,
+    want: 34,
+  },
+  // 2026-09-12: タカラトミーモール無応答→部分成功24件→突き合わせで56件削除。過半を一度に消す突き合わせは止める。
+  { name: "崩落ガード: 既存186件のうち56件以上が消える突き合わせは止める（過半）", fn: () => reconcileCollapsed(80, 56), want: true },
+  { name: "崩落ガード: 既存186件のうち21件（少数）は通常どおり消す", fn: () => reconcileCollapsed(186, 21), want: false },
+  { name: "崩落ガード: 既存20件未満の小ソースは対象外（0→数件の揺れを止めない）", fn: () => reconcileCollapsed(10, 9), want: false },
+  {
+    name: "健全性: 復旧した回は今回の件数で基準を更新する",
+    fn: () => nextBaseline({ count: 137, withDate: 137, dateRate: 1 }, { count: 34, withDate: 34, dateRate: 1 }, false).count,
+    want: 137,
+  },
+  {
+    name: "健全性: 静かな日が正常なソース（VOLATILE）は今回の値で上書きする",
+    fn: () => nextBaseline({ count: 0, withDate: 0, dateRate: 0 }, { count: 34, withDate: 34, dateRate: 1 }, true).count,
+    want: 0,
+  },
 
   // ── 個別ページが無い行の置き場（figisland の一覧URL） ──────────
   {
@@ -4160,6 +4362,44 @@ const cases: Case[] = [
     name: "置き場: 他のソースには広げない",
     fn: () => figislandListPlaceholder("torecasoku", "https://figisland.net/prizes-schedule/"),
     want: false,
+  },
+  // 2026-09-12: billys の DROP 特集ページ（Last Resort AB 8型が同じ l1126.aspx を指していた）
+  { name: "shared_url 除外: billys の DROP 特集ページ（/shop/pages/lNNNN.aspx）", fn: () => billysDropPage("billys", "https://www.billys-tokyo.net/shop/pages/l1126.aspx"), want: true },
+  { name: "shared_url 除外: billys の商品ページは除外しない", fn: () => billysDropPage("billys", "https://www.billys-tokyo.net/shop/g/g7205610002016/"), want: false },
+  { name: "shared_url 除外: 他ソースの pages URL は除外しない", fn: () => billysDropPage("snkrdunk", "https://www.billys-tokyo.net/shop/pages/l1126.aspx"), want: false },
+
+  // ── 2026-09-12: URLの形の検査（拡張パック「30th CELEBRATION」が死リンクで本番に出ていた） ──
+  // 鳴る側
+  { name: "url_malformed: ホスト名に http が混ざる（前置の事故）は鳴る", fn: () => !!isMalformedUrl("https://www.pokemon-card.comhttps://www.30th.pokemon-card.com/product/m6a"), want: true },
+  { name: "url_malformed: パスに絶対URLが入る形も鳴る", fn: () => !!isMalformedUrl("https://www.pokemon-card.com/https://www.30th.pokemon-card.com/product/m6a"), want: true },
+  { name: "url_malformed: URLとして解釈できない文字列は鳴る", fn: () => !!isMalformedUrl("/products/"), want: true },
+  { name: "url_malformed: http/https 以外のスキームは鳴る", fn: () => !!isMalformedUrl("javascript:void(0)"), want: true },
+  // 鳴らない側（本番にある正常なURLの型）
+  { name: "url_malformed: 楽天検索URL（エンコード済み日本語）は鳴らない", fn: () => isMalformedUrl("https://search.rakuten.co.jp/search/mall/Apple%20iPhone%2018/"), want: null },
+  { name: "url_malformed: アンカー付き商品ページは鳴らない", fn: () => isMalformedUrl("https://www.30th.pokemon-card.com/product/goods-01#goods-shield-01"), want: null },
+  { name: "url_malformed: クエリに http を含む正規URL（Google Forms 等）は鳴らない", fn: () => isMalformedUrl("https://al.dmm.com/?lurl=https%3A%2F%2Fwww.dmm.com%2F"), want: null },
+  // pokemoncard: 絶対URLの link_detailPage を前置しない／周辺グッズは特設サイトの節へ
+  {
+    name: "pokemoncard: 絶対URLの link_detailPage はそのまま使う（前置しない）",
+    fn: () => productUrl({ productTitle: "拡張パック「30th CELEBRATION」", productType: "拡張パック", tumbsImg: "", releaseDate: "", priceTxt: "", link_detailPage: "https://www.30th.pokemon-card.com/product/m6a", link_pokemonCenter: "" }, new Map()),
+    want: "https://www.30th.pokemon-card.com/product/m6a",
+  },
+  {
+    name: "pokemoncard: 相対パスの link_detailPage は公式サイトを前置する",
+    fn: () => productUrl({ productTitle: "X", productType: "", tumbsImg: "", releaseDate: "", priceTxt: "", link_detailPage: "/ex/m6/", link_pokemonCenter: "" }, new Map()),
+    want: "https://www.pokemon-card.com/ex/m6/",
+  },
+  {
+    name: "pokemoncard: リンク無しの周辺グッズは特設サイトの同名の節へ（無ければ一覧のまま）",
+    fn: () => {
+      const idx = parseGoodsIndex(
+        "https://www.30th.pokemon-card.com/product/goods-01",
+        `<div id="goods-shield-01" class="ProductBlock"><div class="head"><h3><span class="SubHeading_icon"></span><span class="SubHeading_text__Ik8s2">デッキシールド プレミアム・グロス 30th CELEBRATION</span></h3></div></div><div id="goods-shield-02" class="ProductBlock"><h3><span class="SubHeading_text__Ik8s2">デッキシールド 30周年デザイン</span></h3></div>`
+      );
+      const p = (t: string) => ({ productTitle: t, productType: "周辺グッズ", tumbsImg: "", releaseDate: "", priceTxt: "", link_detailPage: "", link_pokemonCenter: "" });
+      return `${productUrl(p("デッキシールド 30周年デザイン"), idx)} | ${productUrl(p("カードホルダー ピカチュウ"), idx)}`;
+    },
+    want: "https://www.30th.pokemon-card.com/product/goods-01#goods-shield-02 | https://www.pokemon-card.com/products/",
   },
   {
     // 置き場が成立する前提＝そのURLを画面に出さないこと。
@@ -5022,6 +5262,38 @@ const cases: Case[] = [
     name: "商品名のスラッシュは日付と読まない",
     fn: () => cleanListTitle("snkrdunk", "Asics Gel-Kayano 14 \"White/Graphite Grey\"｜抽選/販売/定価情報"),
     want: "Asics Gel-Kayano 14 \"White/Graphite Grey\"",
+  },
+  // 2026-09-12 実測: 地域語つきの日付ラベル（snkrdunk 2件）と、先頭でないタグ直後のパイプ（torecasoku 3件）
+  {
+    name: "「海外9/4発売｜」の地域語つき日付ラベルも剥がす",
+    fn: () => cleanListTitle("snkrdunk", "海外9/4発売｜Travis Scott × Nike Air Force 1 Low 07 \"Ice Blue\"｜抽選/販売/定価情報"),
+    want: "Travis Scott × Nike Air Force 1 Low 07 \"Ice Blue\"",
+  },
+  {
+    name: "先頭でない【タグ】直後のパイプも落とす（シリーズ名 【MTG】| 商品名）",
+    fn: () => cleanListTitle("torecasoku", "マーベル・レジェンド 【MTG】| マーベル スーパー・ヒーローズ ドクター・ドゥーム 2099"),
+    want: "マーベル・レジェンド 【MTG】 マーベル スーパー・ヒーローズ ドクター・ドゥーム 2099",
+  },
+  // 2026-09-13 実測: 全角「（」と半角「)」が対になった商品名5件を、幅ごとに数えて「（」だけ落としていた
+  {
+    name: "全角と半角が混ざって対になった丸括弧は半角に揃えて残す（整形が粗を作らない）",
+    fn: () => cleanListTitle("chiikawa_market", "ちいかわ まじかるちいかわ ハンドタオル（ウキウキピクニック) グリーン"),
+    want: "ちいかわ まじかるちいかわ ハンドタオル(ウキウキピクニック) グリーン",
+  },
+  {
+    name: "半角「(」と全角「）」の組も同じ",
+    fn: () => cleanListTitle("mofusand_market", "mofusand プリントアームカバー(ドーナツにゃん）"),
+    want: "mofusand プリントアームカバー(ドーナツにゃん)",
+  },
+  {
+    name: "片幅だけで釣り合わない括弧は従来どおり落とす（混在の救済で網を殺さない）",
+    fn: () => cleanListTitle("chiikawa_market", "ちいかわ ぬいぐるみ（ハチワレ"),
+    want: "ちいかわ ぬいぐるみハチワレ",
+  },
+  {
+    name: "タグ直後でないパイプ（楽譜記号 ||:）は触らない",
+    fn: () => cleanListTitle("hololive_shop", "IRyS 1st Concert “HOPE ||: Beyond the Stars”"),
+    want: "IRyS 1st Concert “HOPE ||: Beyond the Stars”",
   },
 
   // ── /en/trends（2026-08-23 新設）────────────────────────────────────────

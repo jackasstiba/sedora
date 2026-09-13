@@ -20,6 +20,19 @@ const LAUNCH_URL = `${STORE}/shop/pages/launch.aspx`;
 /** 発売日を過ぎた行を何日残すか（発売当日は「本日発売」として見せたい）。 */
 const KEEP_DAYS_AFTER_RELEASE = 0;
 
+/**
+ * その行の url が **DROP（ブランド合同発売）の特集ページ**か。
+ *
+ * 実測 2026-09-12: LAUNCH の Last Resort AB 8型（VM001 / VM006-MOC / SS TEE 等）が全部
+ * `/shop/pages/l1126.aspx`（DROP 24）を指していた。これは収集元がそう繋いでいる＝そのページに
+ * 全型・全色の商品リンクと価格が並ぶ**買える場所**で、個別ページに送れていないのではない
+ * （LAUNCH は型番単位で色を畳むので、色ごとの個別ページを1つに決めようがない）。
+ * audit の shared_url（同じリンク先を複数商品が指す）からはこの型だけ外す。判定はここ1つ。
+ */
+export function billysDropPage(source: string, url: string): boolean {
+  return source === "billys" && /^https:\/\/www\.billys-tokyo\.net\/shop\/pages\/l\d+\.aspx$/.test(url);
+}
+
 export type BillysLaunch = {
   brand: string;
   name: string;
