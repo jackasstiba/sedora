@@ -1851,6 +1851,7 @@ const cases: Case[] = [
   { name: "NBSPは普通の空白にする", fn: () => cleanTitle("コービー 5"), want: "コービー 5" },
   // 2026-09-13 実測: raffle_kuji の「&quot;LOVvmE&#x27;s Note&quot;」が生で本番に出た（audit:page エスケープ漏れ）
   { name: "HTMLエンティティは保存の入口（cleanTitle）で戻す", fn: () => cleanTitle("2026 SAY MY NAME &quot;LOVvmE&#x27;s Note&quot; June Diary"), want: "2026 SAY MY NAME \"LOVvmE's Note\" June Diary" },
+  { name: "名前付きエンティティ（&eacute; &amp;）も戻す。&amp;eacute; を二重に解かない", fn: () => cleanTitle("スプーン&amp;フォーク Pok&eacute;mon Magic Hour Illusion! &amp;eacute;"), want: "スプーン&フォーク Pokémon Magic Hour Illusion! &eacute;" },
   { name: "narrow NBSP・連続空白も1つの空白へ", fn: () => cleanTitle("エア ジョーダン  1"), want: "エア ジョーダン 1" },
 
   // ── Xミラー抽選記事の応募先抽出（観点B実使用 2026-08-15: 行き止まりカードの解消） ──────────

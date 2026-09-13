@@ -8,15 +8,24 @@
 /** HTMLエンティティ全般を実文字に戻す（数値・16進・主要な名前付き）。
  *  実測: &amp; だけの部分対応では &#039;（'）や &#038; が本番カードに生で残った。 */
 export function decodeHtmlEntities(s: string): string {
-  return s
-    .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
-    .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)))
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ");
+  return (
+    s
+      .replace(/&#x([0-9a-fA-F]{1,6});/g, (_, h) => String.fromCodePoint(parseInt(h, 16)))
+      .replace(/&#(\d{1,7});/g, (_, n) => String.fromCodePoint(Number(n)))
+      // 名前付き（実測 2026-09-13: ポケセンの「Pok&eacute;mon」が生で本番に出た）。
+      // &amp; は**最後**に戻す（「&amp;eacute;」を二重に解かない）。
+      .replace(/&([a-zA-Z]+);/g, (m, name: string) => NAMED_ENTITIES[name] ?? m)
+      .replace(/&amp;/g, "&")
+  );
 }
+
+const NAMED_ENTITIES: Record<string, string> = {
+  quot: '"', apos: "'", lt: "<", gt: ">", nbsp: " ",
+  eacute: "é", egrave: "è", ecirc: "ê", agrave: "à", aacute: "á", acirc: "â", iacute: "í",
+  oacute: "ó", ocirc: "ô", uacute: "ú", ugrave: "ù", uuml: "ü", ouml: "ö", auml: "ä", ccedil: "ç", ntilde: "ñ",
+  copy: "©", reg: "®", trade: "™", hellip: "…", mdash: "—", ndash: "–", middot: "·", times: "×",
+  lsquo: "‘", rsquo: "’", ldquo: "“", rdquo: "”", yen: "¥",
+};
 
 /** タグを落として可視テキストにする */
 export function stripTags(html: string): string {
