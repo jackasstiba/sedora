@@ -5,6 +5,7 @@ import { displaySubGenre } from "@/lib/title";
 import { countdownLabelEn, eventTypeLabel, genreLabel, type Locale } from "@/lib/i18n";
 import { ONLINE_TAG_EN } from "@/lib/channel";
 import { summarizeHighlightsEn } from "@/lib/collabHighlights";
+import { summarizeOtherHighlightsEn } from "@/lib/storeTextEn";
 import { NoImage } from "./NoImage";
 import type { CardItem } from "@/lib/cardItem";
 
@@ -66,8 +67,11 @@ export function ItemCard({ item, locale = "ja" }: { item: Item; locale?: Locale 
   // 予定日が過ぎたものを「予定」と書かない（登場予定 → 登場済み）。色はJPの語彙で決め、
   // 表示だけを locale で替える（対応表に無い語は日本語のまま出す＝勝手な断定を足さない）。
   const eventLabel = displayEventType(item.eventType, item.eventDate, item.eventDateText, todayJst());
-  // カード用の1行英語要約（コラボの決まった書式が読み解けたときだけ。null＝原文のまま出す）。
-  const highlightsEn = en ? summarizeHighlightsEn(item.highlights) : null;
+  // カード用の1行英語要約（コラボの書式＝collabHighlights／店・賞・受注の書式＝storeTextEn。
+  // どちらも書式語だけ訳し、店名・商品名は原文のまま。読み解けなければ null＝原文のまま出す）。
+  const highlightsEn = en
+    ? (summarizeHighlightsEn(item.highlights) ?? summarizeOtherHighlightsEn(item.highlights))
+    : null;
 
   return (
     <Link

@@ -59,6 +59,13 @@ import {
 import { holoPlacement, isHoloDigitalListing } from "../src/scrapers/hololiveShop";
 import { closedStoreRowProblem } from "../src/lib/renderedStores";
 import {
+  highlightHeadingEn,
+  highlightHeadingJa,
+  storeFormEn,
+  storeNoteEn,
+  summarizeOtherHighlightsEn,
+} from "../src/lib/storeTextEn";
+import {
   isOpenClaimBacked,
   lastDeadline,
   preferredStoreUrl,
@@ -1489,6 +1496,26 @@ const cases: Case[] = [
   //     表示に選ばれた節に対しても行う（実測: 「…お買い物マラソン開催中です　事前エントリー
   //     お忘れなくどうぞ」がトップの1画面目にカード名「事前エントリーお忘れなくどうぞ」で出ていた）。
   {
+    // 2026-09-15 実測 #254779 / #180337 / #180303。節そのものがキャンペーン名＝商品ではない。
+    name: "セール・キャンペーンの告知だけの投稿は掲載しない（旅行割引・店のセール・買い物メモ）",
+    fn: () =>
+      [
+        hasProductSegment("channeltono", "9月15日10時より楽天トラベル　九州ふっこう応援割が開催　熊本・鹿児島最大60％オフ！その他最大50％オフ！本日楽天カード4倍デーも開催中です"),
+        hasProductSegment("channeltono", "もうすぐ9月4日12時より駿河屋アーリー・オータムセールが開催　最大94％オフ！タイムセールも同時開催です"),
+        hasProductSegment("channeltono", "9月5日の楽天スーパーセールタイムセールで良さそうなもの選んでみた　その1"),
+      ].join(","),
+    want: "false,false,false",
+  },
+  {
+    name: "商品を名指しした上でセールに触れる投稿は正当な商品（生タイトルに当てない）",
+    fn: () =>
+      [
+        hasProductSegment("channeltono", "楽天ブックスで販売再開中です　Xbox Series X 1TB デジタルエディション　1時59分まで楽天スーパーセール中です"),
+        hasProductSegment("channeltono", "ジョーシン楽天で販売再開　13,000円オフクーポンありで人気です楽天上位へ　AMD Ryzen 7 9800X3D BOX　本日楽天スーパーセール開催中です"),
+      ].join(","),
+    want: "true,true",
+  },
+  {
     name: "呼びかけだけの投稿は掲載しない（先頭でなくても）",
     fn: () =>
       hasProductSegment(
@@ -1611,6 +1638,19 @@ const cases: Case[] = [
       return v ? `${v.date.toISOString().slice(0, 10)}|${v.text}` : "null";
     },
     want: "2026-08-05|2026年8月5日〜9月23日",
+  },
+  {
+    // 2026-09-15 実測 #245700: 一覧の「期間 : 2026年9月18日〜」が収集元側の誤り。記事の仕様表は
+    // 「発売日 2026年9月19日(土)」でタイトルも 9/19。「発売日」ラベルも裏取りの候補にする。
+    name: "コラボ: 仕様表の「発売日」ラベルでもタイトルと一致すれば裏取りできる（一覧の1日早い誤りを訂正）",
+    fn: () => {
+      const body =
+        "ディズニー作品のグッズが、2026年9月19日(土)より全国のアベイルにて発売されます。 " +
+        "販売概要 発売日 2026年9月19日(土) オンラインストアは同日12:00より 販売場所 全国のアベイル店舗";
+      const v = pickVerifiedEventDate(body, "ナイトメアー他ディズニーアイテム 9月19日よりアベイルに登場!", new Date(Date.UTC(2026, 8, 18)), new Date(Date.UTC(2026, 8, 15)));
+      return v ? `${v.date.toISOString().slice(0, 10)}|${v.text}` : "null";
+    },
+    want: "2026-09-19|2026年9月19日",
   },
   {
     name: "コラボ: 先頭の候補がタイトルと違えば飛ばして、一致する候補を採る",
@@ -2533,6 +2573,7 @@ const cases: Case[] = [
   { name: "カード要約: 期限切れの店を落とす", fn: () => liveStoreSummary("受付中ストア：店1（抽選・〜8/1）、店2（抽選・〜8/21）", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }, { name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店2（抽選・〜8/21）" },
   { name: "カード要約: まだ始まっていない店は受付中に数えない", fn: () => liveStoreSummary("受付中ストア：店1（抽選・8/20 00:00〜）、店2（抽選・〜8/21）", [{ name: "店1", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, { name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：店2（抽選・〜8/21）" },
   { name: "カード要約: 相対表記を作らない（本日/明日を混ぜない）", fn: () => /本日|明日/.test(liveStoreSummary("受付中ストア：店1（抽選・〜8/1）、店2（抽選・〜8/8）", [{ name: "店1", url: null, form: "抽選", when: "〜8/1", note: null, at: "2026-08-01", kind: "締切" }, { name: "店2", url: null, form: "抽選", when: "〜8/8", note: null, at: "2026-08-08", kind: "締切" }], today) ?? ""), want: false },
+  { name: "カード要約: 全店が受付開始前なら「受付中」と名乗らない（開始日は残す）", fn: () => liveStoreSummary("受付中ストア：Amazon（10/20 18:00〜）", [{ name: "Amazon", url: null, form: null, when: "10/20 18:00〜", note: null, at: "2026-10-20", kind: "開始" }], today), want: "応募先：Amazon（10/20 18:00〜）" },
   { name: "カード要約: 全部受付中なら触らない", fn: () => liveStoreSummary("受付中ストア：そのまま", [{ name: "店2", url: null, form: "抽選", when: "〜8/21", note: null, at: "2026-08-21", kind: "締切" }], today), want: "受付中ストア：そのまま" },
   // ⚠️ この期待値は 2026-08-24 に**意図的に変えた**（B案）。旧: 締切が分からない枠でも
   // 「受付中ストア：」のままにしていた＝**永久に受付中と名乗り続ける**振る舞いを正解として
@@ -4871,19 +4912,96 @@ const cases: Case[] = [
     want: true,
   },
   {
-    name: "EN受付ラベル: 絶対表記のまま出す（本日/明日への置換をしない＝保存物が古びても嘘にならない）",
+    name: "EN受付ラベル: 絶対表記のまま出す（本日/明日への置換をしない＝保存物が古びても嘘にならない）。書式語だけ英語",
     fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "〜8/8 22:00", note: null, at: "2026-08-08", kind: "締切" }, calendarDate(2026, 8, 8)),
-    want: "〜8/8 22:00",
+    want: "until 8/8 22:00",
   },
   {
     name: "EN受付ラベル: 開始が未来なら not open yet を添える（受付中と同じ顔で並べない）",
     fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "8/20 00:00〜", note: null, at: "2026-08-20", kind: "開始" }, calendarDate(2026, 8, 8)),
-    want: "8/20 00:00〜 (not open yet)",
+    want: "from 8/20 00:00 (not open yet)",
   },
   {
     name: "EN受付ラベル: 開始が過去なら何も足さない",
     fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "7/8 12:00〜", note: null, at: "2026-07-08", kind: "開始" }, calendarDate(2026, 8, 8)),
-    want: "7/8 12:00〜",
+    want: "from 7/8 12:00",
+  },
+  {
+    name: "EN受付ラベル: 読めない書式は原文のまま（勝手に言い換えない）",
+    fn: () => storeWhenLabelEn({ name: "店", url: null, form: "抽選", when: "受付中（店頭）", note: null, at: null, kind: null } as never, calendarDate(2026, 8, 8)),
+    want: "受付中（店頭）",
+  },
+  // ── 他ソース書式の英語化（src/lib/storeTextEn.ts・2026-09-15）──
+  // /en の一覧で highlights の33%が日本語のまま出ていた。訳すのは書式語だけ、店名・商品名は原文。
+  {
+    name: "EN店要約: 受付中ストア（形式・締切・他N店を訳し、店名は原文）",
+    fn: () => summarizeOtherHighlightsEn("受付中ストア：ONE PIECEカードゲーム公式ショップ（ナムコパークス各店）（抽選・〜9/15 23:59）、ゲームプラザ元気302（先着販売・2口） 他51店"),
+    want: "Accepting now: ONE PIECEカードゲーム公式ショップ（ナムコパークス各店） (lottery · until 9/15 23:59), ゲームプラザ元気302 (first come, first served · 2 entry pages) +51 more stores",
+  },
+  {
+    name: "EN店要約: 締切時刻 調査中・受付開始待ち",
+    fn: () => summarizeOtherHighlightsEn("応募先：Amazon（抽選・締切時刻 調査中）、マイクロソフトストア（招待制販売・7/8 12:00〜）"),
+    want: "Listed at: Amazon (lottery · deadline time unconfirmed), マイクロソフトストア (invite-only · from 7/8 12:00)",
+  },
+  {
+    name: "EN店要約: 在庫あり・再販中",
+    fn: () => summarizeOtherHighlightsEn("在庫あり・再販中のストア：Amazon（先着販売）"),
+    want: "In stock / restocked at: Amazon (first come, first served)",
+  },
+  {
+    name: "EN店要約: 直近の実績（終了（M/D）を ended に）",
+    fn: () => summarizeOtherHighlightsEn("直近の抽選・予約実績：ゲオ（アプリ） 終了（9/11）・ホビーオフ 終了（9/11）"),
+    want: "Recent lotteries / pre-orders: ゲオ (app) ended (9/11), ホビーオフ ended (9/11)",
+  },
+  {
+    name: "EN賞要約: 各賞ラインナップ（賞ラベルだけ訳す・賞品名は原文）",
+    fn: () => summarizeOtherHighlightsEn("各賞ラインナップ：A賞 黒崎一護 MASTERLISE ／ B賞 日番谷冬獅郎 MASTERLISE ／ ラストワン賞 更木剣八 MASTERLISE（全9種）"),
+    want: "Prize lineup (9 tiers): A: 黒崎一護 MASTERLISE · B: 日番谷冬獅郎 MASTERLISE · Last One: 更木剣八 MASTERLISE",
+  },
+  {
+    name: "EN賞要約: kujimap 書式（・区切り・他N賞・1セットN本）",
+    fn: () => summarizeOtherHighlightsEn("各賞ラインナップ：A賞 ルフィ・B賞 ゾロ 他7賞（1セット80本）"),
+    want: "Prize lineup (80 tickets per set): A: ルフィ · B: ゾロ +7 more tiers",
+  },
+  {
+    name: "EN賞要約: 賞品ラインナップ（一次くじ）",
+    fn: () => summarizeOtherHighlightsEn("賞品ラインナップ：トレカ(HITOMI) ／ トレカ(SHUIE)（全2種）"),
+    want: "Prizes (2 prizes): トレカ(HITOMI) · トレカ(SHUIE)",
+  },
+  {
+    name: "EN要約: 受注受付・抽選受付・発送予定・公式価格帯",
+    fn: () => [
+      summarizeOtherHighlightsEn("受注受付 〜9/18"),
+      summarizeOtherHighlightsEn("抽選受付 〜9/17"),
+      summarizeOtherHighlightsEn("2027年3月発送予定"),
+      summarizeOtherHighlightsEn("公式: 価格帯 ¥2,600〜¥5,300・約4点"),
+    ].join("|"),
+    want: "Orders accepted until 9/18|Entries accepted until 9/17|Ships Mar 2027 (planned)|Official price range ¥2,600–¥5,300 · about 4 items",
+  },
+  {
+    name: "EN要約: 読み解けない書式は null（呼び出し側が原文を出す）／コラボ書式もここでは読まない",
+    fn: () => `${summarizeOtherHighlightsEn("注目：なにか")}|${summarizeOtherHighlightsEn("抽選・くじあり ｜ 登場グッズ: ぬいぐるみ")}|${summarizeOtherHighlightsEn(null)}`,
+    want: "null|null|null",
+  },
+  {
+    name: "EN店舗行: 販売形式は閉じた表（都道府県名は訳さない）",
+    fn: () => `${storeFormEn("抽選")}|${storeFormEn("先着販売")}|${storeFormEn("招待制販売")}|${storeFormEn("東京")}`,
+    want: "Lottery|First come, first served|Invite-only|null",
+  },
+  {
+    name: "EN店舗行: 条件は語ごとに訳し、表に無い語は原文のまま残す（消さない）",
+    fn: () => `${storeNoteEn("アプリ・会員・お一人様2BOXまで")}|${storeNoteEn("価格 109,980円")}|${storeNoteEn("御三家カードセット3種")}`,
+    want: "store app required · store membership required · up to 2 boxes per person|price ¥109,980|null",
+  },
+  {
+    name: "詳細の枠見出し: 書式の見出し語から決める（実施履歴を「注目賞品/Featured prizes」と呼ばない）",
+    fn: () => `${highlightHeadingEn("直近の抽選・予約実績：ゲオ 終了（9/11）")}|${highlightHeadingJa("直近の抽選・予約実績：ゲオ 終了（9/11）")}|${highlightHeadingEn("抽選・くじあり ｜ 登場グッズ: ぬいぐるみ")}|${highlightHeadingEn("賞品ラインナップ：X")}`,
+    want: "Recent lotteries / pre-orders|直近の抽選・予約実績|null|Prizes",
+  },
+  {
+    name: "描画: EN の店舗行（until M/D）でも過ぎた締切は鳴る（英語化で検査から消えない）",
+    fn: () => !!closedStoreRowProblem("ビックカメラ柏店 Lottery until 8/1 19:00 Conditions: store membership required Entry page →", today, parseDisplayedDate),
+    want: true,
   },
   {
     name: "EN公式ボタン: 実売内容を確認できた時だけ販売内容を約束（JAと同じ強さ）",

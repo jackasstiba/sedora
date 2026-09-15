@@ -13,6 +13,7 @@ import { countdown, displayEventType, eventDateLabel, eventPeriodText, isEventPa
 import { PastNoticeBox } from "@/components/PastNotice";
 import { cleanListTitle, displaySubGenre, itemPageTitle, venueForTitle } from "@/lib/title";
 import { isHotPrize, parseKujiLineup, parsePrizesJson } from "@/lib/prizes";
+import { highlightHeadingJa } from "@/lib/storeTextEn";
 import { productCategoryValue } from "@/lib/productCategory";
 import { absoluteImageUrl, proxiedImageUrl } from "@/lib/imageProxy";
 // 計測に収集元を載せるが、名前そのものは送らない（符号化してから渡す）。
@@ -480,9 +481,20 @@ export default async function ItemPage({ params }: Props) {
                     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
                 }`}
               >
-                <span className="font-semibold">{item.hasLottery ? "🎯 注目賞品" : "🛍 注目グッズ"}</span>
+                {/* 枠の見出しは hasLottery でなく**書式の見出し語**（「：」の左側）から決める。
+                    2026-09-15 実測: nyukaNow の「直近の抽選・予約実績：ゲオ（アプリ） 終了（9/11）…」が
+                    「🎯 注目賞品」の枠に入り「賞品を選んで買うことはできません」と続いていた。
+                    中身は賞品ではなく実施履歴。見出し語が無い＝コラボ書式だけ従来の見出し。 */}
+                <span className="font-semibold">
+                  {highlightHeadingJa(item.highlights)
+                    ? `${item.hasLottery ? "🎯" : "🛍"} ${highlightHeadingJa(item.highlights)}`
+                    : item.hasLottery
+                      ? "🎯 注目賞品"
+                      : "🛍 注目グッズ"}
+                </span>
                 <span className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
-                {item.hasLottery && (
+                {/* 「賞品は選べない」の注記は、中身が賞品のときだけ（実施履歴・応募先・在庫の枠には出さない）。 */}
+                {item.hasLottery && !/^(受付中ストア|応募先|在庫あり|直近の抽選・予約実績)/.test(highlightHeadingJa(item.highlights) ?? "") && (
                   <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
                     抽選・ランダムで当たる賞品を含みます。欲しい賞品を選んで買うことはできません。
                   </p>

@@ -28,7 +28,9 @@ export function closedStoreRowProblem(
   parseDate: (label: string, today: Date) => Date | null
 ): string | null {
   const t = rowText.replace(/\s+/g, " ").trim();
-  const m = t.match(/〜\s*(\d{1,2}\/\d{1,2})/);
+  // JA「〜8/17 20:00」／EN「until 8/17 20:00」（src/lib/storeTextEn.ts の storeWhenEn と対。
+  // 2026-09-15 に EN の店舗行を英語化した。片方だけ変えると EN の行がこの検査から消える）。
+  const m = t.match(/(?:〜|\buntil)\s*(\d{1,2}\/\d{1,2})/);
   if (!m) return null;
   const d = parseDate(m[1], today);
   if (!d || d.getTime() >= today.getTime()) return null;

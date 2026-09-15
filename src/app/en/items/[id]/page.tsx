@@ -29,6 +29,13 @@ import { ONLINE_TAG_EN, isOnlineItem } from "@/lib/channel";
 // 計測に収集元を載せるが、名前そのものは送らない（符号化してから渡す）。
 import { sourceCode } from "@/lib/sourceCode";
 import {
+  highlightHeadingEn,
+  storeFormEn,
+  storeNoteEn,
+  storeWhenEn,
+  summarizeOtherHighlightsEn,
+} from "@/lib/storeTextEn";
+import {
   groupStoresByLabel,
   parseStoresJson,
   preferredStoreUrl,
@@ -138,14 +145,20 @@ function StoreRowsEn({
                 </div>
                 {(s.form || whenLabel) && (
                   <div className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs">
+                    {/* 販売形式・締切・条件は**書式語だけ**英語に（src/lib/storeTextEn.ts の閉じた表）。
+                        表に無い語は原文のまま lang="ja"。海外の読者が最初に知るべき
+                        「抽選か先着か・いつまで・会員/アプリが要るか」を読める形にする。 */}
                     {s.form && (
-                      <span lang="ja" className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200">
-                        {s.form}
+                      <span
+                        lang={storeFormEn(s.form) ? undefined : "ja"}
+                        className="rounded bg-purple-100 px-1.5 py-0.5 font-medium text-purple-800 dark:bg-purple-900/40 dark:text-purple-200"
+                      >
+                        {storeFormEn(s.form) ?? s.form}
                       </span>
                     )}
                     {whenLabel && (
                       <span
-                        lang="ja"
+                        lang={storeWhenEn(s.when) ? undefined : "ja"}
                         className={
                           urgent
                             ? "font-semibold text-rose-600 dark:text-rose-400"
@@ -159,7 +172,10 @@ function StoreRowsEn({
                 )}
                 {s.note && (
                   <p className="mt-1 text-xs leading-snug text-neutral-600 dark:text-neutral-400">
-                    Conditions: <span lang="ja">{s.note}</span>
+                    Conditions:{" "}
+                    <span lang={storeNoteEn(s.note) ? undefined : "ja"}>
+                      {storeNoteEn(s.note) ?? s.note}
+                    </span>
                   </p>
                 )}
               </div>
@@ -202,6 +218,8 @@ export default async function ItemPageEn({ params }: Props) {
   const lineup = prizeGallery ? null : parseKujiLineup(item.highlights);
   // コラボ要約（決まった書式）を構造に戻す。書式が違えば null＝原文のまま出す。
   const collab = parseHighlights(item.highlights);
+  // 店・賞・受注の書式（他ソース）の英語1行。書式語だけ訳す（src/lib/storeTextEn.ts）。
+  const otherHighlightsEn = collab ? null : summarizeOtherHighlightsEn(item.highlights);
   const prizesGraded = prizeGallery?.some((p) => /賞$/.test(p.label)) ?? false;
   const storeList = parseStoresJson(item.stores);
   const storeSplit = storeList ? splitStoresByDeadline(storeList, todayJst()) : null;
@@ -404,7 +422,16 @@ export default async function ItemPageEn({ params }: Props) {
                     : "bg-neutral-100 text-neutral-700 dark:bg-neutral-800 dark:text-neutral-200"
                 }`}
               >
-                <span className="font-semibold">{item.hasLottery ? "🎯 Featured prizes" : "🛍 Merch lineup"}</span>
+                {/* 枠の見出しは hasLottery でなく**書式の見出し語**から決める（2026-09-15 実測:
+                    nyukaNow の「直近の抽選・予約実績：ゲオ 終了（9/11）」が "Featured prizes" の
+                    枠に入っていた。中身は賞品ではなく実施履歴）。見出し語が無い＝コラボ書式。 */}
+                <span className="font-semibold">
+                  {highlightHeadingEn(item.highlights)
+                    ? `${item.hasLottery ? "🎯" : "🛍"} ${highlightHeadingEn(item.highlights)}`
+                    : item.hasLottery
+                      ? "🎯 Featured prizes"
+                      : "🛍 Merch lineup"}
+                </span>
                 {/* コラボの要約は**書式が決まっている**（src/lib/collabHighlights.ts が組み立てと
                     読み解きの唯一の定義）ので、英語の枠に組み直して出す。訳すのはグッズの
                     **種別名**だけで、対応表に無い語は日本語のまま（lang="ja"）＝断定を足さない。
@@ -450,10 +477,14 @@ export default async function ItemPageEn({ params }: Props) {
                       </div>
                     )}
                   </div>
+                ) : otherHighlightsEn ? (
+                  /* 店・賞・受注の書式（storeTextEn）: 見出しは上に出したので本文だけ。店名・賞品名は原文。 */
+                  <span className="ml-1">{otherHighlightsEn.replace(/^[^:]+:\s*/, "")}</span>
                 ) : (
                   <span lang="ja" className="ml-1">{item.highlights.replace(/^[^：]+：/, "")}</span>
                 )}
-                {item.hasLottery && (
+                {/* 「賞品は選べない」の注記は、中身が賞品のときだけ（実施履歴や応募先の枠には出さない）。 */}
+                {item.hasLottery && !highlightHeadingEn(item.highlights)?.match(/^(Accepting now|Listed at|In stock|Recent lotteries)/) && (
                   <p className="mt-0.5 text-xs text-purple-700/80 dark:text-purple-300/80">
                     Includes prizes decided by lottery or random draw — you cannot pick a specific prize.
                   </p>

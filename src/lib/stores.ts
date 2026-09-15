@@ -1,6 +1,7 @@
 // 家電・ゲーム機など「複数の小売が同時に抽選/予約応募を実施する」商品の、
 // 現在“受付中”の公式ストア一覧（Item.stores JSON列）を安全にパースする純関数。
 // 各エントリは一次ソース（各小売の抽選ページ）へ直リンクし、アグリゲーターは表に出さない。
+import { storeWhenEn } from "./storeTextEn";
 
 export type StoreEntry = {
   name: string; // 小売名（例: "Amazon"）／コラボの会場名（例: "【東京/原宿】原宿店"）
@@ -89,12 +90,15 @@ export function storeSectionCopyEn(source: string): {
  */
 export function storeWhenLabelEn(s: StoreEntry, today: Date): string | null {
   if (!s.when) return null;
-  if (!s.at || s.kind !== "開始") return s.when;
+  // 書式語だけ英語に（"〜8/8 22:00" → "until 8/8 22:00"）。読めない書式は原文のまま。
+  // scripts/auditRendered.ts の closedStoreRowProblem は「until M/D」も締切として読む。
+  const when = storeWhenEn(s.when) ?? s.when;
+  if (!s.at || s.kind !== "開始") return when;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.at);
-  if (!m) return s.when;
+  if (!m) return when;
   const at = Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
   const days = Math.round((at - today.getTime()) / 86_400_000);
-  return days > 0 ? `${s.when} (not open yet)` : s.when;
+  return days > 0 ? `${when} (not open yet)` : when;
 }
 
 /**

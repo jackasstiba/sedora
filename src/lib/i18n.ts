@@ -114,6 +114,7 @@ const EVENT_LABEL_EN: Record<string, string> = {
   登場済み: "Out now",
   再販: "Restock",
   開催: "Event",
+  情報: "Info", // Xミラー系の「種別を読めなかった告知」。2026-09-15 に /en のカードで原文のまま出ていた
 };
 
 export function eventTypeLabel(eventType: string, locale: Locale): string {

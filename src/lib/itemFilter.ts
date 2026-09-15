@@ -833,7 +833,10 @@ export function liveStoreSummary(
     if (s.kind === "開始") return at <= today.getTime(); // まだ始まっていない店は「受付中」ではない
     return true;
   });
-  if (!open.length) return highlights;
+  // 受付中の枠が1つも無い（全店が受付開始前／締切済み）のに「受付中ストア：」を返していた
+  // （実測 2026-09-15: 「受付中ストア：Amazon（10/20 18:00〜）」＝1か月先の予約開始が受付中の顔で
+  // トップに出ていた。JA/EN 両方）。名乗りだけ落として、店の事実（開始日）はそのまま残す。
+  if (!open.length) return `${UNVERIFIED_PREFIX}${summarizeStores(stores, 3)}`;
   // 「受付中」と名乗ってよいのは締切を持つ枠だけ。1つも無ければ事実だけの見出しにする
   // （消さない＝締切が無い、は終わった、ではない）。
   const backed = open.filter(isOpenClaimBacked);

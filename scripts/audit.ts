@@ -224,8 +224,17 @@ async function main() {
     // 楽譜のリピート記号 `||:` `:||` は正当な商品名の一部（実測 2026-08-21:
     // hololive公式「IRyS 1st Concert “HOPE ||: Beyond the Stars”」）。区切り記号は
     // 単独のパイプなので、リピート記号だけ除いてから判定する。
+    // 2026-09-15 実測: 一番くじ倶楽部の公式商品名「一番くじ コラボコレクション meiji｜森永製菓｜ロッテ」
+    // （3社の並記に全角パイプ）。この検査の前提「商品名にパイプは出てこない」の反例。
+    // ichiban_kuji の題名は <title> の先頭要素で、サイト名の接尾辞（｜一番くじ倶楽部｜BANDAI SPIRITS…）は
+    // cleanTitle が既に剥がしているので、残った全角パイプは商品名の一部。**このソースの全角パイプだけ**除く
+    // （半角 | と他ソースは従来どおり＝網を狭めすぎない）。
+    const pipeResidue = (r: { source: string; title: string }) => {
+      const c = cleanListTitle(r.source, r.title).replace(/\|\|+:|:\|\|+/g, "");
+      return r.source === "ichiban_kuji" ? /\|/.test(c) : /[|｜]/.test(c);
+    };
     const bad = shown
-      .filter((r) => /[|｜]/.test(cleanListTitle(r.source, r.title).replace(/\|\|+:|:\|\|+/g, "")))
+      .filter(pipeResidue)
       .map((r) => `[${r.source} #${r.id}] ${cleanListTitle(r.source, r.title)}`);
     report("title_pipe_residue", "タイトルに収集元の区切り記号が残っている", "error", bad, baseline, shown.length);
   }
